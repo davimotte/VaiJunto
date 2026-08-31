@@ -1,0 +1,25 @@
+# Binários compilados
+/bin/
+servidor
+motorista
+passageiro
+
+# Artefatos de teste e cobertura
+*.test
+*.out
+coverage.html
+
+# Resultados do teste de carga
+/resultados/
+
+# Editores
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Configuração local do Claude Code 
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/memory/
+CLAUDE.md

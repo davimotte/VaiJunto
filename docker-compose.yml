@@ -1,0 +1,38 @@
+# Ambiente de desenvolvimento em uma unica maquina.
+# No laboratorio NAO use este arquivo: rode `docker run` em cada maquina,
+# conforme a secao 10.2 do PROJETO.md.
+
+services:
+  servidor:
+    build:
+      context: .
+      dockerfile: Dockerfile.servidor
+    command: ["--endereco", "0.0.0.0:9000", "--usuarios", "/dados/usuarios.json", "--caronas", "/dados/caronas.json"]
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./dados:/dados:ro
+
+  passageiro:
+    build:
+      context: .
+      dockerfile: Dockerfile.cliente
+    entrypoint: ["/bin/passageiro"]
+    environment:
+      VAIJUNTO_SERVIDOR: servidor:9000
+    depends_on:
+      - servidor
+    stdin_open: true
+    tty: true
+
+  motorista:
+    build:
+      context: .
+      dockerfile: Dockerfile.cliente
+    entrypoint: ["/bin/motorista"]
+    environment:
+      VAIJUNTO_SERVIDOR: servidor:9000
+    depends_on:
+      - servidor
+    stdin_open: true
+    tty: true

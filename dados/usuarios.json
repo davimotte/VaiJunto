@@ -1,0 +1,338 @@
+[
+  {
+    "usuario": "joao",
+    "senha": "1234",
+    "nome": "João Silva",
+    "perfil": "MOTORISTA"
+  },
+  {
+    "usuario": "carlos",
+    "senha": "1234",
+    "nome": "Carlos Lima",
+    "perfil": "MOTORISTA"
+  },
+  {
+    "usuario": "ana",
+    "senha": "1234",
+    "nome": "Ana Ribeiro",
+    "perfil": "MOTORISTA"
+  },
+  {
+    "usuario": "maria",
+    "senha": "abcd",
+    "nome": "Maria Souza",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "pedro",
+    "senha": "abcd",
+    "nome": "Pedro Alves",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "lucia",
+    "senha": "abcd",
+    "nome": "Lúcia Nunes",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste01",
+    "senha": "teste",
+    "nome": "Cliente de Teste 01",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste02",
+    "senha": "teste",
+    "nome": "Cliente de Teste 02",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste03",
+    "senha": "teste",
+    "nome": "Cliente de Teste 03",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste04",
+    "senha": "teste",
+    "nome": "Cliente de Teste 04",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste05",
+    "senha": "teste",
+    "nome": "Cliente de Teste 05",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste06",
+    "senha": "teste",
+    "nome": "Cliente de Teste 06",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste07",
+    "senha": "teste",
+    "nome": "Cliente de Teste 07",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste08",
+    "senha": "teste",
+    "nome": "Cliente de Teste 08",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste09",
+    "senha": "teste",
+    "nome": "Cliente de Teste 09",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste10",
+    "senha": "teste",
+    "nome": "Cliente de Teste 10",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste11",
+    "senha": "teste",
+    "nome": "Cliente de Teste 11",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste12",
+    "senha": "teste",
+    "nome": "Cliente de Teste 12",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste13",
+    "senha": "teste",
+    "nome": "Cliente de Teste 13",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste14",
+    "senha": "teste",
+    "nome": "Cliente de Teste 14",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste15",
+    "senha": "teste",
+    "nome": "Cliente de Teste 15",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste16",
+    "senha": "teste",
+    "nome": "Cliente de Teste 16",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste17",
+    "senha": "teste",
+    "nome": "Cliente de Teste 17",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste18",
+    "senha": "teste",
+    "nome": "Cliente de Teste 18",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste19",
+    "senha": "teste",
+    "nome": "Cliente de Teste 19",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste20",
+    "senha": "teste",
+    "nome": "Cliente de Teste 20",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste21",
+    "senha": "teste",
+    "nome": "Cliente de Teste 21",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste22",
+    "senha": "teste",
+    "nome": "Cliente de Teste 22",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste23",
+    "senha": "teste",
+    "nome": "Cliente de Teste 23",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste24",
+    "senha": "teste",
+    "nome": "Cliente de Teste 24",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste25",
+    "senha": "teste",
+    "nome": "Cliente de Teste 25",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste26",
+    "senha": "teste",
+    "nome": "Cliente de Teste 26",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste27",
+    "senha": "teste",
+    "nome": "Cliente de Teste 27",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste28",
+    "senha": "teste",
+    "nome": "Cliente de Teste 28",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste29",
+    "senha": "teste",
+    "nome": "Cliente de Teste 29",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste30",
+    "senha": "teste",
+    "nome": "Cliente de Teste 30",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste31",
+    "senha": "teste",
+    "nome": "Cliente de Teste 31",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste32",
+    "senha": "teste",
+    "nome": "Cliente de Teste 32",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste33",
+    "senha": "teste",
+    "nome": "Cliente de Teste 33",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste34",
+    "senha": "teste",
+    "nome": "Cliente de Teste 34",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste35",
+    "senha": "teste",
+    "nome": "Cliente de Teste 35",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste36",
+    "senha": "teste",
+    "nome": "Cliente de Teste 36",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste37",
+    "senha": "teste",
+    "nome": "Cliente de Teste 37",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste38",
+    "senha": "teste",
+    "nome": "Cliente de Teste 38",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste39",
+    "senha": "teste",
+    "nome": "Cliente de Teste 39",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste40",
+    "senha": "teste",
+    "nome": "Cliente de Teste 40",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste41",
+    "senha": "teste",
+    "nome": "Cliente de Teste 41",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste42",
+    "senha": "teste",
+    "nome": "Cliente de Teste 42",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste43",
+    "senha": "teste",
+    "nome": "Cliente de Teste 43",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste44",
+    "senha": "teste",
+    "nome": "Cliente de Teste 44",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste45",
+    "senha": "teste",
+    "nome": "Cliente de Teste 45",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste46",
+    "senha": "teste",
+    "nome": "Cliente de Teste 46",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste47",
+    "senha": "teste",
+    "nome": "Cliente de Teste 47",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste48",
+    "senha": "teste",
+    "nome": "Cliente de Teste 48",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste49",
+    "senha": "teste",
+    "nome": "Cliente de Teste 49",
+    "perfil": "PASSAGEIRO"
+  },
+  {
+    "usuario": "teste50",
+    "senha": "teste",
+    "nome": "Cliente de Teste 50",
+    "perfil": "PASSAGEIRO"
+  }
+]

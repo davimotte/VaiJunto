@@ -1,0 +1,92 @@
+[
+  {
+    "id": "car-1",
+    "motorista": "joao",
+    "origem": "Salvador",
+    "destino": "Jequié",
+    "partida": "2026-09-15T06:00:00-03:00",
+    "assentos": 3,
+    "precos_centavos": [
+      3000,
+      4500
+    ],
+    "_nota": "Primeira perna da baldeacao. Chega em Feira 08:00, em Jequie 11:00."
+  },
+  {
+    "id": "car-2",
+    "motorista": "carlos",
+    "origem": "Jequié",
+    "destino": "Vitória da Conquista",
+    "partida": "2026-09-15T12:30:00-03:00",
+    "assentos": 2,
+    "precos_centavos": [
+      4000
+    ],
+    "_nota": "Segunda perna. Folga de 90 min apos car-1."
+  },
+  {
+    "id": "car-3",
+    "motorista": "ana",
+    "origem": "Feira de Santana",
+    "destino": "Vitória da Conquista",
+    "partida": "2026-09-15T09:00:00-03:00",
+    "assentos": 1,
+    "precos_centavos": [
+      4500,
+      4000
+    ],
+    "_nota": "Itinerario alternativo com assento escasso."
+  },
+  {
+    "id": "car-4",
+    "motorista": "joao",
+    "origem": "Jequié",
+    "destino": "Vitória da Conquista",
+    "partida": "2026-09-15T11:15:00-03:00",
+    "assentos": 4,
+    "precos_centavos": [
+      4000
+    ],
+    "_nota": "CONTROLE NEGATIVO: folga de 15 min apos car-1, abaixo da margem de 30."
+  },
+  {
+    "id": "car-5",
+    "motorista": "carlos",
+    "origem": "Vitória da Conquista",
+    "destino": "Salvador",
+    "partida": "2026-09-15T08:00:00-03:00",
+    "assentos": 3,
+    "precos_centavos": [
+      4000,
+      4500,
+      3000
+    ],
+    "_nota": "CONTROLE NEGATIVO: sentido oposto, nao pode aparecer na busca."
+  },
+  {
+    "id": "car-6",
+    "motorista": "ana",
+    "origem": "Salvador",
+    "destino": "Vitória da Conquista",
+    "partida": "2026-09-16T07:00:00-03:00",
+    "assentos": 4,
+    "precos_centavos": [
+      3000,
+      4500,
+      4000
+    ],
+    "_nota": "CONTROLE NEGATIVO: direta, mas em 16/09."
+  },
+  {
+    "id": "car-7",
+    "motorista": "joao",
+    "origem": "Feira de Santana",
+    "destino": "Jequié",
+    "partida": "2026-09-15T08:30:00-03:00",
+    "assentos": 1,
+    "precos_centavos": [
+      4500
+    ],
+    "_nota": "Assento unico, gargalo do teste T1. Chega 11:30, conecta com car-2."
+  }
+]

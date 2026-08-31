@@ -1,0 +1,10 @@
+FROM golang:1.23-alpine AS build
+WORKDIR /src
+COPY go.mod ./
+COPY . .
+RUN CGO_ENABLED=0 go build -o /bin/motorista ./cmd/motorista && \
+    CGO_ENABLED=0 go build -o /bin/passageiro ./cmd/passageiro
+
+FROM alpine:3.20
+COPY --from=build /bin/motorista /bin/passageiro /bin/
+ENV VAIJUNTO_SERVIDOR=localhost:9000
