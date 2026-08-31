@@ -74,8 +74,11 @@ cada resposta com a requisição que a originou e medir latência individual.
 | Cidade | String | `"Feira de Santana"` |
 | Identificadores | String opaca gerada pelo servidor | `"car-3f2a"`, `"res-91c"` |
 
-Cidades são comparadas após normalização (aparar espaços, minúsculas, remover
-acentos), mas o servidor devolve sempre a grafia canônica do corredor.
+Cidades são comparadas por igualdade exata de string com a grafia canônica
+do corredor (tabela abaixo). O servidor não normaliza nem aceita variações
+de grafia — os clientes oficiais escolhem a cidade em um menu enumerado, não
+digitam o nome, então a string que chega ao servidor já é sempre a
+canônica. Qualquer outra string responde `CIDADE_DESCONHECIDA`.
 
 ### 3.1 Corredor de cidades
 
