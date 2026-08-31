@@ -1,8 +1,8 @@
 # Binários compilados
 /bin/
-servidor
-motorista
-passageiro
+/servidor
+/motorista
+/passageiro
 
 # Artefatos de teste e cobertura
 *.test
