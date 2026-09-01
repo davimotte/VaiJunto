@@ -1,6 +1,7 @@
 package servidor
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -44,7 +45,14 @@ func atenderConexao(conn net.Conn) error {
 func processarLinha(linha []byte) protocolo.Resposta {
 	req, err := protocolo.DecodificarRequisicao(linha)
 	if err != nil {
-		return respostaErro("", protocolo.CodigoJSONInvalido, "Linha não decodifica como JSON válido.")
+		var errSintaxe *json.SyntaxError
+		if errors.As(err, &errSintaxe) {
+			return respostaErro("", protocolo.CodigoJSONInvalido, "Linha não decodifica como JSON válido.")
+		}
+		// JSON sintaticamente válido, mas de forma incompatível com o
+		// envelope (ex.: array ou escalar no lugar de objeto): a seção 6
+		// do PROTOCOL.md separa esse caso de JSON_INVALIDO.
+		return respostaErro("", protocolo.CodigoEnvelopeInvalido, "Faltam os campos id, tipo ou dados no envelope.")
 	}
 	if req.ID == "" || req.Tipo == "" || req.Dados == nil {
 		return respostaErro(req.ID, protocolo.CodigoEnvelopeInvalido, "Faltam os campos id, tipo ou dados no envelope.")
