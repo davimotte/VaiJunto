@@ -272,7 +272,7 @@ vaijunto/
 │   ├── motorista/main.go
 │   └── passageiro/main.go
 ├── internal/
-│   ├── protocolo/    # envelope, structs de requisição/resposta, códigos de erro, framing
+│   ├── protocolo/    # envelope, structs de requisição/resposta, códigos de erro, framing (enquadramento)
 │   ├── dominio/      # Corredor, Carona, Reserva, Usuario, Estado, regras, mutex
 │   ├── servidor/     # listener, sessão, roteador
 │   └── cliente/      # conexão reaproveitada pelos dois CLIs
