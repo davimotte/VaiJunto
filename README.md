@@ -66,6 +66,45 @@ Verificando o servidor sem cliente:
 printf '{"id":"1","tipo":"PING","dados":{}}\n' | nc localhost 9000
 ```
 
+## Interface dos clientes
+
+Os clientes são navegados por menu numérico. Uma execução mantém **uma única**
+conexão TCP aberta, do login ao logout, que é o cenário para o qual o protocolo
+foi desenhado (ver decisão D15 no `PROJETO.md`).
+
+```
+=== VAIJUNTO — Passageiro ===
+Conectado a 192.168.0.10:9000 como Maria Souza
+
+1) Buscar itinerários
+2) Minhas reservas
+3) Cancelar reserva
+4) Sair
+Escolha: 1
+
+Origem: Salvador
+Destino: Vitória da Conquista
+Data (AAAA-MM-DD): 2026-09-15
+
+3 itinerários encontrados:
+
+[1] R$ 115,00 — 06:00 → 15:00 (1 baldeação)
+    Salvador → Jequié          06:00-11:00  João Silva    R$ 75,00
+    Jequié → V. da Conquista   12:30-15:00  Carlos Lima   R$ 40,00
+
+[2] R$ 120,00 — 06:00 → 14:30 (1 baldeação)
+    ...
+
+Reservar qual? (0 para voltar): 1
+Reserva res-91c confirmada. Total: R$ 115,00
+```
+
+O menu do motorista segue o mesmo padrão, com publicar carona, listar as próprias
+caronas, detalhar os passageiros por trecho e cancelar carona.
+
+O usuário nunca digita identificador: ao escolher um itinerário pelo número, o
+cliente devolve ao servidor os campos que ele mesmo recebeu na busca.
+
 ## Executando com Docker
 
 Desenvolvimento em uma máquina:

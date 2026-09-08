@@ -201,6 +201,31 @@ Comparação feita sobre o intervalo do itinerário inteiro, da primeira partida
 última chegada, e não trecho a trecho: o tempo de espera numa baldeação também é
 tempo em que o passageiro não pode estar em outra viagem.
 
+### D15 — Clientes com menu interativo e conexão única por sessão
+
+Os clientes são interfaces de terminal navegadas por menu numérico, e não CLIs de
+subcomandos. Uma execução do cliente abre **uma** conexão TCP, faz `LOGIN`,
+executa quantas operações o usuário quiser e encerra com `LOGOUT`.
+
+A justificativa é de coerência com D08. Um CLI de subcomandos criaria um processo
+novo por operação, abrindo e fechando conexão a cada comando, o que obrigaria a
+autenticar a cada operação e esvaziaria o argumento de que a conexão persistente
+torna o token de sessão desnecessário. O menu é o cenário para o qual o protocolo
+foi desenhado.
+
+O usuário nunca digita identificador. Ao escolher um itinerário retornado pela
+busca, o cliente devolve ao servidor os campos `carona_id`, `de` e `ate` que ele
+mesmo recebeu, sem que nada disso apareça na tela.
+
+Entrada inválida no menu não encerra o processo nem fecha a conexão: o cliente
+revalida e repete a pergunta. Isso importa na apresentação, que tem 20 minutos e
+arguição no meio.
+
+**Exceção deliberada:** o teste de carga não usa o menu. Ele fala o protocolo
+diretamente por socket, usando `internal/protocolo`, porque precisa controlar
+temporização e disparar requisições simultâneas, o que uma interface interativa
+não permite.
+
 ---
 
 ## 4. Modelo de domínio
@@ -272,7 +297,7 @@ vaijunto/
 │   ├── motorista/main.go
 │   └── passageiro/main.go
 ├── internal/
-│   ├── protocolo/    # envelope, structs de requisição/resposta, códigos de erro, framing (enquadramento)
+│   ├── protocolo/    # envelope, structs de requisição/resposta, códigos de erro, framing
 │   ├── dominio/      # Corredor, Carona, Reserva, Usuario, Estado, regras, mutex
 │   ├── servidor/     # listener, sessão, roteador
 │   └── cliente/      # conexão reaproveitada pelos dois CLIs
@@ -536,7 +561,7 @@ Três pontos que costumam consumir tempo em laboratório:
 | 5 | Operações básicas | Publicar, listar, detalhar, cancelar, listar reservas funcionam |
 | 6 | Busca de itinerários | Teste de regressão da seção 9.2 passa |
 | 7 | Reserva atômica | T1, T2 e T8 passam com `-race` |
-| 8 | Clientes CLI | Motorista e passageiro completos |
+| 8 | Clientes CLI com menu interativo | Motorista e passageiro completos; conexão única por sessão |
 | 9 | Teste de carga | T1 a T8 e as curvas de latência |
 | 10 | Docker e execução distribuída | Servidor e cliente em máquinas distintas |
 | 11 | Relatório SBC e README | 8 páginas, formato SBC, referenciado |
