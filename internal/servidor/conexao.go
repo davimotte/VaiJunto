@@ -1,7 +1,6 @@
 package servidor
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -25,9 +24,12 @@ func atenderConexao(conn net.Conn) error {
 			if errors.Is(err, io.EOF) {
 				return nil
 			}
-			// Linha acima de 64 KB: a seção 1 manda descartá-la e encerrar a
-			// conexão sem resposta, já que não há como saber onde a
-			// mensagem parcial termina.
+			// Os dois jeitos de uma mensagem chegar incompleta — estourar os
+			// 64 KB ou o stream acabar sem o '\n' — têm o mesmo tratamento na
+			// seção 1: descartar sem resposta e encerrar a conexão. Ambos
+			// voltam como erro, e não como o EOF acima, porque são o cliente
+			// violando o protocolo: vale registrar, ao contrário da
+			// desconexão normal.
 			return err
 		}
 
@@ -40,22 +42,20 @@ func atenderConexao(conn net.Conn) error {
 }
 
 // processarLinha decodifica uma linha e devolve a resposta correspondente,
-// tratando as duas falhas de enquadramento antes de rotear (seção 1 e 6 do
-// PROTOCOL.md).
+// traduzindo as falhas de envelope para os códigos da seção 6 do PROTOCOL.md.
+//
+// A validação do envelope em si é de internal/protocolo: aqui só se escolhe o
+// código. Nos dois casos a resposta usa req.ID, e não "": a decodificação em
+// dois estágios extrai o id antes de validar tipo e dados, então o id vem
+// preenchido sempre que era legível, e vazio só quando não havia como lê-lo
+// (seção 2.2).
 func processarLinha(linha []byte) protocolo.Resposta {
 	req, err := protocolo.DecodificarRequisicao(linha)
 	if err != nil {
-		var errSintaxe *json.SyntaxError
-		if errors.As(err, &errSintaxe) {
-			return respostaErro("", protocolo.CodigoJSONInvalido, "Linha não decodifica como JSON válido.")
+		if errors.Is(err, protocolo.ErrJSONInvalido) {
+			return respostaErro(req.ID, protocolo.CodigoJSONInvalido, "Linha não decodifica como JSON válido.")
 		}
-		// JSON sintaticamente válido, mas de forma incompatível com o
-		// envelope (ex.: array ou escalar no lugar de objeto): a seção 6
-		// do PROTOCOL.md separa esse caso de JSON_INVALIDO.
-		return respostaErro("", protocolo.CodigoEnvelopeInvalido, "Faltam os campos id, tipo ou dados no envelope.")
-	}
-	if req.ID == "" || req.Tipo == "" || req.Dados == nil {
-		return respostaErro(req.ID, protocolo.CodigoEnvelopeInvalido, "Faltam os campos id, tipo ou dados no envelope.")
+		return respostaErro(req.ID, protocolo.CodigoEnvelopeInvalido, "Envelope inválido: id, tipo e dados são obrigatórios, e dados precisa ser um objeto.")
 	}
 	return rotear(req)
 }

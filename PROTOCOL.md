@@ -16,7 +16,10 @@ respeite interopera com o servidor.
 - Modelo estritamente **requisição/resposta**. O servidor nunca envia mensagem
   não solicitada.
 - Tamanho máximo de uma linha: **64 KB**. Linha maior é descartada e a conexão é
-  encerrada.
+  encerrada, sem resposta.
+- Uma mensagem só é considerada completa quando o `\n` é recebido. Bytes
+  pendentes sem terminador no momento do EOF são **descartados sem resposta**. O
+  receptor não deve tentar processar uma linha incompleta.
 - Linha vazia é ignorada silenciosamente.
 - Linha que não decodifica como JSON válido gera resposta `JSON_INVALIDO` e a
   conexão permanece aberta.
@@ -41,6 +44,16 @@ impossível um delimitador falso vindo do conteúdo de um campo.
 | `tipo` | string | sim | Nome da operação, em maiúsculas. |
 | `dados` | objeto | sim | Payload específico da operação. Objeto vazio quando não há campos. |
 
+Validação estrita do envelope: `id` e `tipo` precisam ser **strings** e `dados`
+precisa ser um **objeto JSON**. Campo ausente, `null`, ou de outro tipo (número,
+array, booleano) responde `ENVELOPE_INVALIDO`.
+
+O receptor decodifica o envelope em dois estágios. Primeiro extrai o `id`, se ele
+for uma string legível; só depois valida `tipo` e `dados`. Isso garante que uma
+resposta de erro por envelope malformado ainda ecoe o `id` correto, o que é
+necessário para que o cliente e o teste de carga consigam parear resposta e
+requisição mesmo em rajada de mensagens inválidas.
+
 ### 2.2 Resposta
 
 ```json
@@ -53,7 +66,7 @@ impossível um delimitador falso vindo do conteúdo de um campo.
 
 | Campo | Tipo | Presente | Descrição |
 |---|---|---|---|
-| `id` | string | sempre | Mesmo `id` da requisição. `""` se não foi possível lê-lo. |
+| `id` | string | sempre | Mesmo `id` da requisição. `""` apenas quando a linha não decodifica como JSON ou o `id` não é uma string. |
 | `status` | string | sempre | `OK` ou `ERRO`. |
 | `codigo` | string | só em erro | Código da tabela da seção 6. |
 | `mensagem` | string | só em erro | Texto legível, para exibição no CLI. |
