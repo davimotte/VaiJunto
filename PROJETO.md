@@ -282,11 +282,26 @@ até C sobre a rota `[A, B, C, D]` consome os índices 0 e 1.
 | # | Camada | Responsabilidade | Implementação |
 |---|---|---|---|
 | 1 | Conexão | Aceitar conexões e isolar cada cliente | `net.Listener`, goroutine por `net.Conn` |
-| 2 | Enquadramento | Delimitar mensagens e codificar/decodificar | `bufio.Reader.ReadBytes('\n')`, `encoding/json` |
+| 2 | Enquadramento | Delimitar mensagens e codificar/decodificar | `bufio.Reader.ReadSlice('\n')`, `encoding/json` |
 | 3 | Sessão | Autenticar e lembrar quem é o cliente | variável local da goroutine |
 | 4 | Roteamento | Despachar por tipo de mensagem | `switch req.Tipo` |
 | 5 | Domínio | Regras de negócio | funções sobre o estado já travado |
 | 6 | Estado | Guardar caronas, reservas e usuários | `sync.Mutex` |
+
+Duas notas sobre a camada 2. O uso de `ReadSlice` em vez de `ReadBytes` é
+deliberado: `ReadBytes` acumula num slice que cresce sem limite até encontrar o
+delimitador, o que torna impossível aplicar o corte de 64 KB antes de já ter lido
+a linha inteira, exatamente o que o limite existe para evitar. Com `ReadSlice`
+sobre um buffer de 64 KB + 1, o estouro é detectado por `bufio.ErrBufferFull`
+sem que a memória seja consumida.
+
+A contrapartida é que `ReadSlice` devolve uma fatia apontando para o buffer
+interno do `bufio.Reader`, sobrescrita na leitura seguinte. **A fatia precisa ser
+copiada antes de sair da função de leitura.** Sem a cópia, mensagens enviadas em
+sequência rápida corrompem umas às outras, e a falha só aparece sob carga.
+
+A camada 4 também é responsável por traduzir erros de domínio em códigos do
+protocolo, conforme a seção 5.3.
 
 ### 5.2 Estrutura de pacotes
 
@@ -316,6 +331,27 @@ O pacote `protocolo`, compartilhado entre servidor e clientes, garante que os
 dois lados nunca divirjam. Isso não fere a interoperabilidade: o contrato real é
 o JSON documentado em `PROTOCOL.md`, e um cliente escrito em outra linguagem
 continua funcionando.
+
+### 5.3 Tradução de erros de domínio
+
+`internal/dominio` não importa `internal/protocolo`, então ele não pode conhecer
+os códigos de erro do protocolo. Ao mesmo tempo, é o domínio que sabe **qual**
+erro ocorreu. A conciliação:
+
+1. O domínio define erros sentinela tipados, sem string de protocolo:
+   `dominio.ErrCidadeDesconhecida`, `dominio.ErrSemAssento`, e assim por diante.
+2. `internal/servidor` mantém **uma única** tabela que mapeia cada erro sentinela
+   ao seu código do `PROTOCOL.md` e à mensagem legível.
+3. A camada 4 consulta a tabela ao montar a resposta.
+
+Nenhum literal de código de erro pode existir em `internal/dominio`. Um erro
+sentinela sem entrada na tabela cai em `ERRO_INTERNO`, e um teste percorre todos
+os sentinelas exportados verificando que cada um tem entrada, o que impede a
+divergência silenciosa entre as duas pontas.
+
+Isso preserva a propriedade que sustenta toda a seção 5.1: o domínio não conhece
+a rede. Trocar o protocolo por outro formato exigiria mexer apenas nas camadas 2
+e 4.
 
 ---
 
