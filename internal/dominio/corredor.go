@@ -23,6 +23,23 @@ var duracaoAteProxima = []time.Duration{
 	2*time.Hour + 30*time.Minute,
 }
 
+// CidadesCorredor devolve a sequência de cidades do corredor, na ordem dos
+// índices.
+//
+// Existe para que os clientes oficiais montem o menu enumerado de cidades a
+// partir da mesma lista que o servidor valida (PROTOCOL.md, seção 3): uma
+// segunda lista escrita no cliente poderia divergir na grafia, e a
+// comparação do corredor é por igualdade exata de string, então a divergência
+// apareceria como CIDADE_DESCONHECIDA em tempo de execução.
+//
+// Devolve uma cópia porque o corredor é constante do sistema (D09): quem
+// consome não pode reordenar nem renomear a lista de dentro.
+func CidadesCorredor() []string {
+	copia := make([]string, len(cidadesCorredor))
+	copy(copia, cidadesCorredor)
+	return copia
+}
+
 // IndiceCidade devolve a posição de nome no corredor. A comparação é por
 // igualdade exata de string: os clientes oficiais escolhem a cidade em um
 // menu enumerado (não digitam o nome), então a grafia que chega ao
