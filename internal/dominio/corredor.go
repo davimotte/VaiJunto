@@ -36,26 +36,6 @@ func IndiceCidade(nome string) (int, bool) {
 	return 0, false
 }
 
-// ErroDominio é um erro de validação de domínio que carrega o código de erro
-// do PROTOCOL.md (seção 6). O domínio não monta resposta de protocolo: a
-// camada de roteamento em internal/servidor lê Codigo e traduz para o campo
-// "codigo" da Resposta.
-type ErroDominio struct {
-	Codigo   string
-	Mensagem string
-}
-
-func (e *ErroDominio) Error() string { return e.Mensagem }
-
-// Códigos de erro produzidos pelo domínio (PROTOCOL.md, seção 6). Os valores
-// coincidem com as constantes de internal/protocolo por definição — o
-// domínio não importa esse pacote (não conhece a rede) e por isso mantém sua
-// própria cópia.
-const (
-	CodigoCidadeDesconhecida = "CIDADE_DESCONHECIDA"
-	CodigoRotaInvalida       = "ROTA_INVALIDA"
-)
-
 // DerivarRotaEHorarios calcula, a partir de origem, destino e do instante de
 // partida, a sequência de cidades percorridas e o horário de chegada em cada
 // uma (D09): o motorista informa só origem, destino e partida, e o servidor
@@ -63,14 +43,14 @@ const (
 func DerivarRotaEHorarios(origem, destino string, partida time.Time) ([]string, []time.Time, error) {
 	io, ok := IndiceCidade(origem)
 	if !ok {
-		return nil, nil, &ErroDominio{Codigo: CodigoCidadeDesconhecida, Mensagem: fmt.Sprintf("cidade desconhecida: %q", origem)}
+		return nil, nil, fmt.Errorf("%w: origem %q", ErrCidadeDesconhecida, origem)
 	}
 	id, ok := IndiceCidade(destino)
 	if !ok {
-		return nil, nil, &ErroDominio{Codigo: CodigoCidadeDesconhecida, Mensagem: fmt.Sprintf("cidade desconhecida: %q", destino)}
+		return nil, nil, fmt.Errorf("%w: destino %q", ErrCidadeDesconhecida, destino)
 	}
 	if io == id {
-		return nil, nil, &ErroDominio{Codigo: CodigoRotaInvalida, Mensagem: "origem e destino não podem ser a mesma cidade"}
+		return nil, nil, fmt.Errorf("%w: origem e destino são a mesma cidade %q", ErrRotaInvalida, origem)
 	}
 
 	passo := 1
