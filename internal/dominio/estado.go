@@ -60,3 +60,20 @@ func (e *Estado) DetalharCarona(caronaID, motoristaID string) (Carona, [][]Passa
 	defer e.mu.Unlock()
 	return detalharCarona(e, caronaID, motoristaID)
 }
+
+// BuscarItinerarios devolve os itinerários da origem ao destino cuja primeira
+// perna parte na data pedida (PROTOCOL.md, seção 5.8).
+//
+// Trava como todas as demais operações, embora não escreva nada: Livres é
+// lido para podar pernas sem assento, e ler contador que outra goroutine
+// decrementa é corrida mesmo quando o valor lido não vai a lugar nenhum. O
+// resultado é montado inteiro dentro da seção crítica e sai como valor, sem
+// nenhum ponteiro para dentro do estado.
+//
+// data carrega o fuso em que a pergunta "que dia é 15/09?" deve ser
+// respondida; quem chama é responsável por escolhê-lo (D11).
+func (e *Estado) BuscarItinerarios(origem, destino string, data time.Time) ([]Itinerario, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return buscarItinerarios(e, origem, destino, data)
+}

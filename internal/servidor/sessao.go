@@ -46,6 +46,7 @@ var perfilExigido = map[string]string{
 	protocolo.TipoPublicarCarona:      protocolo.PerfilMotorista,
 	protocolo.TipoListarMinhasCaronas: protocolo.PerfilMotorista,
 	protocolo.TipoDetalharCarona:      protocolo.PerfilMotorista,
+	protocolo.TipoBuscarItinerarios:   protocolo.PerfilPassageiro,
 }
 
 // autorizar aplica as regras de acesso da seção 4 do PROTOCOL.md antes de

@@ -65,3 +65,35 @@ type Estado struct {
 	caronas  map[string]*Carona
 	reservas map[string]*Reserva
 }
+
+// PernaItinerario é um segmento contíguo de uma única carona dentro de um
+// itinerário: dos índices De até Ate da rota daquela carona, consumindo os
+// trechos De, De+1, …, Ate-1 (PROTOCOL.md, seção 5.8).
+//
+// Motorista é o nome de exibição, e não o identificador de login: quem lê o
+// resultado da busca é o passageiro, que escolhe com quem viajar e nunca
+// digita identificador (D15).
+type PernaItinerario struct {
+	CaronaID      string
+	Motorista     string
+	De, Ate       int
+	Origem        string
+	Destino       string
+	Partida       time.Time
+	Chegada       time.Time
+	PrecoCentavos int
+}
+
+// Itinerario é um caminho completo da origem ao destino pedidos, montado com
+// uma ou mais pernas (RF07).
+//
+// É um valor derivado, calculado a cada busca e nunca guardado no Estado: a
+// busca é informativa e não reserva nada (D07). O número de baldeações é
+// len(Pernas)-1 e por isso não vira campo — dado derivável guardado em
+// paralelo é dado que pode divergir.
+type Itinerario struct {
+	PrecoTotalCentavos int
+	Partida            time.Time
+	Chegada            time.Time
+	Pernas             []PernaItinerario
+}

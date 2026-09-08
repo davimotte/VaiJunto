@@ -2,6 +2,7 @@ package dominio
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -430,5 +431,147 @@ func TestDetalharCarona_ListaPassageirosPorTrecho(t *testing.T) {
 	}
 	if len(passageiros[2]) != 0 {
 		t.Fatalf("trecho 2 deveria estar vazio (a reserva que o cobre está inativa): %+v", passageiros[2])
+	}
+}
+
+// estadoDoCenario carrega o estado a partir de dados/, e não de caronas
+// montadas no próprio teste.
+//
+// A escolha é deliberada: o cenário da seção 9.2 do PROJETO.md é um artefato
+// versionado, usado também na demonstração e no relatório. Um teste que
+// reconstruísse as sete caronas em código passaria a valer sobre dados que
+// ninguém executa, e deixaria de acusar uma alteração indevida em
+// dados/caronas.json — que é justamente um dos riscos que ele existe para
+// cobrir.
+func estadoDoCenario(t *testing.T) *Estado {
+	t.Helper()
+	e, err := CarregarEstado("../../dados/usuarios.json", "../../dados/caronas.json")
+	if err != nil {
+		t.Fatalf("CarregarEstado: %v", err)
+	}
+	return e
+}
+
+// assinatura reduz um itinerário à sequência de trechos que o identifica,
+// no formato "car-1:0-1|car-3:0-2". É o que o teste compara: os horários e o
+// preço são conferidos à parte, e comparar struct a struct só tornaria a
+// mensagem de falha ilegível.
+func assinatura(it Itinerario) string {
+	s := ""
+	for i, p := range it.Pernas {
+		if i > 0 {
+			s += "|"
+		}
+		s += fmt.Sprintf("%s:%d-%d", p.CaronaID, p.De, p.Ate)
+	}
+	return s
+}
+
+// TestBuscarItinerarios_CenarioSecao92 é o teste de regressão exigido pelo
+// PROJETO.md (seção 9.2) e o critério de pronto da fase 6 (seção 11).
+//
+// A consulta Salvador → Vitória da Conquista em 15/09/2026 exercita o
+// algoritmo inteiro da seção 6 de uma vez: não há carona direta na data, então
+// toda resposta é uma baldeação, e os três controles negativos do cenário
+// atacam um filtro diferente cada um.
+//
+// O teste fixa a lista **completa e ordenada**, e não apenas a presença dos
+// itinerários válidos. Verificar só presença deixaria passar um itinerário a
+// mais, que é exatamente a forma que um bug de validação toma aqui: car-4
+// aparecendo por margem de baldeação mal aplicada não remove nenhum resultado
+// correto, só acrescenta um errado.
+func TestBuscarItinerarios_CenarioSecao92(t *testing.T) {
+	e := estadoDoCenario(t)
+	fuso := fusoBrasilia()
+	data := time.Date(2026, 9, 15, 0, 0, 0, 0, fuso)
+
+	itinerarios, err := e.BuscarItinerarios("Salvador", "Vitória da Conquista", data)
+	if err != nil {
+		t.Fatalf("BuscarItinerarios: %v", err)
+	}
+
+	// Ordem esperada: preço total crescente, empate por chegada mais cedo,
+	// depois por menos baldeações (PROTOCOL.md, seção 5.8). Como as sete
+	// caronas do cenário têm preços simétricos por construção, os seis
+	// itinerários custam os mesmos 11500 centavos e o critério de preço empata
+	// em todos: o que a lista abaixo fixa, na prática, são os dois critérios
+	// de desempate.
+	esperados := []struct {
+		assinatura string
+		preco      int
+		partida    time.Time
+		chegada    time.Time
+		baldeacoes int
+	}{
+		{"car-1:0-1|car-3:0-2", 11500,
+			time.Date(2026, 9, 15, 6, 0, 0, 0, fuso), time.Date(2026, 9, 15, 14, 30, 0, 0, fuso), 1},
+		{"car-1:0-2|car-3:1-2", 11500,
+			time.Date(2026, 9, 15, 6, 0, 0, 0, fuso), time.Date(2026, 9, 15, 14, 30, 0, 0, fuso), 1},
+		{"car-1:0-1|car-7:0-1|car-3:1-2", 11500,
+			time.Date(2026, 9, 15, 6, 0, 0, 0, fuso), time.Date(2026, 9, 15, 14, 30, 0, 0, fuso), 2},
+		{"car-1:0-2|car-2:0-1", 11500,
+			time.Date(2026, 9, 15, 6, 0, 0, 0, fuso), time.Date(2026, 9, 15, 15, 0, 0, 0, fuso), 1},
+		{"car-1:0-1|car-3:0-1|car-2:0-1", 11500,
+			time.Date(2026, 9, 15, 6, 0, 0, 0, fuso), time.Date(2026, 9, 15, 15, 0, 0, 0, fuso), 2},
+		{"car-1:0-1|car-7:0-1|car-2:0-1", 11500,
+			time.Date(2026, 9, 15, 6, 0, 0, 0, fuso), time.Date(2026, 9, 15, 15, 0, 0, 0, fuso), 2},
+	}
+
+	obtidas := make([]string, len(itinerarios))
+	for i, it := range itinerarios {
+		obtidas[i] = assinatura(it)
+	}
+	if len(itinerarios) != len(esperados) {
+		t.Fatalf("quantidade de itinerários: got %d, want %d\nobtidos: %v",
+			len(itinerarios), len(esperados), obtidas)
+	}
+
+	for i, quero := range esperados {
+		it := itinerarios[i]
+		if obtidas[i] != quero.assinatura {
+			t.Errorf("posição %d: got %q, want %q\nlista obtida: %v", i, obtidas[i], quero.assinatura, obtidas)
+			continue
+		}
+		if it.PrecoTotalCentavos != quero.preco {
+			t.Errorf("%s: preço total = %d, want %d", quero.assinatura, it.PrecoTotalCentavos, quero.preco)
+		}
+		// Comparação por Equal, nunca por ==: o mesmo instante escrito em
+		// fusos diferentes é o mesmo ponto no tempo (D11).
+		if !it.Partida.Equal(quero.partida) {
+			t.Errorf("%s: partida = %s, want %s", quero.assinatura, it.Partida, quero.partida)
+		}
+		if !it.Chegada.Equal(quero.chegada) {
+			t.Errorf("%s: chegada = %s, want %s", quero.assinatura, it.Chegada, quero.chegada)
+		}
+		if baldeacoes := len(it.Pernas) - 1; baldeacoes != quero.baldeacoes {
+			t.Errorf("%s: baldeações = %d, want %d", quero.assinatura, baldeacoes, quero.baldeacoes)
+		}
+		// A soma dos preços das pernas tem que fechar com o total: é o
+		// campo em cima do qual o passageiro decide, e o único lugar onde
+		// um erro de acumulação apareceria (D11).
+		soma := 0
+		for _, p := range it.Pernas {
+			soma += p.PrecoCentavos
+		}
+		if soma != it.PrecoTotalCentavos {
+			t.Errorf("%s: soma das pernas = %d, mas preço total = %d", quero.assinatura, soma, it.PrecoTotalCentavos)
+		}
+	}
+
+	// Controles negativos do cenário (PROJETO.md, seção 9.2). A verificação é
+	// redundante em relação à lista completa acima, mas nomeia o filtro que
+	// quebrou: sem ela, a falha diria apenas "6 itinerários, want 5".
+	proibidas := map[string]string{
+		"car-4": "folga de 15 min após car-1, abaixo de MARGEM_BALDEACAO",
+		"car-5": "sentido oposto ao da busca",
+		"car-6": "direta, mas parte em 16/09",
+	}
+	for _, it := range itinerarios {
+		for _, p := range it.Pernas {
+			if motivo, proibida := proibidas[p.CaronaID]; proibida {
+				t.Errorf("itinerário %s usa %s, que deveria ser rejeitada: %s",
+					assinatura(it), p.CaronaID, motivo)
+			}
+		}
 	}
 }

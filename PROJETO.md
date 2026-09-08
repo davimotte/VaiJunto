@@ -184,12 +184,23 @@ queira mencionar no relatório.
 
 | Constante | Valor | Onde se aplica |
 |---|---|---|
-| `MARGEM_BALDEACAO` | 30 min | Folga mínima entre chegada de um trecho e partida do seguinte |
+| `MARGEM_BALDEACAO` | 30 min | Folga **mínima** entre chegada de um trecho e partida do seguinte |
+| `ESPERA_MAXIMA_BALDEACAO` | 12 h | Folga **máxima** da mesma conexão |
 | `ANTECEDENCIA_CANCELAMENTO` | 1 h | Prazo do passageiro para cancelar, contado da partida do primeiro trecho |
 | Cancelamento de carona | até a partida | Prazo do motorista |
 
 A margem de baldeação deve ser a **mesma constante** na busca e na reserva. Se
 divergirem, a busca oferece itinerários que a reserva recusa.
+
+As duas margens delimitam uma janela, e não um piso solto. O teto existe porque o
+filtro de data da busca vale só para a primeira perna (seção 6): sem ele, uma
+carona de outro dia entra como perna intermediária e produz um "itinerário" com
+espera de 24 h, formalmente válido no espaço e no tempo. Doze horas é o que
+separa a conexão noturna legítima — que atravessa a meia-noite e é justamente o
+que o filtro de data por perna única existe para permitir — da espera de um dia
+inteiro, que nenhum passageiro chamaria de baldeação.
+
+Como `MARGEM_BALDEACAO`, o teto é a **mesma constante** na busca e na reserva.
 
 Assimetria deliberada: quando o motorista cancela a carona, o cancelamento em
 cascata das reservas **ignora** o prazo de uma hora do passageiro. O prazo
@@ -391,16 +402,26 @@ função expandir(cidadeAtual, livreEm, acumulado, resultados):
             se data(p.partida) != dataPedida: continua
         senão:
             se p.partida < livreEm + MARGEM_BALDEACAO: continua
+            se p.partida > livreEm + ESPERA_MAXIMA_BALDEACAO: continua
         se perna usa carona já presente em acumulado: continua
         expandir(p.destino, p.chegada, acumulado + [p], resultados)
 ```
 
 O filtro de data se aplica apenas à primeira perna, o que permite baldeação
-atravessando a meia-noite. A checagem de carona repetida evita itinerários que
-embarcam duas vezes no mesmo veículo.
+atravessando a meia-noite. É esse afrouxamento que obriga a existir o teto
+`ESPERA_MAXIMA_BALDEACAO` (D13): sem ele, uma carona de outro dia encadeia
+legalmente como perna intermediária, e a busca devolve esperas de 24 h como se
+fossem conexões. A checagem de carona repetida evita itinerários que embarcam
+duas vezes no mesmo veículo.
 
 **Passo 4 — ordenar e limitar.** Preço total crescente; empate por chegada mais
 cedo; depois por menos baldeações. Máximo de 20 itinerários.
+
+Os três critérios não formam ordem total — no cenário da seção 9.2 há pares que
+empatam nos três —, e a iteração de mapa em Go é aleatória. A implementação
+acrescenta um quarto desempate, determinístico, sobre a sequência de trechos do
+itinerário. Não é regra de negócio: existe para que a mesma consulta devolva
+sempre a mesma lista, na demonstração e no teste de regressão.
 
 A busca lê `Livres` apenas para podar pernas inviáveis. Ela não reserva e não
 promete nada; a reserva refaz toda a verificação sob o lock. A duplicação é
@@ -534,7 +555,10 @@ A consulta **Salvador → Vitória da Conquista em 15/09** exercita tudo:
 - `car-1 + car-7 + car-2` é um itinerário de três pernas, e o assento único de
   `car-7` é o gargalo do teste de concorrência.
 - `car-5` e `car-6` devem estar sempre ausentes. São os controles negativos de
-  sentido e de data.
+  sentido e de data. `car-6` cobre especificamente o teto de espera: como o
+  filtro de data só olha a primeira perna, ela **encadeia** depois de `car-1`
+  (chegada em Jequié às 11:00 de 15/09, partida de lá ao meio-dia de 16/09) e só
+  é rejeitada por `ESPERA_MAXIMA_BALDEACAO`.
 
 Escrever um teste que fixe o resultado esperado dessa consulta. Ele serve de
 regressão para o algoritmo de busca e de evidência de corretude no relatório.

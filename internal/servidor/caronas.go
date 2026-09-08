@@ -8,7 +8,7 @@ import (
 	"vaijunto/internal/protocolo"
 )
 
-// Handlers das operações de motorista (PROTOCOL.md, seções 5.4 a 5.6).
+// Handlers das operações sobre caronas (PROTOCOL.md, seções 5.4 a 5.8).
 //
 // Todos seguem a mesma divisão de trabalho: aqui só se decodifica o payload,
 // se chama um método do estado e se traduz o resultado para o envelope. A
@@ -158,4 +158,74 @@ func tratarDetalharCarona(req protocolo.Requisicao, estado *dominio.Estado, s *s
 		CaronaID: carona.ID,
 		Trechos:  trechos,
 	})
+}
+
+// buscarItinerariosPedido decodifica o "dados" de BUSCAR_ITINERARIOS com
+// campos ponteiro pelo mesmo motivo de publicarCaronaPedido: distinguir campo
+// ausente de string vazia, para que a mensagem de erro diga o que faltou.
+type buscarItinerariosPedido struct {
+	Origem  *string `json:"origem"`
+	Destino *string `json:"destino"`
+	Data    *string `json:"data"`
+}
+
+// tratarBuscarItinerarios responde a BUSCAR_ITINERARIOS (PROTOCOL.md, seção
+// 5.8).
+//
+// Nada aqui reserva ou bloqueia assento: os valores refletem o instante da
+// consulta e podem estar desatualizados quando o passageiro confirmar (D07). É
+// o que garante que nenhum assento fique preso a uma reserva nunca concluída.
+func tratarBuscarItinerarios(req protocolo.Requisicao, estado *dominio.Estado, s *sessao) protocolo.Resposta {
+	var pedido buscarItinerariosPedido
+	if err := json.Unmarshal(req.Dados, &pedido); err != nil {
+		return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "Algum campo veio com o tipo errado.")
+	}
+	if pedido.Origem == nil || pedido.Destino == nil || pedido.Data == nil {
+		return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "Informe origem, destino e data.")
+	}
+
+	// "2026-09-15" não designa um instante: designa um dia, e um dia só existe
+	// dentro de um fuso. O fuso é resolvido aqui, na borda, e entregue pronto
+	// ao domínio — que assim não precisa consultar relógio nem configuração
+	// de ambiente. time.Local vem de TZ, e o binário embute tzdata para que
+	// isso funcione também no contêiner Alpine (PROJETO.md, seção 10.1).
+	data, err := time.ParseInLocation("2006-01-02", *pedido.Data, time.Local)
+	if err != nil {
+		return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "A data precisa estar no formato AAAA-MM-DD (ex.: 2026-09-15).")
+	}
+
+	itinerarios, err := estado.BuscarItinerarios(*pedido.Origem, *pedido.Destino, data)
+	if err != nil {
+		return respostaDeErroDeDominio(req.ID, err)
+	}
+
+	resposta := protocolo.BuscarItinerariosResposta{
+		Itinerarios: make([]protocolo.Itinerario, 0, len(itinerarios)),
+	}
+	for _, it := range itinerarios {
+		trechos := make([]protocolo.TrechoItinerario, 0, len(it.Pernas))
+		for _, p := range it.Pernas {
+			trechos = append(trechos, protocolo.TrechoItinerario{
+				CaronaID:      p.CaronaID,
+				Motorista:     p.Motorista,
+				De:            p.De,
+				Ate:           p.Ate,
+				Origem:        p.Origem,
+				Destino:       p.Destino,
+				Partida:       p.Partida,
+				Chegada:       p.Chegada,
+				PrecoCentavos: p.PrecoCentavos,
+			})
+		}
+		resposta.Itinerarios = append(resposta.Itinerarios, protocolo.Itinerario{
+			PrecoTotalCentavos: it.PrecoTotalCentavos,
+			Partida:            it.Partida,
+			Chegada:            it.Chegada,
+			// Derivado na borda, e não guardado no domínio: uma baldeação é
+			// uma troca de veículo, e trocas são uma a menos que as pernas.
+			Baldeacoes: len(it.Pernas) - 1,
+			Trechos:    trechos,
+		})
+	}
+	return respostaOK(req.ID, resposta)
 }
