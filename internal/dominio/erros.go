@@ -1,6 +1,10 @@
 package dominio
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"time"
+)
 
 // Erros sentinela do domínio (PROJETO.md, seção 5.3).
 //
@@ -34,6 +38,39 @@ var (
 	// ErrNaoEDono — o recurso pertence a outro usuário.
 	ErrNaoEDono = errors.New("dominio: recurso pertence a outro usuário")
 
+	// ErrCaronaCancelada — a carona já foi cancelada pelo motorista. Vale
+	// tanto para quem tenta cancelá-la de novo quanto para quem tenta
+	// reservar nela.
+	ErrCaronaCancelada = errors.New("dominio: carona cancelada")
+
+	// ErrItemInvalido — um item da reserva está fora de faixa: lista vazia,
+	// De >= Ate, ou índice além da rota da carona. É o passo 1 da seção 7 do
+	// PROJETO.md na parte que fala de faixa de valores, e não de encadeamento.
+	ErrItemInvalido = errors.New("dominio: item de reserva fora de faixa")
+
+	// ErrItinerarioInvalido — os trechos não formam um itinerário: repetem a
+	// mesma carona, não encadeiam no espaço, ou não encadeiam no tempo dentro
+	// da janela de baldeação (D13).
+	ErrItinerarioInvalido = errors.New("dominio: trechos não formam um itinerário")
+
+	// ErrSemAssento — algum trecho do itinerário não tem assento livre.
+	// Detalhes de qual trecho vêm em ErroSemAssento.
+	ErrSemAssento = errors.New("dominio: trecho sem assento livre")
+
+	// ErrConflitoHorario — o passageiro já tem reserva ativa que se sobrepõe
+	// no tempo ao itinerário pedido (D14). Detalhes em ErroConflitoHorario.
+	ErrConflitoHorario = errors.New("dominio: reserva sobreposta no tempo")
+
+	// ErrReservaNaoEncontrada — identificador de reserva inexistente.
+	ErrReservaNaoEncontrada = errors.New("dominio: reserva não encontrada")
+
+	// ErrReservaJaCancelada — a reserva já está inativa.
+	ErrReservaJaCancelada = errors.New("dominio: reserva já cancelada")
+
+	// ErrPrazoCancelamentoExpirado — o cancelamento chegou fora do prazo
+	// (D13). Detalhes em ErroPrazoCancelamento.
+	ErrPrazoCancelamentoExpirado = errors.New("dominio: prazo de cancelamento expirado")
+
 	// ErrGeracaoDeID — a fonte de aleatoriedade falhou ao gerar um
 	// identificador. Só existe para não engolir o erro de crypto/rand em
 	// silêncio; na prática não acontece.
@@ -57,6 +94,62 @@ func TodosOsErros() []error {
 		ErrCredenciaisInvalidas,
 		ErrCaronaNaoEncontrada,
 		ErrNaoEDono,
+		ErrCaronaCancelada,
+		ErrItemInvalido,
+		ErrItinerarioInvalido,
+		ErrSemAssento,
+		ErrConflitoHorario,
+		ErrReservaNaoEncontrada,
+		ErrReservaJaCancelada,
+		ErrPrazoCancelamentoExpirado,
 		ErrGeracaoDeID,
 	}
 }
+
+// Três erros do protocolo não se resolvem só com um código: a seção 5.9 do
+// PROTOCOL.md manda SEM_ASSENTO dizer *qual* trecho esgotou, CONFLITO_HORARIO
+// dizer *qual* reserva conflita, e a 5.11 manda PRAZO_CANCELAMENTO_EXPIRADO
+// dizer de que partida se fala. Quem tem esses dados é o domínio.
+//
+// A saída são erros tipados que embrulham o sentinela correspondente: errors.Is
+// continua reconhecendo o sentinela — a tabela de tradução funciona sem saber
+// que eles existem —, e o handler que quiser o detalhe o extrai com errors.As.
+// Nenhum deles carrega código nem texto de protocolo; cidade e identificador
+// são vocabulário do domínio.
+
+// ErroSemAssento identifica o trecho que esgotou.
+type ErroSemAssento struct {
+	CaronaID     string
+	IndiceTrecho int
+	Origem       string
+	Destino      string
+}
+
+func (e *ErroSemAssento) Error() string {
+	return fmt.Sprintf("dominio: carona %s, trecho %d (%s → %s) sem assento livre",
+		e.CaronaID, e.IndiceTrecho, e.Origem, e.Destino)
+}
+
+func (e *ErroSemAssento) Unwrap() error { return ErrSemAssento }
+
+// ErroConflitoHorario identifica a reserva ativa que ocupa o período pedido.
+type ErroConflitoHorario struct {
+	ReservaID string
+}
+
+func (e *ErroConflitoHorario) Error() string {
+	return fmt.Sprintf("dominio: reserva %s já ocupa o período", e.ReservaID)
+}
+
+func (e *ErroConflitoHorario) Unwrap() error { return ErrConflitoHorario }
+
+// ErroPrazoCancelamento identifica a partida da qual o prazo foi contado.
+type ErroPrazoCancelamento struct {
+	Partida time.Time
+}
+
+func (e *ErroPrazoCancelamento) Error() string {
+	return fmt.Sprintf("dominio: prazo de cancelamento da partida %s expirado", e.Partida)
+}
+
+func (e *ErroPrazoCancelamento) Unwrap() error { return ErrPrazoCancelamentoExpirado }

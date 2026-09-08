@@ -160,6 +160,37 @@ func tratarDetalharCarona(req protocolo.Requisicao, estado *dominio.Estado, s *s
 	})
 }
 
+// tratarCancelarCarona cancela a carona do motorista autenticado e propaga o
+// cancelamento às reservas que dependem dela (PROTOCOL.md, seção 5.7; RF05).
+//
+// A resposta traz reservas_canceladas porque o motorista precisa saber quantas
+// pessoas ele acabou de deixar sem viagem — o protocolo é estritamente
+// requisição/resposta e o servidor nunca notifica o passageiro por conta
+// própria (seção 1), então esse número é a única medida imediata do estrago.
+//
+// O prazo do motorista vai até o instante da partida, e não até uma hora antes:
+// é um prazo diferente do prazo do passageiro (D13), e o domínio é quem o
+// aplica. Aqui só se lê o relógio na borda e se passa adiante.
+func tratarCancelarCarona(req protocolo.Requisicao, estado *dominio.Estado, s *sessao) protocolo.Resposta {
+	var pedido protocolo.CancelarCaronaRequisicao
+	if err := json.Unmarshal(req.Dados, &pedido); err != nil {
+		return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "O campo carona_id precisa ser string.")
+	}
+	if pedido.CaronaID == "" {
+		return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "Informe carona_id.")
+	}
+
+	canceladas, err := estado.CancelarCarona(pedido.CaronaID, s.usuario.Usuario, time.Now())
+	if err != nil {
+		return respostaDeErroDeDominio(req.ID, err)
+	}
+
+	return respostaOK(req.ID, protocolo.CancelarCaronaResposta{
+		CaronaID:           pedido.CaronaID,
+		ReservasCanceladas: canceladas,
+	})
+}
+
 // buscarItinerariosPedido decodifica o "dados" de BUSCAR_ITINERARIOS com
 // campos ponteiro pelo mesmo motivo de publicarCaronaPedido: distinguir campo
 // ausente de string vazia, para que a mensagem de erro diga o que faltou.

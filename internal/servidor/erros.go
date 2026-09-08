@@ -1,6 +1,7 @@
 package servidor
 
 import (
+	"encoding/json"
 	"errors"
 
 	"vaijunto/internal/dominio"
@@ -31,8 +32,23 @@ var traducaoErros = map[error]erroTraduzido{
 	dominio.ErrPrecoInvalido:        {protocolo.CodigoCampoInvalido, "O preço de um trecho não pode ser negativo."},
 	dominio.ErrCredenciaisInvalidas: {protocolo.CodigoCredenciaisInvalidas, "Usuário ou senha incorretos."},
 	dominio.ErrCaronaNaoEncontrada:  {protocolo.CodigoCaronaNaoEncontrada, "Carona não encontrada."},
-	dominio.ErrNaoEDono:             {protocolo.CodigoNaoEDono, "Esta carona pertence a outro motorista."},
-	dominio.ErrGeracaoDeID:          {protocolo.CodigoErroInterno, "Falha interna ao gerar o identificador da carona."},
+	// A mensagem é neutra porque o mesmo sentinela cobre carona e reserva: o
+	// domínio trata "pertence a outro usuário" como uma única regra, e inventar
+	// um segundo sentinela só para variar o texto duplicaria o conceito.
+	dominio.ErrNaoEDono:        {protocolo.CodigoNaoEDono, "Este recurso pertence a outro usuário."},
+	dominio.ErrCaronaCancelada: {protocolo.CodigoCaronaCancelada, "Esta carona foi cancelada."},
+	// Os dois erros do passo 1 da seção 7 do PROJETO.md se separam por natureza:
+	// De, Ate e a lista vazia são valor fora de faixa (CAMPO_INVALIDO), enquanto
+	// carona repetida e falta de encadeamento são propriedades do itinerário
+	// como um todo (ITINERARIO_INVALIDO).
+	dominio.ErrItemInvalido:              {protocolo.CodigoCampoInvalido, "Trecho inválido: verifique carona_id, de e ate."},
+	dominio.ErrItinerarioInvalido:        {protocolo.CodigoItinerarioInvalido, "Os trechos escolhidos não formam um itinerário válido."},
+	dominio.ErrSemAssento:                {protocolo.CodigoSemAssento, "Não há mais assento livre em um dos trechos."},
+	dominio.ErrConflitoHorario:           {protocolo.CodigoConflitoHorario, "Você já tem uma reserva ativa nesse período."},
+	dominio.ErrReservaNaoEncontrada:      {protocolo.CodigoReservaNaoEncontrada, "Reserva não encontrada."},
+	dominio.ErrReservaJaCancelada:        {protocolo.CodigoReservaJaCancelada, "Esta reserva já foi cancelada."},
+	dominio.ErrPrazoCancelamentoExpirado: {protocolo.CodigoPrazoCancelamentoExpirado, "Fora do prazo de cancelamento."},
+	dominio.ErrGeracaoDeID:               {protocolo.CodigoErroInterno, "Falha interna ao gerar o identificador."},
 }
 
 // respostaDeErroDeDominio monta a resposta de erro correspondente ao erro
@@ -47,10 +63,80 @@ var traducaoErros = map[error]erroTraduzido{
 // O teste de cobertura de erros_test.go existe para que esse caminho nunca
 // seja exercido por um erro previsto.
 func respostaDeErroDeDominio(id string, err error) protocolo.Resposta {
+	if detalhada := comDetalhe(id, err); detalhada != nil {
+		return *detalhada
+	}
 	for sentinela, traducao := range traducaoErros {
 		if errors.Is(err, sentinela) {
 			return respostaErro(id, traducao.Codigo, traducao.Mensagem)
 		}
 	}
 	return respostaErro(id, protocolo.CodigoErroInterno, "Falha inesperada ao processar a operação.")
+}
+
+// comDetalhe monta a resposta dos três erros que o PROTOCOL.md manda
+// acompanhar de dados: SEM_ASSENTO diz qual trecho esgotou, CONFLITO_HORARIO
+// diz qual reserva ocupa o período (seção 5.9), e PRAZO_CANCELAMENTO_EXPIRADO
+// diz de que partida o prazo foi contado (seção 5.11). Devolve nil quando o
+// erro não é nenhum deles, e aí a tabela genérica resolve.
+//
+// O código continua vindo da tabela, por errors.Is dentro de respostaErroDe:
+// esta função só acrescenta o "dados" e refina a mensagem. Manter o código em
+// um lugar só é o que preserva a propriedade da seção 5.3 — existe **uma**
+// tradução de sentinela para código, e o teste de cobertura continua valendo.
+//
+// A extração é por errors.As, e não por type assertion, para atravessar
+// eventuais embrulhos com %w da mesma forma que errors.Is.
+func comDetalhe(id string, err error) *protocolo.Resposta {
+	var semAssento *dominio.ErroSemAssento
+	if errors.As(err, &semAssento) {
+		resp := respostaErroDe(id, dominio.ErrSemAssento,
+			"Assento esgotado no trecho "+semAssento.Origem+" → "+semAssento.Destino+".",
+			protocolo.SemAssentoDados{
+				CaronaID:     semAssento.CaronaID,
+				IndiceTrecho: semAssento.IndiceTrecho,
+			})
+		return &resp
+	}
+
+	var conflito *dominio.ErroConflitoHorario
+	if errors.As(err, &conflito) {
+		resp := respostaErroDe(id, dominio.ErrConflitoHorario,
+			"Você já tem a reserva "+conflito.ReservaID+" nesse período.",
+			protocolo.ConflitoHorarioDados{ReservaID: conflito.ReservaID})
+		return &resp
+	}
+
+	var prazo *dominio.ErroPrazoCancelamento
+	if errors.As(err, &prazo) {
+		resp := respostaErroDe(id, dominio.ErrPrazoCancelamentoExpirado,
+			"Fora do prazo de cancelamento.",
+			protocolo.PrazoCancelamentoExpiradoDados{Partida: prazo.Partida})
+		return &resp
+	}
+
+	return nil
+}
+
+// respostaErroDe monta uma resposta de erro cujo código vem da tabela, com
+// mensagem própria e dados de detalhe.
+//
+// Sentinela fora da tabela não pode acontecer aqui — os três chamadores usam
+// sentinelas que o teste de cobertura garante presentes —, mas a saída por
+// ERRO_INTERNO existe para que um esquecimento futuro apareça como código
+// genérico, e não como string vazia no campo "codigo".
+func respostaErroDe(id string, sentinela error, mensagem string, dados any) protocolo.Resposta {
+	traducao, ok := traducaoErros[sentinela]
+	if !ok {
+		return respostaErro(id, protocolo.CodigoErroInterno, "Falha inesperada ao processar a operação.")
+	}
+
+	corpo, err := json.Marshal(dados)
+	if err != nil {
+		return respostaErro(id, traducao.Codigo, mensagem)
+	}
+
+	resp := respostaErro(id, traducao.Codigo, mensagem)
+	resp.Dados = corpo
+	return resp
 }

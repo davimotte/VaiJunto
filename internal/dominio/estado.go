@@ -77,3 +77,46 @@ func (e *Estado) BuscarItinerarios(origem, destino string, data time.Time) ([]It
 	defer e.mu.Unlock()
 	return buscarItinerarios(e, origem, destino, data)
 }
+
+// CancelarCarona cancela a carona e propaga o cancelamento às reservas que a
+// usam (PROTOCOL.md, seção 5.7). Devolve quantas reservas caíram na cascata.
+//
+// A carona e todas as reservas atingidas mudam sob o mesmo Lock. É isso que
+// torna a cascata atômica do ponto de vista de qualquer outra conexão: uma
+// reserva concorrente ou entra inteira antes do cancelamento, e é cancelada
+// junto, ou encontra a carona já cancelada e é recusada. Não existe instante
+// observável no meio.
+func (e *Estado) CancelarCarona(caronaID, motoristaID string, agora time.Time) (int, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return cancelarCarona(e, caronaID, motoristaID, agora)
+}
+
+// Reservar confirma um itinerário de forma atômica (PROTOCOL.md, seção 5.9).
+//
+// Este é o método que carrega o peso de RNF05 e RNF06. Toda a validação e toda
+// a escrita do algoritmo da seção 7 acontecem entre este Lock e este Unlock —
+// não existe uma segunda seção crítica, nem estado intermediário de "assento em
+// espera" entre elas (D07). Cinquenta conexões disputando o mesmo assento se
+// enfileiram aqui, e só a primeira encontra Livres maior que zero.
+func (e *Estado) Reservar(passageiroID string, itens []ItemReserva, agora time.Time) (Reserva, Itinerario, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return reservar(e, passageiroID, itens, agora)
+}
+
+// ReservasDoPassageiro lista as reservas do passageiro com os itinerários já
+// resolvidos (PROTOCOL.md, seção 5.10).
+func (e *Estado) ReservasDoPassageiro(passageiroID string, incluirCanceladas bool) []ReservaDetalhada {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return reservasDoPassageiro(e, passageiroID, incluirCanceladas)
+}
+
+// CancelarReserva desfaz a reserva do passageiro e devolve os assentos
+// (PROTOCOL.md, seção 5.11).
+func (e *Estado) CancelarReserva(reservaID, passageiroID string, agora time.Time) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return cancelarReserva(e, reservaID, passageiroID, agora)
+}

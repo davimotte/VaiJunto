@@ -15,10 +15,6 @@ import (
 // switch, em um só lugar, por sessao.autorizar. Nenhum handler repete
 // checagem de autenticação ou de perfil: quando um deles roda, já se sabe que
 // a conexão podia executar aquela operação.
-//
-// CANCELAR_CARONA e as demais operações de passageiro ainda não estão na
-// tabela de perfis, então caem em TIPO_DESCONHECIDO; entram junto com seus
-// handlers.
 func rotear(req protocolo.Requisicao, estado *dominio.Estado, s *sessao) protocolo.Resposta {
 	if recusa := s.autorizar(req); recusa != nil {
 		return *recusa
@@ -37,8 +33,16 @@ func rotear(req protocolo.Requisicao, estado *dominio.Estado, s *sessao) protoco
 		return tratarListarMinhasCaronas(req, estado, s)
 	case protocolo.TipoDetalharCarona:
 		return tratarDetalharCarona(req, estado, s)
+	case protocolo.TipoCancelarCarona:
+		return tratarCancelarCarona(req, estado, s)
 	case protocolo.TipoBuscarItinerarios:
 		return tratarBuscarItinerarios(req, estado, s)
+	case protocolo.TipoReservar:
+		return tratarReservar(req, estado, s)
+	case protocolo.TipoListarMinhasReservas:
+		return tratarListarMinhasReservas(req, estado, s)
+	case protocolo.TipoCancelarReserva:
+		return tratarCancelarReserva(req, estado, s)
 	default:
 		// Inalcançável: autorizar já recusou todo tipo fora da tabela de
 		// perfis. Fica como rede de segurança para o caso de a tabela ganhar

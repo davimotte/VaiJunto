@@ -32,21 +32,28 @@ type sessao struct {
 //
 // A tabela reproduz uma a uma as linhas daquela seção, e listar aqui é a
 // única forma de uma operação ser aceita: o tipo ausente da tabela responde
-// TIPO_DESCONHECIDO. Por isso ela contém somente o que este servidor já
-// atende — as operações de reserva entram junto com seus handlers.
+// TIPO_DESCONHECIDO.
+//
+// As linhas "MOTORISTA, dono" e "PASSAGEIRO, dono" da seção 5 aparecem aqui
+// apenas como o perfil: a checagem de posse é do domínio, porque "esta carona é
+// do joão" é uma propriedade do estado, e não do protocolo.
 const (
 	exigeNada         = ""            // PING e LOGIN
 	exigeAutenticacao = "AUTENTICADO" // qualquer perfil, desde que logado
 )
 
 var perfilExigido = map[string]string{
-	protocolo.TipoPing:                exigeNada,
-	protocolo.TipoLogin:               exigeNada,
-	protocolo.TipoLogout:              exigeAutenticacao,
-	protocolo.TipoPublicarCarona:      protocolo.PerfilMotorista,
-	protocolo.TipoListarMinhasCaronas: protocolo.PerfilMotorista,
-	protocolo.TipoDetalharCarona:      protocolo.PerfilMotorista,
-	protocolo.TipoBuscarItinerarios:   protocolo.PerfilPassageiro,
+	protocolo.TipoPing:                 exigeNada,
+	protocolo.TipoLogin:                exigeNada,
+	protocolo.TipoLogout:               exigeAutenticacao,
+	protocolo.TipoPublicarCarona:       protocolo.PerfilMotorista,
+	protocolo.TipoListarMinhasCaronas:  protocolo.PerfilMotorista,
+	protocolo.TipoDetalharCarona:       protocolo.PerfilMotorista,
+	protocolo.TipoCancelarCarona:       protocolo.PerfilMotorista,
+	protocolo.TipoBuscarItinerarios:    protocolo.PerfilPassageiro,
+	protocolo.TipoReservar:             protocolo.PerfilPassageiro,
+	protocolo.TipoListarMinhasReservas: protocolo.PerfilPassageiro,
+	protocolo.TipoCancelarReserva:      protocolo.PerfilPassageiro,
 }
 
 // autorizar aplica as regras de acesso da seção 4 do PROTOCOL.md antes de

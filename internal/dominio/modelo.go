@@ -97,3 +97,22 @@ type Itinerario struct {
 	Chegada            time.Time
 	Pernas             []PernaItinerario
 }
+
+// ReservaDetalhada é uma Reserva com os dados das caronas já resolvidos, do
+// jeito que LISTAR_MINHAS_RESERVAS precisa entregá-los (PROTOCOL.md, seção
+// 5.10): cidades, horários, preços e o nome do motorista.
+//
+// A Reserva guardada no Estado só tem índices — {carona, De, Ate} —, e é assim
+// que deve continuar: o preço de um trecho e o horário de uma cidade pertencem
+// à carona, e copiá-los para dentro da reserva criaria duas cópias do mesmo
+// dado, que podem divergir. Esta struct é o resultado de resolver os índices, e
+// não é guardada em lugar nenhum.
+//
+// Reaproveita Itinerario porque uma reserva confirmada é literalmente o
+// itinerário que o passageiro escolheu na busca.
+type ReservaDetalhada struct {
+	ID         string
+	Ativa      bool
+	CriadaEm   time.Time
+	Itinerario Itinerario
+}
