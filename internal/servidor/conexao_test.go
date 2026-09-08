@@ -10,13 +10,19 @@ import (
 	"testing"
 	"time"
 
+	"vaijunto/internal/dominio"
 	"vaijunto/internal/protocolo"
 )
 
-// processar é um atalho para os testes: manda a linha por processarLinha e
-// devolve a Resposta montada, que é o que o cliente enxergaria na conexão.
+// processar é um atalho para os testes de envelope: manda a linha por
+// processarLinha sobre um estado vazio e uma conexão recém-aberta, e devolve
+// a Resposta montada, que é o que o cliente enxergaria.
+//
+// Sessão nova a cada chamada é proposital: estes testes tratam do envelope
+// (PROTOCOL.md, seções 1 e 2), que é validado antes de qualquer regra de
+// acesso, e o resultado não pode depender de quem está logado.
 func processar(linha string) protocolo.Resposta {
-	return processarLinha([]byte(linha))
+	return processarLinha([]byte(linha), dominio.NovoEstado(), &sessao{})
 }
 
 // TestProcessarLinha_PingValido garante que o caminho feliz continua intacto:
@@ -171,7 +177,7 @@ func (c *conexaoFalsa) SetWriteDeadline(time.Time) error { return nil }
 func TestAtenderConexao_EOFLimpo(t *testing.T) {
 	conn := &conexaoFalsa{entrada: strings.NewReader(`{"id":"1","tipo":"PING","dados":{}}` + "\n")}
 
-	if err := atenderConexao(conn); err != nil {
+	if err := atenderConexao(conn, dominio.NovoEstado()); err != nil {
 		t.Fatalf("EOF limpo não deveria produzir erro: %v", err)
 	}
 	if !conn.fechada {
@@ -190,7 +196,7 @@ func TestAtenderConexao_LinhaIncompletaNaoResponde(t *testing.T) {
 	// JSON sintaticamente completo, mas sem o '\n': não é uma mensagem.
 	conn := &conexaoFalsa{entrada: strings.NewReader(`{"id":"1","tipo":"PING","dados":{}}`)}
 
-	err := atenderConexao(conn)
+	err := atenderConexao(conn, dominio.NovoEstado())
 	if !errors.Is(err, protocolo.ErrLinhaIncompleta) {
 		t.Fatalf("err = %v, want protocolo.ErrLinhaIncompleta", err)
 	}
@@ -209,7 +215,7 @@ func TestAtenderConexao_RespondeAntesDeDescartarFragmento(t *testing.T) {
 	entrada := `{"id":"1","tipo":"PING","dados":{}}` + "\n" + `{"id":"2","tipo":"PIN`
 	conn := &conexaoFalsa{entrada: strings.NewReader(entrada)}
 
-	if err := atenderConexao(conn); !errors.Is(err, protocolo.ErrLinhaIncompleta) {
+	if err := atenderConexao(conn, dominio.NovoEstado()); !errors.Is(err, protocolo.ErrLinhaIncompleta) {
 		t.Fatalf("err = %v, want protocolo.ErrLinhaIncompleta", err)
 	}
 

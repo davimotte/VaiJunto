@@ -5,18 +5,28 @@ import (
 	"io"
 	"net"
 
+	"vaijunto/internal/dominio"
 	"vaijunto/internal/protocolo"
 )
 
-// atenderConexao implementa as camadas 2 (enquadramento) e 4 (roteamento)
-// sobre uma única conexão: lê uma linha por vez, decodifica o envelope e
-// escreve a resposta, até a conexão fechar. Fechamento abrupto (EOF, RST)
-// não é um erro de protocolo — encerra o loop silenciosamente, como manda a
-// seção 4 do PROTOCOL.md.
-func atenderConexao(conn net.Conn) error {
+// atenderConexao implementa as camadas 2 (enquadramento), 3 (sessão) e 4
+// (roteamento) sobre uma única conexão: lê uma linha por vez, decodifica o
+// envelope e escreve a resposta, até a conexão fechar. Fechamento abrupto
+// (EOF, RST) não é um erro de protocolo — encerra o loop silenciosamente,
+// como manda a seção 4 do PROTOCOL.md.
+//
+// A sessão é declarada aqui, como variável local desta goroutine: é o
+// mecanismo inteiro de identidade do sistema (D08). Ela nasce com a conexão,
+// vive só dentro desta pilha e desaparece quando a função retorna — inclusive
+// em queda abrupta, sem que nada precise ser removido de tabela alguma.
+//
+// O ponteiro do Estado é compartilhado por todas as conexões; é o mutex de
+// dentro dele que serializa o acesso (D04), não esta camada.
+func atenderConexao(conn net.Conn, estado *dominio.Estado) error {
 	defer conn.Close()
 
 	leitor := protocolo.NovoLeitorMensagens(conn)
+	sess := &sessao{}
 
 	for {
 		linha, err := leitor.LerLinha()
@@ -33,7 +43,7 @@ func atenderConexao(conn net.Conn) error {
 			return err
 		}
 
-		resp := processarLinha(linha)
+		resp := processarLinha(linha, estado, sess)
 
 		if err := protocolo.EscreverLinha(conn, resp); err != nil {
 			return err
@@ -49,7 +59,7 @@ func atenderConexao(conn net.Conn) error {
 // dois estágios extrai o id antes de validar tipo e dados, então o id vem
 // preenchido sempre que era legível, e vazio só quando não havia como lê-lo
 // (seção 2.2).
-func processarLinha(linha []byte) protocolo.Resposta {
+func processarLinha(linha []byte, estado *dominio.Estado, sess *sessao) protocolo.Resposta {
 	req, err := protocolo.DecodificarRequisicao(linha)
 	if err != nil {
 		if errors.Is(err, protocolo.ErrJSONInvalido) {
@@ -57,5 +67,5 @@ func processarLinha(linha []byte) protocolo.Resposta {
 		}
 		return respostaErro(req.ID, protocolo.CodigoEnvelopeInvalido, "Envelope inválido: id, tipo e dados são obrigatórios, e dados precisa ser um objeto.")
 	}
-	return rotear(req)
+	return rotear(req, estado, sess)
 }
