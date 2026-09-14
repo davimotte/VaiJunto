@@ -184,6 +184,27 @@ func reservar(e *Estado, passageiroID string, itens []ItemReserva, agora time.Ti
 		}
 	}
 
+	// Ainda no passo 2: nenhuma cidade se repete no itinerário (D09). É a mesma
+	// regra do passo 3 da busca, e pelo mesmo motivo das margens acima: sem ela
+	// aqui, o cliente confirmaria por chamada direta ao protocolo um itinerário
+	// de ida e volta que a busca nunca ofereceria.
+	//
+	// Contam todas as cidades de cada item, inclusive as intermediárias por onde
+	// o passageiro passa dentro do veículo. A de embarque de cada item fica de
+	// fora porque é a de desembarque do item anterior — já marcada, e onde o
+	// passageiro de fato está. O passo 1 já garantiu que [De, Ate] cabe na rota.
+	visitadas := map[string]bool{caronas[0].Rota[itens[0].De]: true}
+	for i, item := range itens {
+		percorridas := caronas[i].Rota[item.De+1 : item.Ate+1]
+		for _, cidade := range percorridas {
+			if visitadas[cidade] {
+				return Reserva{}, Itinerario{}, fmt.Errorf("%w: o itinerário passa duas vezes por %q (trecho %d)",
+					ErrItinerarioInvalido, cidade, i)
+			}
+		}
+		marcar(percorridas, visitadas, true)
+	}
+
 	// Passo 3 — disponibilidade, trecho a trecho (RF11, D10).
 	for i, item := range itens {
 		c := caronas[i]

@@ -137,6 +137,74 @@ func TestReservar_Recusas(t *testing.T) {
 	}
 }
 
+// TestReservar_RecusaItinerarioQueVoltaACidade leva à reserva o contraexemplo
+// da seção 6 do PROJETO.md: A (Salvador → Feira), B (Feira → Salvador) e C
+// (Salvador → Conquista) encadeiam no espaço e no tempo, e são três caronas
+// distintas — passam em todas as regras da reserva exceto a de cidade
+// repetida (seção 7, passo 2).
+//
+// A busca nunca oferece esse itinerário, mas o cliente pode mandá-lo direto
+// pelo protocolo. Uma reserva mais frouxa que a busca aceitaria o que a busca
+// recusa, pelo mesmo motivo que as margens de baldeação são constantes únicas
+// (D13).
+//
+// As caronas são montadas em código, e não lidas de dados/: o cenário da seção
+// 9.2 não tem nenhum par de caronas capaz de voltar a uma cidade.
+func TestReservar_RecusaItinerarioQueVoltaACidade(t *testing.T) {
+	e := estadoDeTeste()
+	a := publicarNoDia(t, e, []string{"Salvador", "Feira de Santana"}, as(6, 0), as(8, 0))
+	b := publicarNoDia(t, e, []string{"Feira de Santana", "Salvador"}, as(8, 30), as(10, 30))
+	c := publicarNoDia(t, e, []string{"Salvador", "Vitória da Conquista"}, as(11, 0), as(18, 30))
+
+	_, _, err := e.Reservar("maria", []ItemReserva{item(a, 0, 1), item(b, 0, 1), item(c, 0, 1)}, as(0, 0))
+	if !errors.Is(err, ErrItinerarioInvalido) {
+		t.Fatalf("erro = %v, want ErrItinerarioInvalido", err)
+	}
+
+	// Nenhuma escrita antes de toda a validação passar (seção 7, passo 5).
+	for _, id := range []string{a, b, c} {
+		if got := livresDe(t, e, "joao", id); got[0] != 2 {
+			t.Errorf("%s livres = %v, want [2]: a recusa escreveu antes de validar tudo", id, got)
+		}
+	}
+	if n := len(e.ReservasDoPassageiro("maria", true)); n != 0 {
+		t.Errorf("recusa criou %d reserva(s)", n)
+	}
+}
+
+// TestReservar_RecusaPernaQueAtravessaCidadeVisitada confere D-e na reserva:
+// contam as cidades por onde o passageiro passa dentro do veículo, e não só as
+// de embarque e desembarque.
+//
+// A leva de Salvador a Jequié; B vai de Jequié a Feira passando por Salvador; C
+// segue de Feira a Conquista. O item B de 0 a 2 embarca e desembarca em
+// cidades novas, mas atravessa Salvador.
+//
+// O controle positivo usa o mesmo estado: B de 1 a 2, embarcando já em
+// Salvador, seguido de C, não revisita nada e precisa ser aceito. É o que
+// mostra que a regra recusa o trecho que atravessa a cidade, e não a carona.
+func TestReservar_RecusaPernaQueAtravessaCidadeVisitada(t *testing.T) {
+	e := estadoDeTeste()
+	a := publicarNoDia(t, e, []string{"Salvador", "Jequié"}, as(6, 0), as(8, 0))
+	b := publicarNoDia(t, e, []string{"Jequié", "Salvador", "Feira de Santana"}, as(8, 30), as(9, 30), as(10, 30))
+	c := publicarNoDia(t, e, []string{"Feira de Santana", "Vitória da Conquista"}, as(11, 0), as(14, 0))
+
+	_, _, err := e.Reservar("maria", []ItemReserva{item(a, 0, 1), item(b, 0, 2), item(c, 0, 1)}, as(0, 0))
+	if !errors.Is(err, ErrItinerarioInvalido) {
+		t.Fatalf("erro = %v, want ErrItinerarioInvalido", err)
+	}
+	if got := livresDe(t, e, "joao", b); got[0] != 2 || got[1] != 2 {
+		t.Errorf("%s livres = %v, want [2 2]: a recusa escreveu antes de validar tudo", b, got)
+	}
+
+	if _, _, err := e.Reservar("maria", []ItemReserva{item(b, 1, 2), item(c, 0, 1)}, as(0, 0)); err != nil {
+		t.Fatalf("B de Salvador a Feira + C deveria ser aceito: %v", err)
+	}
+	if got := livresDe(t, e, "joao", b); got[0] != 2 || got[1] != 1 {
+		t.Errorf("%s livres = %v, want [2 1]: só o trecho Salvador → Feira foi reservado", b, got)
+	}
+}
+
 // TestReservar_SemAssentoNaoDecrementaAPernaDisponivel é o argumento de
 // atomicidade no nível do domínio, e o par determinístico do cenário T2.
 //
