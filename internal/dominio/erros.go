@@ -13,8 +13,9 @@ import (
 // do PROTOCOL.md. Quem traduz sentinela em código é a tabela única de
 // internal/servidor. Comparar com errors.Is, nunca por texto da mensagem.
 var (
-	// ErrCidadeDesconhecida — cidade fora do corredor fixo (D09).
-	ErrCidadeDesconhecida = errors.New("dominio: cidade fora do corredor")
+	// ErrCidadeDesconhecida — cidade fora do conjunto de cidades atendidas
+	// (D09).
+	ErrCidadeDesconhecida = errors.New("dominio: cidade não atendida")
 
 	// ErrRotaInvalida — as paradas não formam uma carona (D09): menos de duas,
 	// cidade repetida, horários que não crescem estritamente, ou quantidade de

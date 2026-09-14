@@ -15,104 +15,6 @@ func fusoBrasilia() *time.Location {
 	return time.FixedZone("-03:00", -3*60*60)
 }
 
-// TestDerivarRotaEHorarios_SalvadorVitoriaDaConquista confere o exemplo de
-// PROTOCOL.md (seção 5.4): publicar Salvador → Vitória da Conquista às 08:00
-// deve gerar os quatro horários 08:00, 10:00, 13:00 e 15:30, na ordem do
-// corredor (D09).
-func TestDerivarRotaEHorarios_SalvadorVitoriaDaConquista(t *testing.T) {
-	fuso := fusoBrasilia()
-	partida := time.Date(2026, 9, 15, 8, 0, 0, 0, fuso)
-
-	rota, horarios, err := DerivarRotaEHorarios("Salvador", "Vitória da Conquista", partida)
-	if err != nil {
-		t.Fatalf("DerivarRotaEHorarios: %v", err)
-	}
-
-	rotaEsperada := []string{"Salvador", "Feira de Santana", "Jequié", "Vitória da Conquista"}
-	if len(rota) != len(rotaEsperada) {
-		t.Fatalf("rota com tamanho errado: got %v, want %v", rota, rotaEsperada)
-	}
-	for i, cidade := range rotaEsperada {
-		if rota[i] != cidade {
-			t.Fatalf("rota[%d] = %q, want %q (rota completa: %v)", i, rota[i], cidade, rota)
-		}
-	}
-
-	horariosEsperados := []time.Time{
-		time.Date(2026, 9, 15, 8, 0, 0, 0, fuso),
-		time.Date(2026, 9, 15, 10, 0, 0, 0, fuso),
-		time.Date(2026, 9, 15, 13, 0, 0, 0, fuso),
-		time.Date(2026, 9, 15, 15, 30, 0, 0, fuso),
-	}
-	if len(horarios) != len(horariosEsperados) {
-		t.Fatalf("horarios com tamanho errado: got %v, want %v", horarios, horariosEsperados)
-	}
-	for i, h := range horariosEsperados {
-		if !horarios[i].Equal(h) {
-			t.Fatalf("horarios[%d] = %v, want %v", i, horarios[i], h)
-		}
-	}
-}
-
-// TestDerivarRotaEHorarios_SentidoInverso confere que o corredor deriva
-// horários corretos também no sentido oposto (D09: "nos dois sentidos, com
-// durações simétricas"), caso de car-5 em dados/caronas.json.
-func TestDerivarRotaEHorarios_SentidoInverso(t *testing.T) {
-	fuso := fusoBrasilia()
-	partida := time.Date(2026, 9, 15, 8, 0, 0, 0, fuso)
-
-	rota, horarios, err := DerivarRotaEHorarios("Vitória da Conquista", "Salvador", partida)
-	if err != nil {
-		t.Fatalf("DerivarRotaEHorarios: %v", err)
-	}
-
-	rotaEsperada := []string{"Vitória da Conquista", "Jequié", "Feira de Santana", "Salvador"}
-	for i, cidade := range rotaEsperada {
-		if rota[i] != cidade {
-			t.Fatalf("rota[%d] = %q, want %q (rota completa: %v)", i, rota[i], cidade, rota)
-		}
-	}
-
-	chegadaSalvador := time.Date(2026, 9, 15, 15, 30, 0, 0, fuso)
-	if !horarios[3].Equal(chegadaSalvador) {
-		t.Fatalf("chegada em Salvador = %v, want %v", horarios[3], chegadaSalvador)
-	}
-}
-
-// TestDerivarRotaEHorarios_CidadeDesconhecida confere que cidade fora do
-// corredor devolve o sentinela ErrCidadeDesconhecida. A comparação é por
-// errors.Is porque o domínio embrulha o sentinela com %w para dizer qual
-// cidade falhou (PROJETO.md, seção 5.3).
-func TestDerivarRotaEHorarios_CidadeDesconhecida(t *testing.T) {
-	_, _, err := DerivarRotaEHorarios("Ilhéus", "Salvador", time.Now())
-	if !errors.Is(err, ErrCidadeDesconhecida) {
-		t.Fatalf("err = %v, want ErrCidadeDesconhecida", err)
-	}
-}
-
-// TestDerivarRotaEHorarios_OrigemIgualDestino confere ErrRotaInvalida quando
-// origem e destino coincidem.
-func TestDerivarRotaEHorarios_OrigemIgualDestino(t *testing.T) {
-	_, _, err := DerivarRotaEHorarios("Jequié", "Jequié", time.Now())
-	if !errors.Is(err, ErrRotaInvalida) {
-		t.Fatalf("err = %v, want ErrRotaInvalida", err)
-	}
-}
-
-// TestDerivarRotaEHorarios_GrafiaDivergente confere que a comparação é por
-// igualdade exata (PROTOCOL.md seção 3): grafia em minúsculas, sem acento ou
-// com espaço extra não é aceita como a cidade canônica — os clientes
-// oficiais escolhem a cidade em um menu, nunca digitam o nome.
-func TestDerivarRotaEHorarios_GrafiaDivergente(t *testing.T) {
-	casos := []string{"jequié", "Jequie", " Jequié", "Jequié "}
-	for _, origem := range casos {
-		_, _, err := DerivarRotaEHorarios(origem, "Salvador", time.Now())
-		if !errors.Is(err, ErrCidadeDesconhecida) {
-			t.Fatalf("origem %q: err = %v, want ErrCidadeDesconhecida", origem, err)
-		}
-	}
-}
-
 // TestCarregarCaronas_Car1ChegaEmJequieAs1100 usa o cenário de demonstração
 // (PROJETO.md, seção 9.2): car-1 parte de Salvador às 06:00 rumo a Jequié e
 // deve chegar às 11:00.
@@ -246,8 +148,8 @@ func TestCarregarCaronas_NaoExigePartidaNoFuturo(t *testing.T) {
 // TestCarregarCaronas_RecusaCaronaInvalida percorre as validações de uma
 // carona (D09, I6) na porta de entrada do boot.
 //
-// Elas importam aqui tanto quanto na publicação: sem o corredor, nada mais
-// garante por construção que os horários cresçam, e a busca, a reserva e a
+// Elas importam aqui tanto quanto na publicação: os horários vêm escritos no
+// arquivo, nada garante por construção que eles cresçam, e a busca, a reserva e a
 // invariante I3 dependem disso. Um arquivo de carga com horário fora de ordem
 // não pode virar estado.
 //
@@ -864,7 +766,7 @@ func buscarNoDia(t *testing.T, e *Estado, origem, destino string) ([]Itinerario,
 // descarta carona pela ordem das suas paradas.
 //
 // A carona vai de Feira de Santana a Salvador e depois a Vitória da Conquista.
-// Sem corredor não existe "sentido" de viagem (D09), e a perna Salvador →
+// As cidades não têm ordem nem sentido de viagem (D09), e a perna Salvador →
 // Vitória da Conquista serve à busca como qualquer outra. Uma poda que ainda
 // classificasse a carona pelas duas primeiras paradas a descartaria inteira —
 // falso negativo, e não excesso de cautela.
@@ -955,7 +857,7 @@ func TestBuscarItinerarios_TetoDePernas(t *testing.T) {
 
 	itinerarios, obtidas := buscarNoDia(t, e, "Salvador", "Vitória da Conquista")
 
-	teto := len(CidadesCorredor()) - 1
+	teto := len(CidadesAtendidas()) - 1
 	for _, it := range itinerarios {
 		if len(it.Pernas) > teto {
 			t.Errorf("itinerário %s tem %d pernas, acima do teto de %d", assinatura(it), len(it.Pernas), teto)

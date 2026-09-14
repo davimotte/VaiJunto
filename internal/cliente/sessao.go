@@ -9,13 +9,14 @@ import (
 	"vaijunto/internal/protocolo"
 )
 
-// Peças que os dois menus compartilham: o fuso do corredor, a escolha de
-// cidade, o laço de login e a política de tratamento de erro.
+// Peças que os dois menus compartilham: o fuso das cidades, a escolha de
+// cidade, a coleta de paradas, o laço de login e a política de tratamento de
+// erro.
 
-// nomeFusoDoCorredor é o fuso das cidades do corredor (D09), todas na Bahia.
-const nomeFusoDoCorredor = "America/Bahia"
+// nomeFusoDasCidades é o fuso das cidades atendidas (D09), todas na Bahia.
+const nomeFusoDasCidades = "America/Bahia"
 
-// FusoDoCorredor devolve o fuso em que os horários digitados pelo motorista
+// FusoDasCidades devolve o fuso em que os horários digitados pelo motorista
 // são interpretados.
 //
 // Precisa ser explícito, e não time.Local: dentro do contêiner Alpine o fuso
@@ -26,14 +27,15 @@ const nomeFusoDoCorredor = "America/Bahia"
 // a rede de segurança para o caso de esse import sumir: perde o horário de
 // verão hipotético, mas mantém o cliente utilizável em vez de recusar toda
 // publicação.
-func FusoDoCorredor() *time.Location {
-	if fuso, err := time.LoadLocation(nomeFusoDoCorredor); err == nil {
+func FusoDasCidades() *time.Location {
+	if fuso, err := time.LoadLocation(nomeFusoDasCidades); err == nil {
 		return fuso
 	}
 	return time.FixedZone("-03", -3*60*60)
 }
 
-// EscolherCidade mostra o corredor enumerado e devolve a grafia canônica.
+// EscolherCidade mostra as cidades atendidas enumeradas e devolve a grafia
+// canônica.
 //
 // O usuário escolhe por número e nunca digita o nome, que é a premissa da
 // seção 3 do PROTOCOL.md: o servidor compara cidades por igualdade exata de
@@ -41,7 +43,7 @@ func FusoDoCorredor() *time.Location {
 // canônica. É o mesmo princípio que faz o passageiro escolher itinerário por
 // número em vez de digitar carona_id.
 func EscolherCidade(term *Terminal, titulo string) (string, error) {
-	cidades := dominio.CidadesCorredor()
+	cidades := dominio.CidadesAtendidas()
 	escolhida, err := term.LerOpcao(titulo, cidades)
 	if err != nil {
 		return "", err
@@ -141,7 +143,7 @@ func TratarErro(term *Terminal, err error) error {
 //
 // O fuso vem de quem chama, pelo mesmo motivo de LerInstante.
 func ColetarParadas(term *Terminal, fuso *time.Location) ([]protocolo.Parada, error) {
-	cidades := dominio.CidadesCorredor()
+	cidades := dominio.CidadesAtendidas()
 	comEncerrar := append(append([]string(nil), cidades...), "Encerrar a rota aqui")
 	encerrar := len(cidades)
 

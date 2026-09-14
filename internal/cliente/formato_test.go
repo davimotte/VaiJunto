@@ -21,9 +21,9 @@ func colunaDe(linha, agulha string) int {
 	return utf8.RuneCountInString(linha[:byteInicial])
 }
 
-// fusoDoCorredorFixo é o deslocamento das cidades do corredor, usado nos
+// fusoDasCidadesFixo é o deslocamento das cidades atendidas, usado nos
 // testes para montar instantes sem depender do tzdata da máquina.
-var fusoDoCorredorFixo = time.FixedZone("-03", -3*60*60)
+var fusoDasCidadesFixo = time.FixedZone("-03", -3*60*60)
 
 func TestFormatarCentavos(t *testing.T) {
 	casos := []struct {
@@ -64,7 +64,7 @@ func TestFormatarCentavos_SomaSemArredondamento(t *testing.T) {
 }
 
 func TestFormatarInstante(t *testing.T) {
-	instante := time.Date(2026, 9, 15, 6, 0, 0, 0, fusoDoCorredorFixo)
+	instante := time.Date(2026, 9, 15, 6, 0, 0, 0, fusoDasCidadesFixo)
 	if got := FormatarInstante(instante); got != "15/09/2026 06:00" {
 		t.Errorf("FormatarInstante = %q", got)
 	}
@@ -78,11 +78,11 @@ func TestFormatarInstante(t *testing.T) {
 // passageiro diferir do que o motorista publicou, e num contêiner Alpine
 // (fuso local UTC) a diferença seria de três horas.
 func TestFormatarInstante_NaoConverteOFuso(t *testing.T) {
-	instante := time.Date(2026, 9, 15, 6, 0, 0, 0, fusoDoCorredorFixo)
+	instante := time.Date(2026, 9, 15, 6, 0, 0, 0, fusoDasCidadesFixo)
 
 	// O mesmo instante visto de outro fuso: a formatação precisa continuar
 	// mostrando a hora do fuso que veio junto do valor.
-	if got := FormatarInstante(instante.In(time.UTC).In(fusoDoCorredorFixo)); got != "15/09/2026 06:00" {
+	if got := FormatarInstante(instante.In(time.UTC).In(fusoDasCidadesFixo)); got != "15/09/2026 06:00" {
 		t.Errorf("FormatarInstante = %q, want %q", got, "15/09/2026 06:00")
 	}
 }
@@ -92,7 +92,7 @@ func TestFormatarInstante_NaoConverteOFuso(t *testing.T) {
 // busca vale só para a primeira perna. Exibir só "06:00" numa perna do dia
 // seguinte faria o itinerário parecer voltar no tempo.
 func TestFormatarHoraRelativa(t *testing.T) {
-	referencia := time.Date(2026, 9, 15, 22, 0, 0, 0, fusoDoCorredorFixo)
+	referencia := time.Date(2026, 9, 15, 22, 0, 0, 0, fusoDasCidadesFixo)
 
 	casos := []struct {
 		nome     string
@@ -101,17 +101,17 @@ func TestFormatarHoraRelativa(t *testing.T) {
 	}{
 		{
 			nome:     "mesmo dia sai só com a hora",
-			instante: time.Date(2026, 9, 15, 23, 30, 0, 0, fusoDoCorredorFixo),
+			instante: time.Date(2026, 9, 15, 23, 30, 0, 0, fusoDasCidadesFixo),
 			esperado: "23:30",
 		},
 		{
 			nome:     "dia seguinte sai com a data",
-			instante: time.Date(2026, 9, 16, 1, 0, 0, 0, fusoDoCorredorFixo),
+			instante: time.Date(2026, 9, 16, 1, 0, 0, 0, fusoDasCidadesFixo),
 			esperado: "16/09 01:00",
 		},
 		{
 			nome:     "meia-noite em ponto já é o dia seguinte",
-			instante: time.Date(2026, 9, 16, 0, 0, 0, 0, fusoDoCorredorFixo),
+			instante: time.Date(2026, 9, 16, 0, 0, 0, 0, fusoDasCidadesFixo),
 			esperado: "16/09 00:00",
 		},
 	}
@@ -126,16 +126,16 @@ func TestFormatarHoraRelativa(t *testing.T) {
 }
 
 func TestFormatarIntervalo_BaldeacaoNoturna(t *testing.T) {
-	referencia := time.Date(2026, 9, 15, 22, 0, 0, 0, fusoDoCorredorFixo)
-	partida := time.Date(2026, 9, 15, 23, 0, 0, 0, fusoDoCorredorFixo)
-	chegada := time.Date(2026, 9, 16, 1, 30, 0, 0, fusoDoCorredorFixo)
+	referencia := time.Date(2026, 9, 15, 22, 0, 0, 0, fusoDasCidadesFixo)
+	partida := time.Date(2026, 9, 15, 23, 0, 0, 0, fusoDasCidadesFixo)
+	chegada := time.Date(2026, 9, 16, 1, 30, 0, 0, fusoDasCidadesFixo)
 
 	if got := FormatarIntervalo(partida, chegada, referencia); got != "23:00 → 16/09 01:30" {
 		t.Errorf("FormatarIntervalo = %q", got)
 	}
 }
 
-// TestPreencher_ContaRunasENaoBytes: as cidades do corredor têm acento, e
+// TestPreencher_ContaRunasENaoBytes: as cidades atendidas têm acento, e
 // alinhar por bytes torceria toda coluna à direita de "Jequié".
 func TestPreencher_ContaRunasENaoBytes(t *testing.T) {
 	comAcento := Preencher("Jequié", 10)
@@ -172,7 +172,8 @@ func TestPlural(t *testing.T) {
 
 // TestTabela_AlinhaPelaLarguraDoConteudo: a largura de cada coluna sai do
 // conteúdo, e não de uma constante escolhida na mão. Constante precisaria
-// caber o pior caso do corredor e deixaria um vão em toda listagem comum.
+// caber o pior caso de todas as cidades e deixaria um vão em toda listagem
+// comum.
 func TestTabela_AlinhaPelaLarguraDoConteudo(t *testing.T) {
 	var tabela Tabela
 	tabela.Linha("Salvador → Jequié", "06:00 → 11:00", "R$ 75,00")

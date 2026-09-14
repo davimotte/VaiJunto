@@ -167,8 +167,8 @@ func TestLerInstante_HoraInvalidaNaoReperguntaAData(t *testing.T) {
 	}
 }
 
-// TestLerInstante_UsaOFusoInformado: o instante montado carrega o fuso do
-// corredor, e não o da máquina. Dentro do contêiner Alpine o fuso local é UTC,
+// TestLerInstante_UsaOFusoInformado: o instante montado carrega o fuso
+// informado, e não o da máquina. Dentro do contêiner Alpine o fuso local é UTC,
 // e uma partida digitada como 08:00 sairia três horas adiantada.
 func TestLerInstante_UsaOFusoInformado(t *testing.T) {
 	term, _ := terminalDeTeste("2026-09-15\n08:00\n")

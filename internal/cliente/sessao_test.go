@@ -11,7 +11,7 @@ import (
 )
 
 // Menu de cidades usado nos testes de ColetarParadas, na ordem de
-// dominio.CidadesCorredor: 1) Salvador, 2) Feira de Santana, 3) Jequié,
+// dominio.CidadesAtendidas: 1) Salvador, 2) Feira de Santana, 3) Jequié,
 // 4) Vitória da Conquista e, a partir da terceira parada, 5) encerrar a rota.
 
 // paradasEsperadas compara cidade e horário, parada a parada. Horário por
@@ -30,7 +30,7 @@ func paradasEsperadas(t *testing.T, obtidas []protocolo.Parada, cidades []string
 
 // em devolve um instante de 20/09/2026 no fuso fixo dos testes.
 func em(hora, minuto int) time.Time {
-	return time.Date(2026, 9, 20, hora, minuto, 0, 0, fusoDoCorredorFixo)
+	return time.Date(2026, 9, 20, hora, minuto, 0, 0, fusoDasCidadesFixo)
 }
 
 // TestColetarParadas_MontaRotaNaOrdemInformada confere o caminho feliz de D09
@@ -44,7 +44,7 @@ func TestColetarParadas_MontaRotaNaOrdemInformada(t *testing.T) {
 			"4\n2026-09-20\n20:10\n" + // Vitória da Conquista
 			"5\n") // encerrar
 
-	paradas, err := ColetarParadas(term, fusoDoCorredorFixo)
+	paradas, err := ColetarParadas(term, fusoDasCidadesFixo)
 	if err != nil {
 		t.Fatalf("ColetarParadas: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestColetarParadas_CidadeRepetidaRepetePergunta(t *testing.T) {
 			"2\n2026-09-20\n10:00\n" + // Feira de Santana
 			"5\n")
 
-	paradas, err := ColetarParadas(term, fusoDoCorredorFixo)
+	paradas, err := ColetarParadas(term, fusoDasCidadesFixo)
 	if err != nil {
 		t.Fatalf("ColetarParadas: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestColetarParadas_HorarioNaoPosteriorRepetePergunta(t *testing.T) {
 			"2026-09-20\n09:00\n" + // aceito
 			"5\n")
 
-	paradas, err := ColetarParadas(term, fusoDoCorredorFixo)
+	paradas, err := ColetarParadas(term, fusoDasCidadesFixo)
 	if err != nil {
 		t.Fatalf("ColetarParadas: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestColetarParadas_EncerrarSoAPartirDeDuasParadas(t *testing.T) {
 			"2\n2026-09-20\n10:00\n" + // Feira de Santana
 			"5\n") // agora sim, encerrar
 
-	paradas, err := ColetarParadas(term, fusoDoCorredorFixo)
+	paradas, err := ColetarParadas(term, fusoDasCidadesFixo)
 	if err != nil {
 		t.Fatalf("ColetarParadas: %v", err)
 	}
@@ -133,11 +133,11 @@ func TestColetarParadas_TodasAsCidadesEncerraSozinho(t *testing.T) {
 			"3\n2026-09-20\n11:00\n" +
 			"4\n2026-09-20\n13:30\n")
 
-	paradas, err := ColetarParadas(term, fusoDoCorredorFixo)
+	paradas, err := ColetarParadas(term, fusoDasCidadesFixo)
 	if err != nil {
 		t.Fatalf("ColetarParadas: %v", err)
 	}
-	if len(paradas) != len(dominio.CidadesCorredor()) {
+	if len(paradas) != len(dominio.CidadesAtendidas()) {
 		t.Fatalf("paradas = %+v, want uma por cidade", paradas)
 	}
 }
@@ -148,19 +148,19 @@ func TestColetarParadas_TodasAsCidadesEncerraSozinho(t *testing.T) {
 func TestColetarParadas_FimDaEntrada(t *testing.T) {
 	term, _ := terminalDeTeste("1\n2026-09-20\n08:00\n")
 
-	if _, err := ColetarParadas(term, fusoDoCorredorFixo); !errors.Is(err, ErrEntradaEncerrada) {
+	if _, err := ColetarParadas(term, fusoDasCidadesFixo); !errors.Is(err, ErrEntradaEncerrada) {
 		t.Fatalf("err = %v, want ErrEntradaEncerrada", err)
 	}
 }
 
-// TestFusoDoCorredor confere que os instantes montados pelo cliente saem no
-// deslocamento do corredor.
+// TestFusoDasCidades confere que os instantes montados pelo cliente saem no
+// deslocamento das cidades atendidas, todas na Bahia.
 //
 // Vale com ou sem tzdata na máquina: se LoadLocation falhar, o deslocamento
 // fixo responde o mesmo -03:00. O que não pode acontecer é o cliente cair em
 // UTC, que é o fuso local dentro do contêiner Alpine.
-func TestFusoDoCorredor(t *testing.T) {
-	fuso := FusoDoCorredor()
+func TestFusoDasCidades(t *testing.T) {
+	fuso := FusoDasCidades()
 
 	instante := time.Date(2026, 9, 15, 8, 0, 0, 0, fuso)
 	if _, deslocamento := instante.Zone(); deslocamento != -3*60*60 {
@@ -179,9 +179,10 @@ func TestFusoDoCorredor(t *testing.T) {
 	}
 }
 
-// TestEscolherCidade confere que a cidade sai com a grafia canônica do
-// corredor. A seção 3 do PROTOCOL.md compara cidade por igualdade exata e não
-// normaliza grafia: é o menu enumerado que garante a string correta.
+// TestEscolherCidade confere que a cidade sai com a grafia canônica das
+// cidades atendidas. A seção 3 do PROTOCOL.md compara cidade por igualdade
+// exata e não normaliza grafia: é o menu enumerado que garante a string
+// correta.
 func TestEscolherCidade(t *testing.T) {
 	term, saida := terminalDeTeste("4\n")
 
@@ -192,13 +193,13 @@ func TestEscolherCidade(t *testing.T) {
 	if cidade != "Vitória da Conquista" {
 		t.Errorf("cidade = %q, want %q", cidade, "Vitória da Conquista")
 	}
-	if _, ok := dominio.IndiceCidade(cidade); !ok {
-		t.Errorf("cidade %q não é reconhecida pelo corredor", cidade)
+	if !dominio.CidadeConhecida(cidade) {
+		t.Errorf("cidade %q não é reconhecida pelo domínio", cidade)
 	}
 
-	// Todas as cidades do corredor precisam estar no menu, ou uma delas ficaria
+	// Todas as cidades atendidas precisam estar no menu, ou uma delas ficaria
 	// inalcançável pelo cliente.
-	for _, esperada := range dominio.CidadesCorredor() {
+	for _, esperada := range dominio.CidadesAtendidas() {
 		if !strings.Contains(saida.String(), esperada) {
 			t.Errorf("cidade %q ausente do menu:\n%s", esperada, saida.String())
 		}

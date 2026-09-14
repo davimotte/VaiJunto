@@ -35,11 +35,12 @@ const (
 
 // FormatarInstante escreve um instante completo, com data e hora.
 //
-// Não há conversão de fuso: o servidor envia RFC 3339 com o deslocamento do
-// corredor, encoding/json preserva esse deslocamento ao desserializar, e
-// exibir o instante como ele veio é o que faz o horário na tela do passageiro
-// ser o mesmo horário que o motorista publicou — independentemente do fuso da
-// máquina onde o cliente roda, que numa imagem Alpine costuma ser UTC.
+// Não há conversão de fuso: o servidor envia RFC 3339 com o deslocamento que
+// o motorista publicou, encoding/json preserva esse deslocamento ao
+// desserializar, e exibir o instante como ele veio é o que faz o horário na
+// tela do passageiro ser o mesmo horário que o motorista publicou —
+// independentemente do fuso da máquina onde o cliente roda, que numa imagem
+// Alpine costuma ser UTC.
 func FormatarInstante(t time.Time) string { return t.Format(formatoInstante) }
 
 // FormatarDiaHora escreve dia, mês e hora, sem o ano. Serve às listagens em
@@ -62,7 +63,7 @@ func FormatarHoraRelativa(t, referencia time.Time) string {
 
 // mesmoDia compara as datas civis de dois instantes. A comparação é feita no
 // fuso de a para os dois lados: instantes vindos do servidor carregam o mesmo
-// deslocamento, e é a data no fuso do corredor que interessa ao passageiro.
+// deslocamento, e é a data no fuso das cidades que interessa ao passageiro.
 func mesmoDia(a, b time.Time) bool {
 	b = b.In(a.Location())
 	anoA, mesA, diaA := a.Date()

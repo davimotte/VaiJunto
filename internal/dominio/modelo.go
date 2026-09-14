@@ -1,5 +1,5 @@
 // Package dominio implementa o estado e as regras de negócio do VAIJUNTO:
-// corredor de cidades, caronas, reservas e o mutex único que protege tudo
+// cidades atendidas, caronas, reservas e o mutex único que protege tudo
 // (PROJETO.md, seções 3 e 4). Não importa internal/protocolo nem
 // internal/servidor — o domínio não conhece a rede.
 package dominio
@@ -18,7 +18,8 @@ type Usuario struct {
 	Perfil  string // "MOTORISTA" ou "PASSAGEIRO"
 }
 
-// Carona é uma oferta de um motorista sobre um trecho do corredor (D09).
+// Carona é uma oferta de um motorista, com as paradas e os horários que ele
+// informou (D09).
 //
 // Rota e Horarios têm o mesmo comprimento; PrecoTrecho e Livres têm
 // len(Rota)-1, um valor por trecho entre cidades consecutivas da rota.
@@ -28,7 +29,7 @@ type Carona struct {
 	ID          string
 	MotoristaID string
 	Rota        []string    // ex.: ["Salvador", "Feira de Santana", "Jequié"]
-	Horarios    []time.Time // len == len(Rota); derivados do corredor (D09)
+	Horarios    []time.Time // len == len(Rota); informados pelo motorista, estritamente crescentes (D09, I6)
 	Assentos    int         // capacidade total do veículo
 	PrecoTrecho []int       // centavos; len == len(Rota)-1
 	Livres      []int       // len == len(Rota)-1; inicia com Assentos

@@ -80,12 +80,10 @@ func gerarIDCarona(e *Estado) (string, error) {
 // validarCarona confere as regras que toda carona precisa cumprir para entrar
 // no estado, venha ela de PUBLICAR_CARONA ou de dados/caronas.json (D09, I6).
 //
-// Essas regras substituem uma garantia que antes vinha de graça. Com o
-// corredor fixo, os horários eram somas de durações positivas e cresciam por
-// construção; agora vêm de quem informa as paradas. A busca (janela de
-// baldeação), a reserva (encadeamento e sobreposição) e a invariante I3 contam
-// com eles crescendo, e por isso a validação existe nas duas portas de entrada
-// do estado, e não só na do protocolo.
+// Os horários vêm de quem informa as paradas, e nada garante por construção
+// que eles cresçam. A busca (janela de baldeação), a reserva (encadeamento e
+// sobreposição) e a invariante I3 contam com isso, e por isso a validação
+// existe nas duas portas de entrada do estado, e não só na do protocolo.
 //
 // Fica de fora, de propósito, a regra da partida no futuro: ela é da
 // publicação. A carga de boot lê dados com data fixa, e aplicá-la impediria o
@@ -100,7 +98,7 @@ func validarCarona(rota []string, horarios []time.Time, assentos int, precos []i
 
 	vistas := make(map[string]bool, len(rota))
 	for i, cidade := range rota {
-		if _, ok := IndiceCidade(cidade); !ok {
+		if !CidadeConhecida(cidade) {
 			return fmt.Errorf("%w: parada %d %q", ErrCidadeDesconhecida, i, cidade)
 		}
 		// Uma rota que volta a uma cidade faria a mesma cidade aparecer em
@@ -321,8 +319,8 @@ type pernaCandidata struct {
 //
 // A única poda é a de trecho sem assento, a única que lê estado mutável — e
 // ela é só uma poda: a busca não reserva nem promete nada, e a reserva refaz
-// a verificação inteira sob o lock (D07). Não há poda geométrica: sem
-// corredor não existe sentido de viagem (D09), e uma poda pelo sentido das
+// a verificação inteira sob o lock (D07). Não há poda geométrica: as cidades
+// não têm ordem nem sentido de viagem (D09), e uma poda pelo sentido das
 // primeiras paradas descartaria caronas que servem à busca.
 //
 // Uma carona com k paradas gera no máximo k(k−1)/2 pernas.
@@ -413,10 +411,10 @@ func mesmaData(instante, data time.Time) bool {
 // reserva revalida tudo.
 func buscarItinerarios(e *Estado, origem, destino string, data time.Time) ([]Itinerario, error) {
 	// Passo 1 — validar.
-	if _, ok := IndiceCidade(origem); !ok {
+	if !CidadeConhecida(origem) {
 		return nil, fmt.Errorf("%w: origem %q", ErrCidadeDesconhecida, origem)
 	}
-	if _, ok := IndiceCidade(destino); !ok {
+	if !CidadeConhecida(destino) {
 		return nil, fmt.Errorf("%w: destino %q", ErrCidadeDesconhecida, destino)
 	}
 	if origem == destino {

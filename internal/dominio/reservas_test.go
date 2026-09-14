@@ -12,7 +12,7 @@ import (
 // Rodam sobre o cenário versionado de dados/caronas.json, pelo mesmo motivo do
 // teste de busca: um cenário reconstruído em código passaria a valer sobre
 // dados que ninguém executa. Os horários citados nos comentários são os da
-// seção 9.2 e saem todos do corredor (D09).
+// seção 9.2, escritos em dados/caronas.json.
 //
 // A diferença destes testes para os cenários T1, T2, T5 e T8 de testes/ é o
 // relógio. Aqui `agora` é um parâmetro, o que permite fixar o instante em que a
