@@ -77,6 +77,66 @@ func gerarIDCarona(e *Estado) (string, error) {
 	return "", fmt.Errorf("%w: espaço de identificadores esgotado", ErrGeracaoDeID)
 }
 
+// validarCarona confere as regras que toda carona precisa cumprir para entrar
+// no estado, venha ela de PUBLICAR_CARONA ou de dados/caronas.json (D09, I6).
+//
+// Essas regras substituem uma garantia que antes vinha de graça. Com o
+// corredor fixo, os horários eram somas de durações positivas e cresciam por
+// construção; agora vêm de quem informa as paradas. A busca (janela de
+// baldeação), a reserva (encadeamento e sobreposição) e a invariante I3 contam
+// com eles crescendo, e por isso a validação existe nas duas portas de entrada
+// do estado, e não só na do protocolo.
+//
+// Fica de fora, de propósito, a regra da partida no futuro: ela é da
+// publicação. A carga de boot lê dados com data fixa, e aplicá-la impediria o
+// servidor de subir depois dessa data.
+func validarCarona(rota []string, horarios []time.Time, assentos int, precos []int) error {
+	if len(rota) < 2 {
+		return fmt.Errorf("%w: %d parada(s), e uma carona precisa de ao menos duas", ErrRotaInvalida, len(rota))
+	}
+	if len(horarios) != len(rota) {
+		return fmt.Errorf("%w: %d horários para %d paradas", ErrRotaInvalida, len(horarios), len(rota))
+	}
+
+	vistas := make(map[string]bool, len(rota))
+	for i, cidade := range rota {
+		if _, ok := IndiceCidade(cidade); !ok {
+			return fmt.Errorf("%w: parada %d %q", ErrCidadeDesconhecida, i, cidade)
+		}
+		// Uma rota que volta a uma cidade faria a mesma cidade aparecer em
+		// duas posições, e "embarcar em Salvador" deixaria de designar um
+		// ponto só da carona.
+		if vistas[cidade] {
+			return fmt.Errorf("%w: %q aparece mais de uma vez na rota", ErrRotaInvalida, cidade)
+		}
+		vistas[cidade] = true
+	}
+
+	// Estritamente crescentes: há um horário por parada, sem espera no local
+	// (D09), então dois horários iguais seriam um trecho de duração zero — o
+	// carro em duas cidades no mesmo instante.
+	for i := 1; i < len(horarios); i++ {
+		if !horarios[i].After(horarios[i-1]) {
+			return fmt.Errorf("%w: horário de %q (%s) não é posterior ao de %q (%s)",
+				ErrRotaInvalida, rota[i], horarios[i], rota[i-1], horarios[i-1])
+		}
+	}
+
+	trechos := len(rota) - 1
+	if len(precos) != trechos {
+		return fmt.Errorf("%w: %d preços para %d trechos", ErrRotaInvalida, len(precos), trechos)
+	}
+	for i, preco := range precos {
+		if preco < 0 {
+			return fmt.Errorf("%w: trecho %d com preço %d", ErrPrecoInvalido, i, preco)
+		}
+	}
+	if assentos < 1 {
+		return fmt.Errorf("%w: %d", ErrAssentosInvalidos, assentos)
+	}
+	return nil
+}
+
 // publicarCarona valida os dados de PUBLICAR_CARONA (PROTOCOL.md, seção 5.4)
 // e insere a carona no estado.
 //

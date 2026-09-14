@@ -2,9 +2,16 @@
   {
     "id": "car-1",
     "motorista": "joao",
-    "origem": "Salvador",
-    "destino": "Jequié",
-    "partida": "2026-09-15T06:00:00-03:00",
+    "rota": [
+      "Salvador",
+      "Feira de Santana",
+      "Jequié"
+    ],
+    "horarios": [
+      "2026-09-15T06:00:00-03:00",
+      "2026-09-15T08:00:00-03:00",
+      "2026-09-15T11:00:00-03:00"
+    ],
     "assentos": 3,
     "precos_centavos": [
       3000,
@@ -15,9 +22,14 @@
   {
     "id": "car-2",
     "motorista": "carlos",
-    "origem": "Jequié",
-    "destino": "Vitória da Conquista",
-    "partida": "2026-09-15T12:30:00-03:00",
+    "rota": [
+      "Jequié",
+      "Vitória da Conquista"
+    ],
+    "horarios": [
+      "2026-09-15T12:30:00-03:00",
+      "2026-09-15T15:00:00-03:00"
+    ],
     "assentos": 2,
     "precos_centavos": [
       4000
@@ -27,9 +39,16 @@
   {
     "id": "car-3",
     "motorista": "ana",
-    "origem": "Feira de Santana",
-    "destino": "Vitória da Conquista",
-    "partida": "2026-09-15T09:00:00-03:00",
+    "rota": [
+      "Feira de Santana",
+      "Jequié",
+      "Vitória da Conquista"
+    ],
+    "horarios": [
+      "2026-09-15T09:00:00-03:00",
+      "2026-09-15T12:00:00-03:00",
+      "2026-09-15T14:30:00-03:00"
+    ],
     "assentos": 1,
     "precos_centavos": [
       4500,
@@ -40,9 +59,14 @@
   {
     "id": "car-4",
     "motorista": "joao",
-    "origem": "Jequié",
-    "destino": "Vitória da Conquista",
-    "partida": "2026-09-15T11:15:00-03:00",
+    "rota": [
+      "Jequié",
+      "Vitória da Conquista"
+    ],
+    "horarios": [
+      "2026-09-15T11:15:00-03:00",
+      "2026-09-15T13:45:00-03:00"
+    ],
     "assentos": 4,
     "precos_centavos": [
       4000
@@ -52,9 +76,18 @@
   {
     "id": "car-5",
     "motorista": "carlos",
-    "origem": "Vitória da Conquista",
-    "destino": "Salvador",
-    "partida": "2026-09-15T08:00:00-03:00",
+    "rota": [
+      "Vitória da Conquista",
+      "Jequié",
+      "Feira de Santana",
+      "Salvador"
+    ],
+    "horarios": [
+      "2026-09-15T08:00:00-03:00",
+      "2026-09-15T10:30:00-03:00",
+      "2026-09-15T13:30:00-03:00",
+      "2026-09-15T15:30:00-03:00"
+    ],
     "assentos": 3,
     "precos_centavos": [
       4000,
@@ -66,9 +99,18 @@
   {
     "id": "car-6",
     "motorista": "ana",
-    "origem": "Salvador",
-    "destino": "Vitória da Conquista",
-    "partida": "2026-09-16T07:00:00-03:00",
+    "rota": [
+      "Salvador",
+      "Feira de Santana",
+      "Jequié",
+      "Vitória da Conquista"
+    ],
+    "horarios": [
+      "2026-09-16T07:00:00-03:00",
+      "2026-09-16T09:00:00-03:00",
+      "2026-09-16T12:00:00-03:00",
+      "2026-09-16T14:30:00-03:00"
+    ],
     "assentos": 4,
     "precos_centavos": [
       3000,
@@ -80,9 +122,14 @@
   {
     "id": "car-7",
     "motorista": "joao",
-    "origem": "Feira de Santana",
-    "destino": "Jequié",
-    "partida": "2026-09-15T08:30:00-03:00",
+    "rota": [
+      "Feira de Santana",
+      "Jequié"
+    ],
+    "horarios": [
+      "2026-09-15T08:30:00-03:00",
+      "2026-09-15T11:30:00-03:00"
+    ],
     "assentos": 1,
     "precos_centavos": [
       4500

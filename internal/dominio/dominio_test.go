@@ -1,8 +1,12 @@
 package dominio
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -143,6 +147,181 @@ func TestCarregarCaronas_Car1ChegaEmJequieAs1100(t *testing.T) {
 	}
 	if car1.Cancelada {
 		t.Fatalf("car-1 não deveria iniciar cancelada")
+	}
+}
+
+// --- Carga de boot com paradas explícitas (D09) ---
+
+// caronaDeArquivo monta uma entrada de dados/caronas.json como mapa, e não
+// como a struct do carregamento, para que os casos de recusa possam remover
+// campos e escrever o formato antigo à vontade.
+func caronaDeArquivo(id string, rota []string, horarios []string, assentos int, precos []int) map[string]any {
+	return map[string]any{
+		"id":              id,
+		"motorista":       "joao",
+		"rota":            rota,
+		"horarios":        horarios,
+		"assentos":        assentos,
+		"precos_centavos": precos,
+	}
+}
+
+// escreverCaronas grava as entradas num arquivo temporário e devolve o
+// caminho. O arquivo some sozinho ao fim do teste (t.TempDir).
+func escreverCaronas(t *testing.T, entradas ...map[string]any) string {
+	t.Helper()
+	b, err := json.Marshal(entradas)
+	if err != nil {
+		t.Fatalf("serializar caronas: %v", err)
+	}
+	caminho := filepath.Join(t.TempDir(), "caronas.json")
+	if err := os.WriteFile(caminho, b, 0o600); err != nil {
+		t.Fatalf("gravar %s: %v", caminho, err)
+	}
+	return caminho
+}
+
+// TestCarregarCaronas_LeRotaEHorariosDoArquivo confere que a carga guarda as
+// paradas exatamente como estão no arquivo, sem derivar nada (D09).
+//
+// A rota e os horários foram escolhidos para que nenhuma derivação pudesse
+// produzi-los: Jequié → Salvador → Vitória da Conquista não é uma sequência em
+// linha, e 40 minutos entre Jequié e Salvador não é duração de trajeto nenhuma.
+// Uma carga que ainda calculasse os horários falharia aqui.
+func TestCarregarCaronas_LeRotaEHorariosDoArquivo(t *testing.T) {
+	caminho := escreverCaronas(t, caronaDeArquivo("car-x",
+		[]string{"Jequié", "Salvador", "Vitória da Conquista"},
+		[]string{"2026-09-15T07:00:00-03:00", "2026-09-15T07:40:00-03:00", "2026-09-15T19:00:00-03:00"},
+		2, []int{1000, 2000}))
+
+	caronas, err := CarregarCaronas(caminho)
+	if err != nil {
+		t.Fatalf("CarregarCaronas: %v", err)
+	}
+	c, ok := caronas["car-x"]
+	if !ok {
+		t.Fatalf("car-x não carregada; caronas: %v", caronas)
+	}
+
+	rotaEsperada := []string{"Jequié", "Salvador", "Vitória da Conquista"}
+	if fmt.Sprint(c.Rota) != fmt.Sprint(rotaEsperada) {
+		t.Errorf("rota = %v, want %v", c.Rota, rotaEsperada)
+	}
+	fuso := fusoBrasilia()
+	horariosEsperados := []time.Time{
+		time.Date(2026, 9, 15, 7, 0, 0, 0, fuso),
+		time.Date(2026, 9, 15, 7, 40, 0, 0, fuso),
+		time.Date(2026, 9, 15, 19, 0, 0, 0, fuso),
+	}
+	if len(c.Horarios) != len(horariosEsperados) {
+		t.Fatalf("horarios = %v, want %v", c.Horarios, horariosEsperados)
+	}
+	for i, quero := range horariosEsperados {
+		if !c.Horarios[i].Equal(quero) {
+			t.Errorf("horarios[%d] = %v, want %v", i, c.Horarios[i], quero)
+		}
+	}
+	if c.MotoristaID != "joao" || c.Assentos != 2 || fmt.Sprint(c.PrecoTrecho) != "[1000 2000]" {
+		t.Errorf("carona carregada = %+v", c)
+	}
+	if fmt.Sprint(c.Livres) != "[2 2]" {
+		t.Errorf("Livres = %v, want [2 2]: todo trecho começa com a capacidade inteira", c.Livres)
+	}
+}
+
+// TestCarregarCaronas_NaoExigePartidaNoFuturo fixa a única validação da
+// publicação que a carga não aplica (D09): os dados de demonstração têm data
+// fixa, e exigir partida no futuro impediria o servidor de subir depois dela.
+func TestCarregarCaronas_NaoExigePartidaNoFuturo(t *testing.T) {
+	caminho := escreverCaronas(t, caronaDeArquivo("car-antiga",
+		[]string{"Salvador", "Feira de Santana"},
+		[]string{"2020-01-10T08:00:00-03:00", "2020-01-10T10:00:00-03:00"},
+		3, []int{3000}))
+
+	if _, err := CarregarCaronas(caminho); err != nil {
+		t.Fatalf("CarregarCaronas recusou carona no passado: %v", err)
+	}
+}
+
+// TestCarregarCaronas_RecusaCaronaInvalida percorre as validações de uma
+// carona (D09, I6) na porta de entrada do boot.
+//
+// Elas importam aqui tanto quanto na publicação: sem o corredor, nada mais
+// garante por construção que os horários cresçam, e a busca, a reserva e a
+// invariante I3 dependem disso. Um arquivo de carga com horário fora de ordem
+// não pode virar estado.
+//
+// Cada caso parte de uma carona válida e estraga uma coisa só, para que a
+// recusa só possa ter vindo da regra que o caso nomeia. A mensagem precisa
+// citar o id da carona: é o que diz a quem subiu o servidor qual linha do
+// arquivo corrigir.
+func TestCarregarCaronas_RecusaCaronaInvalida(t *testing.T) {
+	valida := func() map[string]any {
+		return caronaDeArquivo("car-ruim",
+			[]string{"Salvador", "Feira de Santana", "Jequié"},
+			[]string{"2026-09-15T06:00:00-03:00", "2026-09-15T08:00:00-03:00", "2026-09-15T11:00:00-03:00"},
+			3, []int{3000, 4500})
+	}
+
+	casos := []struct {
+		nome    string
+		estraga func(c map[string]any)
+		quero   error
+	}{
+		{"cidade desconhecida", func(c map[string]any) {
+			c["rota"] = []string{"Salvador", "Ilhéus", "Jequié"}
+		}, ErrCidadeDesconhecida},
+		{"grafia divergente", func(c map[string]any) {
+			c["rota"] = []string{"salvador", "Feira de Santana", "Jequié"}
+		}, ErrCidadeDesconhecida},
+		{"uma parada só", func(c map[string]any) {
+			c["rota"] = []string{"Salvador"}
+			c["horarios"] = []string{"2026-09-15T06:00:00-03:00"}
+			c["precos_centavos"] = []int{}
+		}, ErrRotaInvalida},
+		{"cidade repetida", func(c map[string]any) {
+			c["rota"] = []string{"Salvador", "Feira de Santana", "Salvador"}
+		}, ErrRotaInvalida},
+		{"horário igual ao anterior", func(c map[string]any) {
+			c["horarios"] = []string{"2026-09-15T06:00:00-03:00", "2026-09-15T08:00:00-03:00", "2026-09-15T08:00:00-03:00"}
+		}, ErrRotaInvalida},
+		{"horário antes do anterior", func(c map[string]any) {
+			c["horarios"] = []string{"2026-09-15T06:00:00-03:00", "2026-09-15T05:00:00-03:00", "2026-09-15T11:00:00-03:00"}
+		}, ErrRotaInvalida},
+		{"mais horários que cidades", func(c map[string]any) {
+			c["horarios"] = []string{"2026-09-15T06:00:00-03:00", "2026-09-15T08:00:00-03:00", "2026-09-15T11:00:00-03:00", "2026-09-15T12:00:00-03:00"}
+		}, ErrRotaInvalida},
+		{"formato antigo, sem rota nem horários", func(c map[string]any) {
+			delete(c, "rota")
+			delete(c, "horarios")
+			c["origem"] = "Salvador"
+			c["destino"] = "Jequié"
+			c["partida"] = "2026-09-15T06:00:00-03:00"
+		}, ErrRotaInvalida},
+		{"preços a menos", func(c map[string]any) {
+			c["precos_centavos"] = []int{3000}
+		}, ErrRotaInvalida},
+		{"preço negativo", func(c map[string]any) {
+			c["precos_centavos"] = []int{3000, -1}
+		}, ErrPrecoInvalido},
+		{"sem assentos", func(c map[string]any) {
+			c["assentos"] = 0
+		}, ErrAssentosInvalidos},
+	}
+
+	for _, caso := range casos {
+		t.Run(caso.nome, func(t *testing.T) {
+			entrada := valida()
+			caso.estraga(entrada)
+
+			_, err := CarregarCaronas(escreverCaronas(t, entrada))
+			if !errors.Is(err, caso.quero) {
+				t.Fatalf("err = %v, want %v", err, caso.quero)
+			}
+			if !strings.Contains(err.Error(), "car-ruim") {
+				t.Errorf("mensagem não identifica a carona: %v", err)
+			}
+		})
 	}
 }
 
