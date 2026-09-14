@@ -2,6 +2,7 @@ package servidor
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"vaijunto/internal/dominio"
@@ -23,19 +24,27 @@ import (
 //
 //   - os campos são ponteiros, para separar "campo ausente" de "campo com
 //     valor zero". Sem isso, {"assentos":0} e um pedido sem "assentos" seriam
-//     indistinguíveis, e o cliente receberia a mensagem errada;
-//   - "partida" entra como string, e não como time.Time, para que uma data
-//     malformada vire PARTIDA_INVALIDA em vez de derrubar a decodificação
-//     inteira em CAMPO_INVALIDO.
+//     indistinguíveis, e o cliente receberia a mensagem errada. Pelo mesmo
+//     motivo, "paradas": [] (lista vazia, que é ROTA_INVALIDA) não se confunde
+//     com um pedido sem "paradas" (CAMPO_INVALIDO);
+//   - o horário de cada parada entra como string, e não como time.Time, para
+//     que uma data malformada vire PARTIDA_INVALIDA em vez de derrubar a
+//     decodificação inteira em CAMPO_INVALIDO.
 //
-// A regra que sai daí: tipo JSON errado é CAMPO_INVALIDO; string que não é
-// RFC 3339 é PARTIDA_INVALIDA.
+// A regra que sai daí: campo ausente ou tipo JSON errado é CAMPO_INVALIDO;
+// string que não é RFC 3339, em qualquer parada, é PARTIDA_INVALIDA.
 type publicarCaronaPedido struct {
-	Origem         *string `json:"origem"`
-	Destino        *string `json:"destino"`
-	Partida        *string `json:"partida"`
-	Assentos       *int    `json:"assentos"`
-	PrecosCentavos *[]int  `json:"precos_centavos"`
+	Paradas        *[]paradaPedido `json:"paradas"`
+	Assentos       *int            `json:"assentos"`
+	PrecosCentavos *[]int          `json:"precos_centavos"`
+}
+
+// paradaPedido é um elemento de "paradas", com ponteiros pelo motivo acima.
+// Uma parada null na lista decodifica com os dois campos nil e cai na mesma
+// recusa de campo ausente.
+type paradaPedido struct {
+	Cidade  *string `json:"cidade"`
+	Horario *string `json:"horario"`
 }
 
 // tratarPublicarCarona publica uma carona do motorista autenticado
@@ -45,26 +54,32 @@ func tratarPublicarCarona(req protocolo.Requisicao, estado *dominio.Estado, s *s
 	if err := json.Unmarshal(req.Dados, &pedido); err != nil {
 		return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "Algum campo veio com o tipo errado.")
 	}
-	if pedido.Origem == nil || pedido.Destino == nil || pedido.Partida == nil ||
-		pedido.Assentos == nil || pedido.PrecosCentavos == nil {
-		return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "Informe origem, destino, partida, assentos e precos_centavos.")
+	if pedido.Paradas == nil || pedido.Assentos == nil || pedido.PrecosCentavos == nil {
+		return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "Informe paradas, assentos e precos_centavos.")
 	}
 
-	partida, err := time.Parse(time.RFC3339, *pedido.Partida)
-	if err != nil {
-		return respostaErro(req.ID, protocolo.CodigoPartidaInvalida, "A partida precisa estar no formato RFC 3339, com fuso (ex.: 2026-09-15T08:00:00-03:00).")
+	// Primeiro a forma de todas as paradas, depois o conteúdo dos horários:
+	// assim um pedido com um campo faltando é sempre CAMPO_INVALIDO, qualquer
+	// que seja a posição da parada incompleta.
+	for _, p := range *pedido.Paradas {
+		if p.Cidade == nil || p.Horario == nil {
+			return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "Cada parada precisa de cidade e horario.")
+		}
 	}
 
-	// ADAPTAÇÃO TEMPORÁRIA. O domínio já recebe as paradas informadas pelo
-	// motorista (D09), mas esta borda ainda fala o formato antigo de
-	// PUBLICAR_CARONA, com origem, destino e partida. Até o protocolo passar a
-	// receber "paradas" (PROTOCOL.md, seção 5.4), as paradas são montadas aqui
-	// a partir do corredor. Manter o contrato externo intacto nesta etapa é o
-	// que permite usar os testes de integração, sem edição, como prova de que a
-	// troca no domínio não mudou o comportamento visível.
-	rota, horarios, err := dominio.DerivarRotaEHorarios(*pedido.Origem, *pedido.Destino, partida)
-	if err != nil {
-		return respostaDeErroDeDominio(req.ID, err)
+	// A borda só separa as listas e interpreta o texto dos horários. Se as
+	// paradas formam uma carona — quantas são, se repetem cidade, se os
+	// horários crescem — é regra de domínio, e fica em validarCarona.
+	rota := make([]string, len(*pedido.Paradas))
+	horarios := make([]time.Time, len(*pedido.Paradas))
+	for i, p := range *pedido.Paradas {
+		horario, err := time.Parse(time.RFC3339, *p.Horario)
+		if err != nil {
+			return respostaErro(req.ID, protocolo.CodigoPartidaInvalida,
+				fmt.Sprintf("O horário da parada %d precisa estar no formato RFC 3339, com fuso (ex.: 2026-09-15T08:00:00-03:00).", i+1))
+		}
+		rota[i] = *p.Cidade
+		horarios[i] = horario
 	}
 
 	// O relógio é lido aqui, na borda, e passado ao domínio: as regras de

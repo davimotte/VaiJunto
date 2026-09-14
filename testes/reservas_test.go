@@ -179,8 +179,10 @@ func TestPrazosDeCancelamentoSaoAssimetricos(t *testing.T) {
 	partidaB := partidaA.Add(3 * time.Hour)
 
 	dono := credencial{"joao", "1234"}
-	primeira := publicarComo(t, endereco, dono, "Salvador", "Feira de Santana", partidaA, 2, []int{3000})
-	segunda := publicarComo(t, endereco, credencial{"carlos", "1234"}, "Feira de Santana", "Jequié", partidaB, 2, []int{4500})
+	primeira := publicarComo(t, endereco, dono, 2, []int{3000},
+		parada("Salvador", partidaA), parada("Feira de Santana", partidaA.Add(2*time.Hour)))
+	segunda := publicarComo(t, endereco, credencial{"carlos", "1234"}, 2, []int{4500},
+		parada("Feira de Santana", partidaB), parada("Jequié", partidaB.Add(3*time.Hour)))
 
 	passageiro := conectar(t, endereco)
 	passageiro.entrar("maria", "abcd")

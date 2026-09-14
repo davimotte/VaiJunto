@@ -216,15 +216,14 @@ func reserva(itens ...protocolo.ItemReserva) protocolo.ReservarRequisicao {
 
 // publicarComo publica uma carona autenticado como o motorista informado e
 // devolve o identificador gerado pelo servidor.
-func publicarComo(t *testing.T, endereco string, m credencial, origem, destino string, partida time.Time, assentos int, precos []int) string {
+func publicarComo(t *testing.T, endereco string, m credencial, assentos int, precos []int, paradas ...map[string]any) string {
 	t.Helper()
 
 	c := conectar(t, endereco)
 	c.entrar(m.usuario, m.senha)
 
 	var publicada protocolo.PublicarCaronaResposta
-	c.exigirOK(protocolo.TipoPublicarCarona,
-		publicacao(origem, destino, partida, assentos, precos), &publicada)
+	c.exigirOK(protocolo.TipoPublicarCarona, publicacao(assentos, precos, paradas...), &publicada)
 	return publicada.CaronaID
 }
 
@@ -291,10 +290,10 @@ func TestT2ItinerarioAtomicoNaoDeixaReservaParcial(t *testing.T) {
 	partidaA := futuro(24)
 	partidaB := partidaA.Add(3 * time.Hour)
 
-	folgado := publicarComo(t, endereco, credencial{"joao", "1234"},
-		"Salvador", "Feira de Santana", partidaA, 10, []int{3000})
-	gargalo := publicarComo(t, endereco, credencial{"carlos", "1234"},
-		"Feira de Santana", "Jequié", partidaB, 1, []int{4500})
+	folgado := publicarComo(t, endereco, credencial{"joao", "1234"}, 10, []int{3000},
+		parada("Salvador", partidaA), parada("Feira de Santana", partidaA.Add(2*time.Hour)))
+	gargalo := publicarComo(t, endereco, credencial{"carlos", "1234"}, 1, []int{4500},
+		parada("Feira de Santana", partidaB), parada("Jequié", partidaB.Add(3*time.Hour)))
 
 	participantes := passageirosDaCarga()[3:]
 	respostas := disputa(t, endereco, participantes, func(int) protocolo.ReservarRequisicao {
@@ -362,10 +361,10 @@ func TestT5CancelamentoEmCascataSobConcorrencia(t *testing.T) {
 	partidaB := partidaA.Add(3 * time.Hour)
 
 	dono := credencial{"joao", "1234"}
-	primeira := publicarComo(t, endereco, dono,
-		"Salvador", "Feira de Santana", partidaA, assentos, []int{3000})
-	segunda := publicarComo(t, endereco, credencial{"carlos", "1234"},
-		"Feira de Santana", "Jequié", partidaB, assentos, []int{4500})
+	primeira := publicarComo(t, endereco, dono, assentos, []int{3000},
+		parada("Salvador", partidaA), parada("Feira de Santana", partidaA.Add(2*time.Hour)))
+	segunda := publicarComo(t, endereco, credencial{"carlos", "1234"}, assentos, []int{4500},
+		parada("Feira de Santana", partidaB), parada("Jequié", partidaB.Add(3*time.Hour)))
 
 	passageiros := passageirosDaCarga()[3 : 3+antes+durante]
 
@@ -465,10 +464,11 @@ func TestT8ReservasSobrepostasDoMesmoPassageiro(t *testing.T) {
 	// Mesma partida nas duas caronas: os intervalos coincidem, então a
 	// sobreposição é total e independe de qual das duas vence.
 	partida := futuro(24)
-	umaDelas := publicarComo(t, endereco, credencial{"joao", "1234"},
-		"Salvador", "Feira de Santana", partida, 60, []int{3000})
-	aOutra := publicarComo(t, endereco, credencial{"carlos", "1234"},
-		"Salvador", "Feira de Santana", partida, 60, []int{3200})
+	chegada := partida.Add(2 * time.Hour)
+	umaDelas := publicarComo(t, endereco, credencial{"joao", "1234"}, 60, []int{3000},
+		parada("Salvador", partida), parada("Feira de Santana", chegada))
+	aOutra := publicarComo(t, endereco, credencial{"carlos", "1234"}, 60, []int{3200},
+		parada("Salvador", partida), parada("Feira de Santana", chegada))
 
 	// Duas conexões por passageiro. A identidade é da conexão (D08), mas o
 	// estado que decide o conflito é o compartilhado, e é ele que precisa

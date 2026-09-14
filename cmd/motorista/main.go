@@ -14,6 +14,7 @@ import (
 	_ "time/tzdata" // fusos embutidos no binário: a imagem Alpine do cliente não traz tzdata, e sem eles FusoDoCorredor cairia no deslocamento fixo.
 
 	"vaijunto/internal/cliente"
+	"vaijunto/internal/dominio"
 	"vaijunto/internal/protocolo"
 )
 
@@ -151,10 +152,22 @@ func publicarCarona(term *cliente.Terminal, conexao *cliente.Conexao) error {
 		precos = append(precos, preco)
 	}
 
+	// ADAPTAÇÃO TEMPORÁRIA. PUBLICAR_CARONA já recebe as paradas com o horário
+	// de cada uma (PROTOCOL.md, seção 5.4), mas este menu ainda pergunta só
+	// origem, destino e partida. Até o menu perguntar parada por parada, as
+	// paradas são montadas aqui a partir do corredor, para que o cliente
+	// continue utilizável enquanto o protocolo e o servidor mudam.
+	rotaDerivada, horarios, err := dominio.DerivarRotaEHorarios(origem, destino, partida)
+	if err != nil {
+		return err
+	}
+	paradas := make([]protocolo.Parada, len(rotaDerivada))
+	for i, cidade := range rotaDerivada {
+		paradas[i] = protocolo.Parada{Cidade: cidade, Horario: horarios[i]}
+	}
+
 	publicada, err := conexao.PublicarCarona(protocolo.PublicarCaronaRequisicao{
-		Origem:         origem,
-		Destino:        destino,
-		Partida:        partida,
+		Paradas:        paradas,
 		Assentos:       assentos,
 		PrecosCentavos: precos,
 	})

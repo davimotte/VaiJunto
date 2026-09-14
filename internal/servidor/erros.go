@@ -25,8 +25,8 @@ type erroTraduzido struct {
 }
 
 var traducaoErros = map[error]erroTraduzido{
-	dominio.ErrCidadeDesconhecida:   {protocolo.CodigoCidadeDesconhecida, "Cidade fora do corredor atendido."},
-	dominio.ErrRotaInvalida:         {protocolo.CodigoRotaInvalida, "Rota inválida: verifique origem, destino e a quantidade de preços informada."},
+	dominio.ErrCidadeDesconhecida:   {protocolo.CodigoCidadeDesconhecida, "Cidade não atendida pelo sistema."},
+	dominio.ErrRotaInvalida:         {protocolo.CodigoRotaInvalida, "Rota inválida: são necessárias ao menos duas cidades diferentes, horários crescentes e um preço por trecho."},
 	dominio.ErrPartidaInvalida:      {protocolo.CodigoPartidaInvalida, "A partida precisa ser um instante futuro."},
 	dominio.ErrAssentosInvalidos:    {protocolo.CodigoCampoInvalido, "A carona precisa ter pelo menos um assento."},
 	dominio.ErrPrecoInvalido:        {protocolo.CodigoCampoInvalido, "O preço de um trecho não pode ser negativo."},

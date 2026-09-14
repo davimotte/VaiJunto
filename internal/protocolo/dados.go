@@ -25,13 +25,24 @@ type LoginResposta struct {
 	Perfil  string `json:"perfil"`
 }
 
+// Parada é um ponto da rota de PUBLICAR_CARONA: a cidade e o instante em que
+// o carro passa por ela. Há um único horário por parada, sem espera no local
+// (D09).
+//
+// Cidade e horário andam juntos num objeto, e não em duas listas paralelas,
+// para que "mais cidades que horários" nem seja representável na requisição.
+type Parada struct {
+	Cidade  string    `json:"cidade"`
+	Horario time.Time `json:"horario"`
+}
+
 // PublicarCaronaRequisicao e PublicarCaronaResposta — seção 5.4.
+//
+// PrecosCentavos[t] é o preço do trecho entre Paradas[t] e Paradas[t+1].
 type PublicarCaronaRequisicao struct {
-	Origem         string    `json:"origem"`
-	Destino        string    `json:"destino"`
-	Partida        time.Time `json:"partida"`
-	Assentos       int       `json:"assentos"`
-	PrecosCentavos []int     `json:"precos_centavos"`
+	Paradas        []Parada `json:"paradas"`
+	Assentos       int      `json:"assentos"`
+	PrecosCentavos []int    `json:"precos_centavos"`
 }
 
 type PublicarCaronaResposta struct {

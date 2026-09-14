@@ -129,23 +129,23 @@ func TestRespostaRoundTripErro(t *testing.T) {
 
 // TestInstanteFormatoRFC3339 confere que um instante sem fração de segundo
 // serializa exatamente como os exemplos do PROTOCOL.md (seção 3), sem parte
-// fracionária.
+// fracionária, e com os nomes de campo de PUBLICAR_CARONA (seção 5.4).
 func TestInstanteFormatoRFC3339(t *testing.T) {
 	fuso := time.FixedZone("-03:00", -3*60*60)
-	partida := time.Date(2026, 9, 15, 8, 0, 0, 0, fuso)
 
 	b, err := json.Marshal(PublicarCaronaRequisicao{
-		Origem:         "Salvador",
-		Destino:        "Vitória da Conquista",
-		Partida:        partida,
+		Paradas: []Parada{
+			{Cidade: "Salvador", Horario: time.Date(2026, 9, 15, 8, 0, 0, 0, fuso)},
+			{Cidade: "Feira de Santana", Horario: time.Date(2026, 9, 15, 10, 15, 0, 0, fuso)},
+		},
 		Assentos:       3,
-		PrecosCentavos: []int{3000, 5000, 4000},
+		PrecosCentavos: []int{3000},
 	})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if !bytes.Contains(b, []byte(`"partida":"2026-09-15T08:00:00-03:00"`)) {
-		t.Fatalf("formato de instante inesperado: %s", b)
+	if !bytes.Contains(b, []byte(`"paradas":[{"cidade":"Salvador","horario":"2026-09-15T08:00:00-03:00"}`)) {
+		t.Fatalf("formato de parada ou de instante inesperado: %s", b)
 	}
 }
 

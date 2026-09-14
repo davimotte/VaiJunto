@@ -36,9 +36,9 @@ func (c *Conexao) Logout() error {
 	return c.executar(protocolo.TipoLogout, vazio, nil)
 }
 
-// PublicarCarona publica uma carona (seção 5.4). O cliente informa só origem,
-// destino, partida, assentos e preços: rota e horários são derivados pelo
-// servidor a partir do corredor (D09).
+// PublicarCarona publica uma carona (seção 5.4). O cliente informa as paradas,
+// com o horário de cada uma, os assentos e o preço de cada trecho; o servidor
+// valida e devolve a rota como a guardou, sem calcular nada (D09).
 func (c *Conexao) PublicarCarona(requisicao protocolo.PublicarCaronaRequisicao) (protocolo.PublicarCaronaResposta, error) {
 	var resposta protocolo.PublicarCaronaResposta
 	err := c.executar(protocolo.TipoPublicarCarona, requisicao, &resposta)

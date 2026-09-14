@@ -353,49 +353,59 @@ func TestSessaoMorreComAConexao(t *testing.T) {
 
 // --- PUBLICAR_CARONA (seção 5.4) ---
 
+// parada monta um elemento de "paradas" de PUBLICAR_CARONA (seção 5.4). O
+// horário vai como string RFC 3339, do jeito que trafega na linha.
+func parada(cidade string, horario time.Time) map[string]any {
+	return map[string]any{"cidade": cidade, "horario": horario.Format(time.RFC3339)}
+}
+
 // publicacao é o payload de PUBLICAR_CARONA montado como mapa, e não com a
 // struct do protocolo, para que os testes de validação possam omitir campos e
 // trocar tipos à vontade.
-func publicacao(origem, destino string, partida time.Time, assentos int, precos []int) map[string]any {
+func publicacao(assentos int, precos []int, paradas ...map[string]any) map[string]any {
+	// Sem paradas, o variádico chega nil e serializaria como null — que é
+	// campo ausente, e não lista vazia. Os dois casos têm códigos diferentes.
+	if paradas == nil {
+		paradas = []map[string]any{}
+	}
 	return map[string]any{
-		"origem":          origem,
-		"destino":         destino,
-		"partida":         partida.Format(time.RFC3339),
+		"paradas":         paradas,
 		"assentos":        assentos,
 		"precos_centavos": precos,
 	}
 }
 
-// TestPublicarCaronaDerivaRotaEHorarios confere o exemplo da seção 5.4: o
-// motorista informa origem, destino e partida, e o servidor devolve a rota
-// completa do corredor com o horário de cada cidade.
-func TestPublicarCaronaDerivaRotaEHorarios(t *testing.T) {
+// TestPublicarCaronaDevolveParadasInformadas confere a seção 5.4 e a D09: o
+// servidor não calcula rota nem horário, e a resposta devolve exatamente as
+// paradas que o motorista informou.
+//
+// Rota e horários foram escolhidos para que nenhuma derivação pudesse
+// produzi-los: Jequié → Salvador → Vitória da Conquista não é sequência em
+// linha, e 50 minutos entre Jequié e Salvador não é duração de trajeto nenhuma.
+func TestPublicarCaronaDevolveParadasInformadas(t *testing.T) {
 	c := conectar(t, subirServidor(t))
 	c.entrar("joao", "1234")
 
 	partida := futuro(48)
+	horarios := []time.Time{partida, partida.Add(50 * time.Minute), partida.Add(12*time.Hour + 10*time.Minute)}
+	rota := []string{"Jequié", "Salvador", "Vitória da Conquista"}
+
 	var publicada protocolo.PublicarCaronaResposta
 	c.exigirOK(protocolo.TipoPublicarCarona,
-		publicacao("Salvador", "Vitória da Conquista", partida, 3, []int{3000, 5000, 4000}),
+		publicacao(3, []int{1000, 2000},
+			parada(rota[0], horarios[0]), parada(rota[1], horarios[1]), parada(rota[2], horarios[2])),
 		&publicada)
 
 	if publicada.CaronaID == "" {
 		t.Fatalf("carona publicada sem carona_id")
 	}
-	rotaEsperada := []string{"Salvador", "Feira de Santana", "Jequié", "Vitória da Conquista"}
-	if len(publicada.Rota) != len(rotaEsperada) {
-		t.Fatalf("rota = %v, want %v", publicada.Rota, rotaEsperada)
+	if strings.Join(publicada.Rota, "|") != strings.Join(rota, "|") {
+		t.Fatalf("rota = %v, want %v", publicada.Rota, rota)
 	}
-	for i, cidade := range rotaEsperada {
-		if publicada.Rota[i] != cidade {
-			t.Fatalf("rota[%d] = %q, want %q", i, publicada.Rota[i], cidade)
-		}
+	if len(publicada.Horarios) != len(horarios) {
+		t.Fatalf("horarios = %v, want %v", publicada.Horarios, horarios)
 	}
-
-	// Durações do corredor (seção 3.1): 2h, 3h e 2h30.
-	esperados := []time.Duration{0, 2 * time.Hour, 5 * time.Hour, 7*time.Hour + 30*time.Minute}
-	for i, deslocamento := range esperados {
-		querido := partida.Add(deslocamento)
+	for i, querido := range horarios {
 		if !publicada.Horarios[i].Equal(querido) {
 			t.Fatalf("horarios[%d] = %v, want %v", i, publicada.Horarios[i], querido)
 		}
@@ -412,8 +422,10 @@ func TestPublicarCaronaPreservaFuso(t *testing.T) {
 	c := conectar(t, subirServidor(t))
 	c.entrar("joao", "1234")
 
+	partida := futuro(72)
 	resp := c.enviar(protocolo.TipoPublicarCarona,
-		publicacao("Salvador", "Feira de Santana", futuro(72), 2, []int{3000}))
+		publicacao(2, []int{3000},
+			parada("Salvador", partida), parada("Feira de Santana", partida.Add(2*time.Hour))))
 	if resp.Status != protocolo.StatusOK {
 		t.Fatalf("PUBLICAR_CARONA: %q %q", resp.Codigo, resp.Mensagem)
 	}
@@ -438,53 +450,82 @@ func TestPublicarCaronaPreservaFuso(t *testing.T) {
 // o código que a seção 6 manda.
 //
 // A distinção entre CAMPO_INVALIDO e PARTIDA_INVALIDA é a regra que o
-// servidor adota: tipo JSON errado é campo inválido; string que existe mas não
-// é RFC 3339 é partida inválida.
+// servidor adota: tipo JSON errado ou campo ausente é campo inválido; string
+// que existe mas não é RFC 3339 é partida inválida, em qualquer parada.
 func TestPublicarCaronaValidacoes(t *testing.T) {
 	c := conectar(t, subirServidor(t))
 	c.entrar("joao", "1234")
 
 	partida := futuro(48)
+	em := func(horas int) time.Time { return partida.Add(time.Duration(horas) * time.Hour) }
+	salvador, feira, jequie := parada("Salvador", em(0)), parada("Feira de Santana", em(2)), parada("Jequié", em(5))
+
+	// comHorario troca o horário de uma parada por um valor cru qualquer, para
+	// os casos que precisam de algo que não seja um time.Time bem formado.
+	comHorario := func(cidade string, horario any) map[string]any {
+		return map[string]any{"cidade": cidade, "horario": horario}
+	}
+
 	casos := []struct {
 		nome   string
 		dados  any
 		codigo string
 	}{
-		{"cidade fora do corredor", publicacao("Ilhéus", "Salvador", partida, 2, []int{3000}), protocolo.CodigoCidadeDesconhecida},
-		{"grafia divergente", publicacao("salvador", "Jequié", partida, 2, []int{3000, 4500}), protocolo.CodigoCidadeDesconhecida},
-		{"origem igual ao destino", publicacao("Jequié", "Jequié", partida, 2, []int{3000}), protocolo.CodigoRotaInvalida},
-		{"preços a menos", publicacao("Salvador", "Vitória da Conquista", partida, 2, []int{3000}), protocolo.CodigoRotaInvalida},
-		{"preços a mais", publicacao("Salvador", "Feira de Santana", partida, 2, []int{3000, 4500}), protocolo.CodigoRotaInvalida},
-		{"preço negativo", publicacao("Salvador", "Feira de Santana", partida, 2, []int{-1}), protocolo.CodigoCampoInvalido},
-		{"sem assentos", publicacao("Salvador", "Feira de Santana", partida, 0, []int{3000}), protocolo.CodigoCampoInvalido},
-		{"assentos negativos", publicacao("Salvador", "Feira de Santana", partida, -3, []int{3000}), protocolo.CodigoCampoInvalido},
-		{"partida no passado", publicacao("Salvador", "Feira de Santana", futuro(-2), 2, []int{3000}), protocolo.CodigoPartidaInvalida},
-		{"partida sem fuso", map[string]any{
-			"origem": "Salvador", "destino": "Feira de Santana",
-			"partida": "2027-09-15T08:00:00", "assentos": 2, "precos_centavos": []int{3000},
-		}, protocolo.CodigoPartidaInvalida},
-		{"partida com texto qualquer", map[string]any{
-			"origem": "Salvador", "destino": "Feira de Santana",
-			"partida": "amanhã cedo", "assentos": 2, "precos_centavos": []int{3000},
-		}, protocolo.CodigoPartidaInvalida},
+		// Cidades (seção 3.1).
+		{"cidade desconhecida", publicacao(2, []int{3000}, parada("Ilhéus", em(0)), feira), protocolo.CodigoCidadeDesconhecida},
+		{"grafia divergente", publicacao(2, []int{3000}, parada("salvador", em(0)), feira), protocolo.CodigoCidadeDesconhecida},
+
+		// Estrutura da rota.
+		{"lista de paradas vazia", publicacao(2, []int{}), protocolo.CodigoRotaInvalida},
+		{"uma parada só", publicacao(2, []int{}, salvador), protocolo.CodigoRotaInvalida},
+		{"origem igual ao destino", publicacao(2, []int{3000}, parada("Jequié", em(0)), parada("Jequié", em(2))), protocolo.CodigoRotaInvalida},
+		{"cidade repetida no meio", publicacao(2, []int{3000, 3000}, salvador, feira, parada("Salvador", em(4))), protocolo.CodigoRotaInvalida},
+		{"horário igual ao anterior", publicacao(2, []int{3000}, salvador, parada("Feira de Santana", em(0))), protocolo.CodigoRotaInvalida},
+		{"horário antes do anterior", publicacao(2, []int{3000, 4500}, salvador, jequie, parada("Feira de Santana", em(3))), protocolo.CodigoRotaInvalida},
+		{"preços a menos", publicacao(2, []int{3000}, salvador, feira, jequie), protocolo.CodigoRotaInvalida},
+		{"preços a mais", publicacao(2, []int{3000, 4500}, salvador, feira), protocolo.CodigoRotaInvalida},
+
+		// Faixa de valores.
+		{"preço negativo", publicacao(2, []int{-1}, salvador, feira), protocolo.CodigoCampoInvalido},
+		{"sem assentos", publicacao(0, []int{3000}, salvador, feira), protocolo.CodigoCampoInvalido},
+		{"assentos negativos", publicacao(-3, []int{3000}, salvador, feira), protocolo.CodigoCampoInvalido},
+
+		// Horários.
+		{"primeira parada no passado", publicacao(2, []int{3000}, parada("Salvador", futuro(-2)), feira), protocolo.CodigoPartidaInvalida},
+		{"horário sem fuso", publicacao(2, []int{3000}, comHorario("Salvador", "2027-09-15T08:00:00"), feira), protocolo.CodigoPartidaInvalida},
+		{"horário com texto qualquer", publicacao(2, []int{3000}, comHorario("Salvador", "amanhã cedo"), feira), protocolo.CodigoPartidaInvalida},
+		{"horário malformado numa parada intermediária", publicacao(2, []int{3000, 4500}, salvador, comHorario("Feira de Santana", "10h"), jequie), protocolo.CodigoPartidaInvalida},
+
+		// Forma do payload.
 		{"payload vazio", vazio, protocolo.CodigoCampoInvalido},
-		{"sem assentos no payload", map[string]any{
+		{"formato antigo, com origem, destino e partida", map[string]any{
 			"origem": "Salvador", "destino": "Feira de Santana",
-			"partida": partida.Format(time.RFC3339), "precos_centavos": []int{3000},
+			"partida": partida.Format(time.RFC3339), "assentos": 2, "precos_centavos": []int{3000},
+		}, protocolo.CodigoCampoInvalido},
+		{"paradas não é lista", map[string]any{
+			"paradas": "Salvador, Feira de Santana", "assentos": 2, "precos_centavos": []int{3000},
+		}, protocolo.CodigoCampoInvalido},
+		{"parada sem cidade", publicacao(2, []int{3000}, map[string]any{"horario": em(0).Format(time.RFC3339)}, feira), protocolo.CodigoCampoInvalido},
+		{"parada sem horário", publicacao(2, []int{3000}, salvador, map[string]any{"cidade": "Feira de Santana"}), protocolo.CodigoCampoInvalido},
+		{"parada nula", publicacao(2, []int{3000}, salvador, nil), protocolo.CodigoCampoInvalido},
+		{"horário como número", publicacao(2, []int{3000}, comHorario("Salvador", 20260915), feira), protocolo.CodigoCampoInvalido},
+		{"sem assentos no payload", map[string]any{
+			"paradas": []any{salvador, feira}, "precos_centavos": []int{3000},
 		}, protocolo.CodigoCampoInvalido},
 		{"assentos como string", map[string]any{
-			"origem": "Salvador", "destino": "Feira de Santana",
-			"partida": partida.Format(time.RFC3339), "assentos": "2", "precos_centavos": []int{3000},
-		}, protocolo.CodigoCampoInvalido},
-		{"partida como número", map[string]any{
-			"origem": "Salvador", "destino": "Feira de Santana",
-			"partida": 20260915, "assentos": 2, "precos_centavos": []int{3000},
+			"paradas": []any{salvador, feira}, "assentos": "2", "precos_centavos": []int{3000},
 		}, protocolo.CodigoCampoInvalido},
 	}
 
 	for _, caso := range casos {
 		t.Run(caso.nome, func(t *testing.T) {
-			c.exigirErro(protocolo.TipoPublicarCarona, caso.dados, caso.codigo)
+			// Checagem feita com o t do subteste, e não com c.exigirErro: aquele
+			// helper falha pelo t do teste pai, e a primeira recusa errada
+			// abortaria a tabela inteira, escondendo as demais.
+			resp := c.enviar(protocolo.TipoPublicarCarona, caso.dados)
+			if resp.Status != protocolo.StatusErro || resp.Codigo != caso.codigo {
+				t.Errorf("got status=%q codigo=%q, want ERRO/%s (mensagem: %q)", resp.Status, resp.Codigo, caso.codigo, resp.Mensagem)
+			}
 		})
 	}
 
@@ -506,8 +547,10 @@ func TestPublicarCaronaGeraIdentificadoresDistintos(t *testing.T) {
 	vistos := map[string]bool{}
 	for i := 0; i < 20; i++ {
 		var publicada protocolo.PublicarCaronaResposta
+		partida := futuro(24)
 		c.exigirOK(protocolo.TipoPublicarCarona,
-			publicacao("Salvador", "Feira de Santana", futuro(24), 2, []int{3000}), &publicada)
+			publicacao(2, []int{3000},
+				parada("Salvador", partida), parada("Feira de Santana", partida.Add(2*time.Hour))), &publicada)
 		if vistos[publicada.CaronaID] {
 			t.Fatalf("carona_id repetido: %q", publicada.CaronaID)
 		}
@@ -569,8 +612,10 @@ func TestListarMinhasCaronasIncluiAPublicada(t *testing.T) {
 	carlos.entrar("carlos", "1234")
 
 	var publicada protocolo.PublicarCaronaResposta
+	partida := futuro(48)
 	joao.exigirOK(protocolo.TipoPublicarCarona,
-		publicacao("Salvador", "Feira de Santana", futuro(48), 4, []int{3000}), &publicada)
+		publicacao(4, []int{3000},
+			parada("Salvador", partida), parada("Feira de Santana", partida.Add(2*time.Hour))), &publicada)
 
 	contem := func(c *cliente) bool {
 		var lista protocolo.ListarMinhasCaronasResposta
@@ -675,8 +720,10 @@ func TestConexaoPersistenteComVariasOperacoes(t *testing.T) {
 
 	for i := 0; i < 30; i++ {
 		var publicada protocolo.PublicarCaronaResposta
+		partida := futuro(24 + i)
 		c.exigirOK(protocolo.TipoPublicarCarona,
-			publicacao("Feira de Santana", "Jequié", futuro(24+i), 2, []int{4500}), &publicada)
+			publicacao(2, []int{4500},
+				parada("Feira de Santana", partida), parada("Jequié", partida.Add(3*time.Hour))), &publicada)
 
 		var detalhe protocolo.DetalharCaronaResposta
 		c.exigirOK(protocolo.TipoDetalharCarona,
@@ -813,8 +860,10 @@ func TestPublicacoesSimultaneas(t *testing.T) {
 			c.entrar("joao", "1234")
 			for j := 0; j < porConexao; j++ {
 				var publicada protocolo.PublicarCaronaResposta
+				partida := futuro(24 + n)
 				c.exigirOK(protocolo.TipoPublicarCarona,
-					publicacao("Salvador", "Feira de Santana", futuro(24+n), 2, []int{3000}), &publicada)
+					publicacao(2, []int{3000},
+						parada("Salvador", partida), parada("Feira de Santana", partida.Add(2*time.Hour))), &publicada)
 				ids <- publicada.CaronaID
 			}
 		}(i)
