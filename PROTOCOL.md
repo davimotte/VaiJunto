@@ -88,22 +88,22 @@ cada resposta com a requisição que a originou e medir latência individual.
 | Identificadores | String opaca gerada pelo servidor | `"car-3f2a"`, `"res-91c"` |
 
 Cidades são comparadas por igualdade exata de string com a grafia canônica
-do corredor (tabela abaixo). O servidor não normaliza nem aceita variações
-de grafia — os clientes oficiais escolhem a cidade em um menu enumerado, não
-digitam o nome, então a string que chega ao servidor já é sempre a
-canônica. Qualquer outra string responde `CIDADE_DESCONHECIDA`.
+da lista de cidades atendidas (seção 3.1). O servidor não normaliza nem aceita
+variações de grafia — os clientes oficiais escolhem a cidade em um menu
+enumerado, não digitam o nome, então a string que chega ao servidor já é sempre
+a canônica. Qualquer outra string responde `CIDADE_DESCONHECIDA`.
 
-### 3.1 Corredor de cidades
+### 3.1 Cidades atendidas
 
-Constante do sistema. Caronas percorrem o corredor nos dois sentidos, com
-durações simétricas.
+Conjunto fixo do sistema:
 
-| Índice | Cidade | Duração até a próxima |
-|---|---|---|
-| 0 | Salvador | 2h00 |
-| 1 | Feira de Santana | 3h00 |
-| 2 | Jequié | 2h30 |
-| 3 | Vitória da Conquista | — |
+- Salvador
+- Feira de Santana
+- Jequié
+- Vitória da Conquista
+
+O conjunto não impõe ordem nem duração de trajeto. A sequência de paradas de cada
+carona e o horário de cada parada são informados pelo motorista (seção 5.4).
 
 ---
 
@@ -177,33 +177,48 @@ sem fechá-la.
 
 ### 5.4 `PUBLICAR_CARONA`
 
+O motorista informa cada parada, na ordem em que o carro passa por ela, com o
+horário da passagem. Há um único horário por parada: o instante de chegada a uma
+cidade é também o de partida dela.
+
 ```json
 {"id":"2","tipo":"PUBLICAR_CARONA","dados":{
-  "origem":"Salvador",
-  "destino":"Vitória da Conquista",
-  "partida":"2026-09-15T08:00:00-03:00",
+  "paradas":[
+    {"cidade":"Salvador",             "horario":"2026-09-15T08:00:00-03:00"},
+    {"cidade":"Feira de Santana",     "horario":"2026-09-15T10:15:00-03:00"},
+    {"cidade":"Jequié",               "horario":"2026-09-15T13:40:00-03:00"},
+    {"cidade":"Vitória da Conquista", "horario":"2026-09-15T16:00:00-03:00"}
+  ],
   "assentos":3,
-  "precos_centavos":[3000,5000,4000]
+  "precos_centavos":[3000,4500,4000]
 }}
 ```
 
-Validações:
+`precos_centavos[t]` é o preço do trecho entre `paradas[t]` e `paradas[t+1]`.
 
-- `origem` e `destino` pertencem ao corredor;
-- `origem != destino`;
-- `len(precos_centavos)` igual ao número de trechos entre as duas cidades;
-- cada preço `>= 0`;
-- `assentos >= 1`;
-- `partida` no futuro.
+Validações, com o código de cada recusa:
 
-O servidor deriva a rota e os horários a partir do corredor.
+| Regra | Código |
+|---|---|
+| Todo campo presente e com o tipo correto | `CAMPO_INVALIDO` |
+| `assentos >= 1`; cada preço `>= 0` | `CAMPO_INVALIDO` |
+| Toda `cidade` pertence às cidades atendidas (seção 3.1) | `CIDADE_DESCONHECIDA` |
+| Ao menos duas paradas | `ROTA_INVALIDA` |
+| Nenhuma cidade repetida | `ROTA_INVALIDA` |
+| Horários estritamente crescentes (igual ao anterior também é recusado) | `ROTA_INVALIDA` |
+| `len(precos_centavos) == len(paradas) − 1` | `ROTA_INVALIDA` |
+| Todo `horario` em RFC 3339 com fuso | `PARTIDA_INVALIDA` |
+| Horário da primeira parada no futuro | `PARTIDA_INVALIDA` |
+
+O servidor não calcula rota nem horário: a resposta devolve exatamente as
+paradas informadas, no mesmo formato de `LISTAR_MINHAS_CARONAS`.
 
 ```json
 {"id":"2","status":"OK","dados":{
   "carona_id":"car-3f2a",
   "rota":["Salvador","Feira de Santana","Jequié","Vitória da Conquista"],
-  "horarios":["2026-09-15T08:00:00-03:00","2026-09-15T10:00:00-03:00",
-              "2026-09-15T13:00:00-03:00","2026-09-15T15:30:00-03:00"]
+  "horarios":["2026-09-15T08:00:00-03:00","2026-09-15T10:15:00-03:00",
+              "2026-09-15T13:40:00-03:00","2026-09-15T16:00:00-03:00"]
 }}
 ```
 
@@ -299,10 +314,15 @@ Cada elemento de `trechos` é um segmento contíguo dentro de uma única carona,
 índices `de` até `ate` da rota daquela carona, consumindo os trechos `de`,
 `de+1`, …, `ate-1`.
 
+Um itinerário nunca passa duas vezes pela mesma cidade, contando as cidades
+intermediárias de cada trecho.
+
 `itinerarios` vazio é resposta `OK`, não erro.
 
-Ordenação: preço total crescente, empate por chegada mais cedo, depois por menos
-baldeações. Máximo de 20 resultados.
+Ordenação: menos baldeações primeiro, empate por menor preço total, depois por
+chegada mais cedo. Máximo de **10** resultados, cortados depois da ordenação: o
+limite nunca descarta um itinerário com menos baldeações enquanto mantém um com
+mais.
 
 **A resposta desta operação não reserva nem bloqueia nada.** Os valores refletem
 o instante da consulta e podem estar desatualizados quando o passageiro
@@ -327,8 +347,9 @@ Algoritmo do servidor, integralmente dentro de uma seção crítica:
 1. Validar formato: lista não vazia, `de < ate`, índices dentro da rota, sem
    carona repetida.
 2. Validar encadeamento: a cidade de chegada de cada perna é a de partida da
-   seguinte, e a partida da seguinte ocorre no mínimo **30 minutos** após a
-   chegada da anterior.
+   seguinte, a partida da seguinte ocorre no mínimo **30 minutos** e no máximo
+   **12 horas** após a chegada da anterior, e nenhuma cidade se repete no
+   itinerário, contando as cidades intermediárias de cada perna.
 3. Validar disponibilidade: para todo trecho `t` em `[de, ate)` de cada carona,
    `livres[t] >= 1`. Caronas canceladas reprovam.
 4. Validar sobreposição: o intervalo `[partida, chegada]` do novo itinerário não
@@ -417,13 +438,13 @@ Outros erros: `RESERVA_NAO_ENCONTRADA`, `NAO_E_DONO`, `RESERVA_JA_CANCELADA`.
 | `JA_AUTENTICADO` | `LOGIN` em conexão já autenticada |
 | `CREDENCIAIS_INVALIDAS` | Usuário ou senha incorretos |
 | `PERFIL_INCORRETO` | Perfil não permite a operação |
-| `CIDADE_DESCONHECIDA` | Cidade fora do corredor |
-| `ROTA_INVALIDA` | Origem igual ao destino, ou número de preços incompatível |
-| `PARTIDA_INVALIDA` | Instante de partida no passado ou malformado |
+| `CIDADE_DESCONHECIDA` | Cidade fora das cidades atendidas |
+| `ROTA_INVALIDA` | Menos de duas paradas, cidade repetida, horários não estritamente crescentes, número de preços incompatível, ou origem igual ao destino na busca |
+| `PARTIDA_INVALIDA` | Horário de parada malformado, ou primeira parada no passado |
 | `CARONA_NAO_ENCONTRADA` | `carona_id` inexistente |
 | `CARONA_CANCELADA` | Carona já cancelada |
 | `NAO_E_DONO` | Recurso pertence a outro usuário |
-| `ITINERARIO_INVALIDO` | Trechos não encadeiam no espaço ou no tempo |
+| `ITINERARIO_INVALIDO` | Trechos não encadeiam no espaço ou no tempo, ou passam duas vezes pela mesma cidade |
 | `SEM_ASSENTO` | Algum trecho sem disponibilidade |
 | `CONFLITO_HORARIO` | Passageiro já tem reserva ativa no período |
 | `RESERVA_NAO_ENCONTRADA` | `reserva_id` inexistente |

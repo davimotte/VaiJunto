@@ -34,7 +34,7 @@ Três propriedades definem a dificuldade técnica:
 | ID | Requisito |
 |---|---|
 | RF01 | Autenticar usuário, distinguindo perfil motorista e passageiro |
-| RF02 | Motorista publica carona: rota, data/hora de partida, assentos, preço por trecho |
+| RF02 | Motorista publica carona: sequência de paradas com o horário de cada uma, assentos, preço por trecho |
 | RF03 | Motorista consulta as caronas que publicou |
 | RF04 | Motorista consulta os passageiros confirmados em cada trecho |
 | RF05 | Motorista cancela uma carona |
@@ -135,28 +135,45 @@ reimplementaria por cima o que o transporte oferece. Quando a conexão cai, a
 goroutine termina e a sessão desaparece sozinha, sem tabela de sessões, expiração
 ou coleta de tokens vencidos.
 
-### D09 — Corredor fixo de cidades
+### D09 — Paradas informadas pelo motorista, sobre cidades fixas
 
-O universo do sistema é uma sequência fixa de 4 cidades com durações de trajeto
-constantes entre vizinhas. O motorista informa origem, destino e instante de
-partida; o servidor deriva a rota e todos os horários.
+O servidor conhece um conjunto fixo de cidades atendidas: Salvador, Feira de
+Santana, Jequié e Vitória da Conquista. O conjunto **não tem ordem nem
+durações**. O motorista informa a sequência de paradas da carona e o horário em
+que passa por cada uma; o servidor valida e guarda, sem derivar nada.
 
-| Índice | Cidade | Duração até a próxima |
-|---|---|---|
-| 0 | Salvador | 2h00 |
-| 1 | Feira de Santana | 3h00 |
-| 2 | Jequié | 2h30 |
-| 3 | Vitória da Conquista | — |
+Validações de uma carona:
 
-Caronas percorrem o corredor nos dois sentidos, com durações simétricas.
+- toda cidade pertence ao conjunto atendido;
+- ao menos duas paradas;
+- nenhuma cidade repetida na rota;
+- horários estritamente crescentes (horário igual ao anterior também é recusado);
+- um preço por trecho entre paradas consecutivas;
+- a primeira parada no futuro.
 
-Internamente a rota continua sendo uma lista explícita de cidades e os horários
-uma lista de instantes: o corredor é usado apenas como fonte dos horários e como
-validação de entrada. Generalizar para grafo livre depois é trocar uma função, e
-não reescrever o domínio.
+Há **um horário por parada**: o instante em que o carro chega a uma cidade é o
+mesmo em que parte dela. Espera no local não é modelada.
 
-Um efeito colateral útil: com 4 cidades em linha e sem revisitar cidade, um
-itinerário tem no máximo 3 trechos. O teto emerge da topologia, e não de um
+Justificativa: o motorista define a rota (seção 1), e um corredor com durações
+fixas impunha a todos a mesma velocidade e só admitia rotas em linha. Manter o
+conjunto de cidades fixo preserva o que ele tinha de útil: comparação por grafia
+canônica e menu enumerado no cliente, sem cidade digitada.
+
+Consequência que precisa ser defendida: **horários crescentes deixam de ser
+garantidos por construção.** Com o corredor, a derivação somava durações
+positivas; agora quem garante é a validação. A busca (janela de baldeação), a
+reserva (encadeamento e sobreposição) e a invariante I3 dependem disso, então as
+mesmas validações se aplicam nas duas portas de entrada do estado: a publicação e
+a carga de `dados/caronas.json` no boot. A única exceção na carga é a regra da
+partida no futuro: os dados de demonstração têm data fixa, e aplicá-la impediria
+o servidor de subir depois dessa data.
+
+Sem corredor não existe "sentido" de viagem, então a busca não pode mais podar
+por sentido (seção 6). O que impede um itinerário de ir e voltar é a regra de
+**não revisitar cidade**, aplicada igualmente na busca e na reserva e contando
+as cidades intermediárias por onde o passageiro passa dentro do veículo. Dela
+decorre o teto do itinerário: no máximo `|cidades| − 1` pernas, 3 com as quatro
+cidades atuais. O teto continua emergindo de uma regra do domínio, e não de um
 parâmetro arbitrário escolhido para conter explosão combinatória.
 
 ### D10 — Contadores por trecho, sem numeração de assentos
@@ -237,6 +254,33 @@ diretamente por socket, usando `internal/protocolo`, porque precisa controlar
 temporização e disparar requisições simultâneas, o que uma interface interativa
 não permite.
 
+### D16 — Busca ordenada por menos trocas, com limite de 10 itinerários
+
+A lista de itinerários devolvida ao passageiro segue esta ordem:
+
+1. menos baldeações (trocas de veículo, `pernas − 1`);
+2. menor preço total;
+3. chegada mais cedo;
+4. desempate determinístico sobre a sequência de trechos (seção 6, Passo 4).
+
+"Parada", para a ordenação, é troca de veículo, e não cidade atravessada dentro
+do carro: uma carona direta que passa por duas cidades vem antes de qualquer
+itinerário com baldeação. A prioridade reflete o que o passageiro valoriza: cada
+baldeação é um ponto em que ele depende de dois motoristas cumprirem o horário,
+e o preço só desempata entre roteiros com o mesmo número de trocas.
+
+A resposta traz **no máximo 10 itinerários**. O limite existe porque a resposta
+é uma única linha do protocolo, sujeita ao teto de 64 KB (seção 5.1), e **o
+cliente aplica o mesmo teto** ao ler. Um itinerário de duas pernas ocupa cerca de
+1 KB; sem limite, uma busca com dezenas de combinações derrubaria a conexão do
+passageiro. Dez cabem com folga mesmo com itinerários de três pernas e ainda são
+legíveis num menu de terminal.
+
+Como a ordenação acontece **antes** do corte, o limite nunca descarta um
+itinerário com menos trocas enquanto mantém um com mais. Limitação conhecida,
+registrada como tal: numa busca com mais de 10 possibilidades, o passageiro não
+vê todas.
+
 ---
 
 ## 4. Modelo de domínio
@@ -253,7 +297,7 @@ type Carona struct {
     ID          string
     MotoristaID string
     Rota        []string    // ["Salvador", "Feira de Santana", "Jequié"]
-    Horarios    []time.Time // len == len(Rota); derivados do corredor
+    Horarios    []time.Time // len == len(Rota); informados pelo motorista, estritamente crescentes
     Assentos    int         // capacidade total do veículo
     PrecoTrecho []int       // centavos; len == len(Rota)-1
     Livres      []int       // len == len(Rota)-1; inicia com Assentos
@@ -324,7 +368,7 @@ vaijunto/
 │   └── passageiro/main.go
 ├── internal/
 │   ├── protocolo/    # envelope, structs de requisição/resposta, códigos de erro, framing
-│   ├── dominio/      # Corredor, Carona, Reserva, Usuario, Estado, regras, mutex
+│   ├── dominio/      # cidades atendidas, Carona, Reserva, Usuario, Estado, regras, mutex
 │   ├── servidor/     # listener, sessão, roteador
 │   └── cliente/      # conexão reaproveitada pelos dois CLIs
 ├── testes/           # teste de concorrência e carga
@@ -370,41 +414,50 @@ e 4.
 
 Entrada: cidade de origem, cidade de destino, data.
 
-**Passo 1 — normalizar.** Converter origem e destino em índices `i` e `j` do
-corredor. Se `i == j`, erro. Sentido `d = +1` se `j > i`, senão `d = -1`.
+**Passo 1 — validar.** Origem e destino pertencem ao conjunto de cidades
+atendidas (D09). Se forem a mesma cidade, erro.
 
 **Passo 2 — gerar pernas candidatas.** Uma perna é um segmento contíguo de uma
-única carona.
+única carona, indexado pela cidade onde o passageiro embarca.
 
 ```
-pernas = []
+pernas = mapa cidade → lista de pernas
 para cada carona c não cancelada:
-    se sentido(c) != d: continua
     para cada par (a, b) de posições da rota de c, com a < b:
-        se cidade(c,a) ou cidade(c,b) estiverem fora do intervalo [i..j]: continua
         se algum trecho t em [a, b) tem livres[t] == 0: continua
-        pernas.append({carona: c, de: a, ate: b,
-                       partida: c.Horarios[a], chegada: c.Horarios[b],
-                       preco: soma(c.PrecoTrecho[a..b-1])})
+        pernas[c.Rota[a]].append({carona: c, de: a, ate: b,
+                                  cidades: c.Rota[a..b],
+                                  partida: c.Horarios[a], chegada: c.Horarios[b],
+                                  preco: soma(c.PrecoTrecho[a..b-1])})
 ```
 
-Com 4 cidades, cada carona gera no máximo 6 pernas.
+Uma carona com `k` paradas gera no máximo `k(k−1)/2` pernas.
 
-**Passo 3 — busca em profundidade.** Estado: cidade atual e instante em que o
-passageiro fica livre.
+Não há poda geométrica. Na versão com corredor fixo, pernas no sentido oposto ao
+da busca e cidades fora do intervalo entre origem e destino eram descartadas
+aqui. Com paradas livres (D09) essas podas perdem o sentido e passam a errar:
+uma carona `[Feira, Salvador, Conquista]` seria classificada pelo sentido das
+duas primeiras paradas e descartada, embora sirva à busca Salvador → Conquista.
+
+**Passo 3 — busca em profundidade.** Estado: cidade atual, instante em que o
+passageiro fica livre e cidades já visitadas. A busca começa com
+`visitadas = {origem}`.
 
 ```
-função expandir(cidadeAtual, livreEm, acumulado, resultados):
+função expandir(cidadeAtual, livreEm, acumulado, visitadas, resultados):
     se cidadeAtual == destino:
         resultados.append(montarItinerario(acumulado)); retorna
-    para cada perna p com origem == cidadeAtual:
+    para cada perna p em pernas[cidadeAtual]:
         se acumulado está vazio:
             se data(p.partida) != dataPedida: continua
         senão:
             se p.partida < livreEm + MARGEM_BALDEACAO: continua
             se p.partida > livreEm + ESPERA_MAXIMA_BALDEACAO: continua
         se perna usa carona já presente em acumulado: continua
-        expandir(p.destino, p.chegada, acumulado + [p], resultados)
+        se alguma cidade de p.cidades, exceto a de embarque, está em visitadas: continua
+        marcar p.cidades em visitadas
+        expandir(p.destino, p.chegada, acumulado + [p], visitadas, resultados)
+        desmarcar p.cidades
 ```
 
 O filtro de data se aplica apenas à primeira perna, o que permite baldeação
@@ -414,11 +467,25 @@ legalmente como perna intermediária, e a busca devolve esperas de 24 h como se
 fossem conexões. A checagem de carona repetida evita itinerários que embarcam
 duas vezes no mesmo veículo.
 
-**Passo 4 — ordenar e limitar.** Preço total crescente; empate por chegada mais
-cedo; depois por menos baldeações. Máximo de 20 itinerários.
+O conjunto de visitadas é o que substitui a antiga poda por sentido, e ele não é
+redundante. O encadeamento no espaço e no tempo garante contiguidade, horários
+avançando e carona não repetida, mas **não** impede voltar a uma cidade. Com
+`A: Salvador 06:00 → Feira 08:00`, `B: Feira 08:30 → Salvador 10:30` e
+`C: Salvador 11:00 → Conquista 18:30`, a sequência `A|B|C` é contígua, respeita a
+janela de baldeação e usa três caronas distintas — e volta à origem. As cidades
+intermediárias da perna também contam, porque o passageiro passou por elas dentro
+do veículo; isso inclui o destino, de modo que uma perna que atravessa o destino
+sem desembarcar nele não pode ser completada depois voltando até lá.
 
-Os três critérios não formam ordem total — no cenário da seção 9.2 há pares que
-empatam nos três —, e a iteração de mapa em Go é aleatória. A implementação
+A regra também garante o término com teto explícito: cada perna acrescenta ao
+menos uma cidade nova, então um itinerário tem no máximo `|cidades| − 1` pernas.
+
+**Passo 4 — ordenar e limitar (D16).** Menos baldeações; empate por menor preço
+total; depois por chegada mais cedo. Máximo de 10 itinerários, cortados **depois**
+da ordenação.
+
+Os três critérios não formam ordem total — há pares de itinerários que empatam
+nos três —, e a iteração de mapa em Go é aleatória. A implementação
 acrescenta um quarto desempate, determinístico, sobre a sequência de trechos do
 itinerário. Não é regra de negócio: existe para que a mesma consulta devolva
 sempre a mesma lista, na demonstração e no teste de regressão.
@@ -439,7 +506,10 @@ Tudo executa dentro de **uma única seção crítica**:
    carona; nenhuma carona repetida.
 2. **Encadeamento.** Para cada par consecutivo, a cidade de chegada do anterior é
    a de partida do seguinte, e a partida do seguinte ocorre no mínimo
-   `MARGEM_BALDEACAO` após a chegada do anterior.
+   `MARGEM_BALDEACAO` e no máximo `ESPERA_MAXIMA_BALDEACAO` após a chegada do
+   anterior. Nenhuma cidade se repete no itinerário, contando as cidades
+   intermediárias de cada item: é a mesma regra do Passo 3 da busca, pelo mesmo
+   motivo de as margens serem constantes únicas.
 3. **Disponibilidade.** Para todo trecho `t` em `[de, ate)` de cada carona,
    `Livres[t] >= 1`. Caronas canceladas reprovam.
 4. **Sobreposição.** Para cada reserva ativa do mesmo passageiro, o intervalo
@@ -470,9 +540,10 @@ tudo na mesma seção crítica.
 |---|---|
 | I1 | Para toda carona `c` e trecho `t`: `Livres[t] + (reservas ativas cobrindo (c,t)) == Assentos` |
 | I2 | `0 <= Livres[t] <= Assentos`, sempre |
-| I3 | Toda reserva ativa é um caminho contíguo no espaço e monotônico no tempo |
+| I3 | Toda reserva ativa é um caminho contíguo no espaço, sem cidade repetida, e monotônico no tempo |
 | I4 | Nenhuma reserva ativa referencia carona cancelada |
 | I5 | Duas reservas ativas do mesmo passageiro não se sobrepõem no tempo |
+| I6 | Toda carona tem ao menos duas paradas, nenhuma cidade repetida e horários estritamente crescentes |
 
 I1 é a invariante mestra. Ela é simultaneamente a prova de que nenhum assento foi
 vendido duas vezes (o lado esquerdo nunca excede `Assentos`) e de que nenhum
@@ -530,6 +601,12 @@ Os 50 usuários genéricos existem para o teste de carga; sem eles, T1 e T8 não
 como autenticar 50 conexões distintas.
 
 ### 9.2 Caronas
+
+> **A redesenhar.** Este cenário foi montado sobre o corredor fixo da versão
+> anterior da D09, e alguns papéis abaixo (como o controle negativo de "sentido
+> oposto") só fazem sentido nela. Ele será substituído por um cenário próprio
+> para paradas informadas pelo motorista. Até lá, continua valendo como teste de
+> regressão, com as mesmas caronas e os mesmos horários.
 
 Todas em 15/09/2026, salvo indicação.
 
@@ -633,7 +710,10 @@ Três pontos que costumam consumir tempo em laboratório:
 Itens deliberadamente fora do escopo, úteis para a seção final do relatório:
 
 - Cadastro de usuários e hash de senha.
-- Grafo de cidades arbitrário no lugar do corredor fixo.
+- Cadastro dinâmico de cidades atendidas e verificação de plausibilidade dos
+  horários informados pelo motorista, a partir de distâncias reais.
+- Paginação da busca, para mostrar mais de 10 itinerários sem estourar o limite
+  de linha do protocolo (D16).
 - `RWMutex` ou granularidade fina de lock, com medição comparativa.
 - Persistência do estado e recuperação após reinício.
 - Réplicas do servidor, o que traria o problema de consenso distribuído.

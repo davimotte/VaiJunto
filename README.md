@@ -43,7 +43,7 @@ cmd/servidor      binário do servidor central
 cmd/motorista     CLI do motorista
 cmd/passageiro    CLI do passageiro
 internal/protocolo  envelope, structs de mensagem, códigos de erro
-internal/dominio    corredor, caronas, reservas, estado e mutex
+internal/dominio    cidades atendidas, caronas, reservas, estado e mutex
 internal/servidor   listener, sessão, roteador
 internal/cliente    conexão reaproveitada pelos dois CLIs
 testes            teste de concorrência e carga
