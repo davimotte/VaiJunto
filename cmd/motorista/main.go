@@ -14,7 +14,6 @@ import (
 	_ "time/tzdata" // fusos embutidos no binário: a imagem Alpine do cliente não traz tzdata, e sem eles FusoDoCorredor cairia no deslocamento fixo.
 
 	"vaijunto/internal/cliente"
-	"vaijunto/internal/dominio"
 	"vaijunto/internal/protocolo"
 )
 
@@ -105,65 +104,32 @@ func menu(term *cliente.Terminal, conexao *cliente.Conexao) error {
 
 // publicarCarona coleta os campos da seção 5.4 e publica.
 //
-// O motorista informa origem, destino, partida, assentos e preços; rota e
-// horários intermediários são derivados pelo servidor a partir do corredor
-// (D09) e voltam na resposta.
+// O motorista informa cada parada com o seu horário, os assentos e o preço de
+// cada trecho (D09). O servidor não calcula nada: a resposta devolve a rota
+// como ele a guardou, e é ela que o menu mostra no final.
 func publicarCarona(term *cliente.Terminal, conexao *cliente.Conexao) error {
-	origem, err := cliente.EscolherCidade(term, "Origem:")
+	term.Imprimir("\nInforme as paradas na ordem em que o carro passa por elas.\n")
+	paradas, err := cliente.ColetarParadas(term, cliente.FusoDoCorredor())
 	if err != nil {
 		return err
 	}
 
-	// Origem igual a destino não é uma rota de zero trecho: seria uma carona
-	// sem preço nenhum a perguntar. Repetir a pergunta aqui evita montar uma
-	// requisição que só poderia voltar como ROTA_INVALIDA.
-	var destino string
-	for {
-		destino, err = cliente.EscolherCidade(term, "Destino:")
-		if err != nil {
-			return err
-		}
-		if destino != origem {
-			break
-		}
-		term.Imprimir("\nO destino precisa ser diferente da origem.\n")
-	}
-
-	partida, err := term.LerInstante("\nData da partida (AAAA-MM-DD): ", "Hora da partida (HH:MM): ", cliente.FusoDoCorredor())
+	assentos, err := term.LerInteiro("\nAssentos: ", 1, assentosMaximos)
 	if err != nil {
 		return err
 	}
 
-	assentos, err := term.LerInteiro("Assentos: ", 1, assentosMaximos)
-	if err != nil {
-		return err
-	}
-
-	// Um preço por trecho vizinho da rota, na ordem: len(rota)-1 valores, que
-	// é exatamente a contagem que a seção 5.4 exige.
-	rota := cliente.RotaDoCorredor(origem, destino)
-	precos := make([]int, 0, len(rota)-1)
+	// Um preço por trecho entre paradas consecutivas, na ordem: len(paradas)-1
+	// valores, que é exatamente a contagem que a seção 5.4 exige. Os rótulos
+	// saem das paradas que o próprio motorista acabou de informar.
+	precos := make([]int, 0, len(paradas)-1)
 	term.Imprimir("\nPreço de cada trecho:\n")
-	for i := 0; i+1 < len(rota); i++ {
-		preco, err := term.LerCentavos(fmt.Sprintf("  %s → %s: R$ ", rota[i], rota[i+1]))
+	for i := 0; i+1 < len(paradas); i++ {
+		preco, err := term.LerCentavos(fmt.Sprintf("  %s → %s: R$ ", paradas[i].Cidade, paradas[i+1].Cidade))
 		if err != nil {
 			return err
 		}
 		precos = append(precos, preco)
-	}
-
-	// ADAPTAÇÃO TEMPORÁRIA. PUBLICAR_CARONA já recebe as paradas com o horário
-	// de cada uma (PROTOCOL.md, seção 5.4), mas este menu ainda pergunta só
-	// origem, destino e partida. Até o menu perguntar parada por parada, as
-	// paradas são montadas aqui a partir do corredor, para que o cliente
-	// continue utilizável enquanto o protocolo e o servidor mudam.
-	rotaDerivada, horarios, err := dominio.DerivarRotaEHorarios(origem, destino, partida)
-	if err != nil {
-		return err
-	}
-	paradas := make([]protocolo.Parada, len(rotaDerivada))
-	for i, cidade := range rotaDerivada {
-		paradas[i] = protocolo.Parada{Cidade: cidade, Horario: horarios[i]}
 	}
 
 	publicada, err := conexao.PublicarCarona(protocolo.PublicarCaronaRequisicao{
