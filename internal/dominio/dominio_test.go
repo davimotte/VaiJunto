@@ -730,12 +730,12 @@ func TestBuscarItinerarios_CenarioSecao92(t *testing.T) {
 		t.Fatalf("BuscarItinerarios: %v", err)
 	}
 
-	// Ordem esperada: preço total crescente, empate por chegada mais cedo,
-	// depois por menos baldeações (PROTOCOL.md, seção 5.8). Como as sete
-	// caronas do cenário têm preços simétricos por construção, os seis
-	// itinerários custam os mesmos 11500 centavos e o critério de preço empata
-	// em todos: o que a lista abaixo fixa, na prática, são os dois critérios
-	// de desempate.
+	// Ordem esperada (D16; PROTOCOL.md, seção 5.8): menos baldeações primeiro,
+	// empate por menor preço total, depois por chegada mais cedo. Os três
+	// itinerários com uma troca vêm antes dos três com duas. Como as sete
+	// caronas do cenário têm preços simétricos por construção, os seis custam
+	// os mesmos 11500 centavos: dentro de cada grupo, quem decide é a chegada,
+	// e nos empates exatos, a assinatura.
 	esperados := []struct {
 		assinatura string
 		preco      int
@@ -747,10 +747,10 @@ func TestBuscarItinerarios_CenarioSecao92(t *testing.T) {
 			time.Date(2026, 9, 15, 6, 0, 0, 0, fuso), time.Date(2026, 9, 15, 14, 30, 0, 0, fuso), 1},
 		{"car-1:0-2|car-3:1-2", 11500,
 			time.Date(2026, 9, 15, 6, 0, 0, 0, fuso), time.Date(2026, 9, 15, 14, 30, 0, 0, fuso), 1},
-		{"car-1:0-1|car-7:0-1|car-3:1-2", 11500,
-			time.Date(2026, 9, 15, 6, 0, 0, 0, fuso), time.Date(2026, 9, 15, 14, 30, 0, 0, fuso), 2},
 		{"car-1:0-2|car-2:0-1", 11500,
 			time.Date(2026, 9, 15, 6, 0, 0, 0, fuso), time.Date(2026, 9, 15, 15, 0, 0, 0, fuso), 1},
+		{"car-1:0-1|car-7:0-1|car-3:1-2", 11500,
+			time.Date(2026, 9, 15, 6, 0, 0, 0, fuso), time.Date(2026, 9, 15, 14, 30, 0, 0, fuso), 2},
 		{"car-1:0-1|car-3:0-1|car-2:0-1", 11500,
 			time.Date(2026, 9, 15, 6, 0, 0, 0, fuso), time.Date(2026, 9, 15, 15, 0, 0, 0, fuso), 2},
 		{"car-1:0-1|car-7:0-1|car-2:0-1", 11500,
@@ -827,9 +827,16 @@ func TestBuscarItinerarios_CenarioSecao92(t *testing.T) {
 // R$ 10,00 por trecho, e devolve o identificador gerado.
 func publicarNoDia(t *testing.T, e *Estado, rota []string, horarios ...time.Time) string {
 	t.Helper()
+	return publicarComPreco(t, e, 1000, rota, horarios...)
+}
+
+// publicarComPreco é publicarNoDia com o preço de cada trecho escolhido, para
+// os testes de ordenação.
+func publicarComPreco(t *testing.T, e *Estado, precoPorTrecho int, rota []string, horarios ...time.Time) string {
+	t.Helper()
 	precos := make([]int, len(rota)-1)
 	for i := range precos {
-		precos[i] = 1000
+		precos[i] = precoPorTrecho
 	}
 	c, err := e.PublicarCarona("joao", rota, horarios, 2, precos, agoraDaPublicacao())
 	if err != nil {
@@ -919,7 +926,7 @@ func TestBuscarItinerarios_PernaNaoAtravessaCidadeVisitada(t *testing.T) {
 
 	_, obtidas := buscarNoDia(t, e, "Salvador", "Vitória da Conquista")
 
-	// D custa R$ 10,00 e B|C, R$ 20,00: a ordem abaixo é a de preço.
+	// D é direta e B|C tem uma troca de veículo: D vem primeiro (D16).
 	quero := []string{d + ":0-1", b + ":1-2|" + c + ":0-1"}
 	if fmt.Sprint(obtidas) != fmt.Sprint(quero) {
 		t.Fatalf("itinerários = %v, want %v", obtidas, quero)
@@ -963,5 +970,81 @@ func TestBuscarItinerarios_TetoDePernas(t *testing.T) {
 	}
 	if !encontrado {
 		t.Errorf("A|B|G (%s) ausente; itinerários: %v", maisLongo, obtidas)
+	}
+}
+
+// TestBuscarItinerarios_OrdenaPorTrocasDepoisPrecoDepoisChegada confere os
+// três critérios da D16, cada um decidindo um par.
+//
+//   - Trocas antes de preço: a direta D1, a R$ 90,00, vem antes de A|B, com
+//     uma troca, a R$ 20,00 — e A|B ainda chega mais cedo. É o caso em que a
+//     ordem antiga (preço primeiro) daria o resultado oposto.
+//   - Preço antes de chegada: entre as diretas, D2, a R$ 90,00 e chegando às
+//     18:00, vem antes de D3, a R$ 95,00 e chegando às 13:00.
+//   - Chegada como último critério de negócio: D1 e D2 custam o mesmo, e D1
+//     chega antes.
+func TestBuscarItinerarios_OrdenaPorTrocasDepoisPrecoDepoisChegada(t *testing.T) {
+	e := estadoDeTeste()
+	vdc := "Vitória da Conquista"
+	d1 := publicarComPreco(t, e, 9000, []string{"Salvador", vdc}, as(8, 0), as(16, 0))
+	d2 := publicarComPreco(t, e, 9000, []string{"Salvador", vdc}, as(9, 0), as(18, 0))
+	d3 := publicarComPreco(t, e, 9500, []string{"Salvador", vdc}, as(7, 0), as(13, 0))
+	a := publicarComPreco(t, e, 1000, []string{"Salvador", "Jequié"}, as(6, 0), as(9, 0))
+	b := publicarComPreco(t, e, 1000, []string{"Jequié", vdc}, as(10, 0), as(12, 0))
+
+	_, obtidas := buscarNoDia(t, e, "Salvador", vdc)
+
+	quero := []string{d1 + ":0-1", d2 + ":0-1", d3 + ":0-1", a + ":0-1|" + b + ":0-1"}
+	if fmt.Sprint(obtidas) != fmt.Sprint(quero) {
+		t.Fatalf("ordem = %v\nwant    %v\n(D1=%s, D2=%s, D3=%s, A=%s, B=%s)", obtidas, quero, d1, d2, d3, a, b)
+	}
+}
+
+// TestBuscarItinerarios_LimiteDeDezCortaDepoisDeOrdenar confere o limite da
+// D16 e, principalmente, que ele é aplicado **depois** da ordenação.
+//
+// São 24 itinerários possíveis: 4 diretos, caros, e 20 com uma troca, baratos
+// (4 caronas até Feira de Santana combinadas com 5 que seguem de lá). A busca
+// devolve 10, e os 4 diretos precisam estar entre eles: como nenhum itinerário
+// possível tem menos trocas que um direto, cortar qualquer um deles mantendo
+// um com troca seria cortar antes de ordenar — ou ordenar pelo critério
+// errado.
+func TestBuscarItinerarios_LimiteDeDezCortaDepoisDeOrdenar(t *testing.T) {
+	e := estadoDeTeste()
+	vdc := "Vitória da Conquista"
+	const diretos, primeiras, segundas = 4, 4, 5
+
+	for i := 0; i < diretos; i++ {
+		publicarComPreco(t, e, 9000, []string{"Salvador", vdc}, as(9, 5*i), as(13, 5*i))
+	}
+	for i := 0; i < primeiras; i++ {
+		publicarComPreco(t, e, 1000, []string{"Salvador", "Feira de Santana"}, as(6, 5*i), as(7, 5*i))
+	}
+	for i := 0; i < segundas; i++ {
+		// Partidas entre 08:00 e 08:20: todas a mais de 30 minutos da última
+		// chegada a Feira (07:15), então as 4 × 5 combinações encadeiam.
+		publicarComPreco(t, e, 1000, []string{"Feira de Santana", vdc}, as(8, 5*i), as(10, 5*i))
+	}
+
+	itinerarios, obtidas := buscarNoDia(t, e, "Salvador", vdc)
+
+	// Errorf, e não Fatalf: com o tamanho errado, a verificação de quais
+	// itinerários sobreviveram ao corte continua sendo informativa.
+	if len(itinerarios) != MAXIMO_ITINERARIOS || MAXIMO_ITINERARIOS != 10 {
+		t.Errorf("busca devolveu %d itinerários (MAXIMO_ITINERARIOS = %d), want 10 de %d possíveis",
+			len(itinerarios), MAXIMO_ITINERARIOS, diretos+primeiras*segundas)
+	}
+	diretosDevolvidos := 0
+	for i, it := range itinerarios {
+		if len(it.Pernas) == 1 {
+			diretosDevolvidos++
+		}
+		if i > 0 && len(it.Pernas) < len(itinerarios[i-1].Pernas) {
+			t.Errorf("posição %d tem menos trocas que a anterior: %v", i, obtidas)
+		}
+	}
+	if diretosDevolvidos != diretos {
+		t.Errorf("%d diretos devolvidos, want os %d: o corte descartou itinerário com menos trocas\n%v",
+			diretosDevolvidos, diretos, obtidas)
 	}
 }

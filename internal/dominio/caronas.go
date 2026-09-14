@@ -291,8 +291,15 @@ const (
 	// legítima da espera de um dia inteiro.
 	ESPERA_MAXIMA_BALDEACAO = 12 * time.Hour
 
-	// MAXIMO_ITINERARIOS limita a resposta da busca (PROTOCOL.md, seção 5.8).
-	MAXIMO_ITINERARIOS = 20
+	// MAXIMO_ITINERARIOS limita a resposta da busca (D16; PROTOCOL.md, seção
+	// 5.8).
+	//
+	// A resposta é uma única linha do protocolo, sujeita ao teto de 64 KB, e o
+	// cliente aplica o mesmo teto ao ler: um itinerário de duas pernas ocupa
+	// cerca de 1 KB, e sem limite uma busca com dezenas de combinações
+	// derrubaria a conexão do passageiro. Dez cabem com folga mesmo com três
+	// pernas cada. O corte só é seguro porque vem depois da ordenação.
+	MAXIMO_ITINERARIOS = 10
 )
 
 // pernaCandidata é uma perna gerada no passo 2 da busca, antes de entrar em
@@ -480,7 +487,9 @@ func buscarItinerarios(e *Estado, origem, destino string, data time.Time) ([]Iti
 	// explosão combinatória.
 	expandir(origem, time.Time{})
 
-	// Passo 4 — ordenar e limitar.
+	// Passo 4 — ordenar e limitar (D16). A ordem das duas linhas é a regra: o
+	// corte depois da ordenação nunca descarta um itinerário com menos trocas
+	// enquanto mantém um com mais.
 	ordenarItinerarios(encontrados)
 	if len(encontrados) > MAXIMO_ITINERARIOS {
 		encontrados = encontrados[:MAXIMO_ITINERARIOS]
@@ -553,26 +562,32 @@ func assinaturaItinerario(it Itinerario) string {
 	return b.String()
 }
 
-// ordenarItinerarios aplica a ordenação do PROTOCOL.md (seção 5.8): preço
-// total crescente, empate por chegada mais cedo, depois por menos baldeações.
+// ordenarItinerarios aplica a ordenação da D16 (PROTOCOL.md, seção 5.8):
+// menos baldeações primeiro, empate por menor preço total, depois por chegada
+// mais cedo.
 //
-// O quarto critério não está no protocolo e não é uma regra de negócio: os
-// três documentados não formam ordem total (no cenário da seção 9.2 há pares
-// que empatam nos três), e sem um desempate final a lista sairia em ordem
-// diferente a cada chamada. A assinatura é arbitrária de propósito — o que
-// importa não é *qual* dos empatados vem antes, e sim que venha sempre o
-// mesmo.
+// Baldeação vem antes de preço porque cada troca de veículo é um ponto em que
+// o passageiro depende de dois motoristas cumprirem o horário; o preço só
+// decide entre roteiros com o mesmo número de trocas. Comparar len(Pernas) é o
+// mesmo que comparar baldeações, que são uma a menos que as pernas.
+//
+// O quarto critério não é uma regra de negócio: os três da D16 não formam
+// ordem total (há itinerários que empatam nos três), e sem um desempate final
+// a lista sairia em ordem diferente a cada chamada — e, com o limite de
+// MAXIMO_ITINERARIOS, o corte poderia descartar um itinerário diferente a cada
+// vez. A assinatura é arbitrária de propósito: o que importa não é *qual* dos
+// empatados vem antes, e sim que venha sempre o mesmo.
 func ordenarItinerarios(lista []Itinerario) {
 	sort.Slice(lista, func(a, b int) bool {
 		x, y := lista[a], lista[b]
+		if len(x.Pernas) != len(y.Pernas) {
+			return len(x.Pernas) < len(y.Pernas)
+		}
 		if x.PrecoTotalCentavos != y.PrecoTotalCentavos {
 			return x.PrecoTotalCentavos < y.PrecoTotalCentavos
 		}
 		if !x.Chegada.Equal(y.Chegada) {
 			return x.Chegada.Before(y.Chegada)
-		}
-		if len(x.Pernas) != len(y.Pernas) {
-			return len(x.Pernas) < len(y.Pernas)
 		}
 		return assinaturaItinerario(x) < assinaturaItinerario(y)
 	})
