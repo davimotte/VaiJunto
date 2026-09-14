@@ -296,45 +296,34 @@ const (
 )
 
 // pernaCandidata é uma perna gerada no passo 2 da busca, antes de entrar em
-// qualquer itinerário. Guarda os índices de cidade **no corredor** (e não na
-// rota da carona) porque é por eles que a busca em profundidade encadeia as
-// pernas: duas caronas diferentes chegam à mesma cidade em posições
-// diferentes das suas rotas.
+// qualquer itinerário.
+//
+// Além da perna em si, guarda as cidades que o passageiro percorre nela, da
+// de embarque à de desembarque, inclusive as intermediárias: é sobre elas que
+// a busca em profundidade aplica a regra de não revisitar cidade (D09). A
+// fatia aponta para dentro de Carona.Rota sem cópia, o que é seguro porque só
+// é lida, e só dentro da seção crítica da busca.
 type pernaCandidata struct {
-	perna                       PernaItinerario
-	cidadeOrigem, cidadeDestino int
-}
-
-// sentidoDaCarona devolve +1 quando a carona percorre o corredor no sentido
-// crescente de índice e -1 no decrescente. A rota é sempre derivada do
-// corredor (D09), então basta olhar as duas primeiras cidades.
-func sentidoDaCarona(c *Carona) int {
-	primeira, _ := IndiceCidade(c.Rota[0])
-	segunda, _ := IndiceCidade(c.Rota[1])
-	if segunda > primeira {
-		return 1
-	}
-	return -1
+	perna   PernaItinerario
+	cidades []string
 }
 
 // gerarPernas executa o passo 2 do algoritmo de busca (PROJETO.md, seção 6):
-// todo segmento contíguo de toda carona que sirva ao trajeto pedido.
+// todo segmento contíguo de toda carona com assento livre, indexado pela
+// cidade de embarque.
 //
-// Três podas, nesta ordem: sentido oposto ao da busca, cidade fora do
-// intervalo [menor, maior] entre origem e destino, e trecho sem assento
-// livre. A terceira é a única que lê estado mutável — e ela é só uma poda:
-// a busca não reserva nem promete nada, e a reserva refaz a verificação
-// inteira sob o lock (D07).
+// A única poda é a de trecho sem assento, a única que lê estado mutável — e
+// ela é só uma poda: a busca não reserva nem promete nada, e a reserva refaz
+// a verificação inteira sob o lock (D07). Não há poda geométrica: sem
+// corredor não existe sentido de viagem (D09), e uma poda pelo sentido das
+// primeiras paradas descartaria caronas que servem à busca.
 //
-// Com 4 cidades no corredor, cada carona gera no máximo 6 pernas.
-func gerarPernas(e *Estado, sentido, menor, maior int) map[int][]pernaCandidata {
-	pernas := make(map[int][]pernaCandidata)
+// Uma carona com k paradas gera no máximo k(k−1)/2 pernas.
+func gerarPernas(e *Estado) map[string][]pernaCandidata {
+	pernas := make(map[string][]pernaCandidata)
 
 	for _, c := range e.caronas {
 		if c.Cancelada || len(c.Rota) < 2 {
-			continue
-		}
-		if sentidoDaCarona(c) != sentido {
 			continue
 		}
 
@@ -344,10 +333,6 @@ func gerarPernas(e *Estado, sentido, menor, maior int) map[int][]pernaCandidata 
 		}
 
 		for a := 0; a < len(c.Rota)-1; a++ {
-			cidadeA, _ := IndiceCidade(c.Rota[a])
-			if cidadeA < menor || cidadeA > maior {
-				continue
-			}
 			// O preço acumula ao longo de b: percorrer os trechos de novo a
 			// cada par (a,b) recalcularia a mesma soma várias vezes.
 			preco := 0
@@ -359,11 +344,7 @@ func gerarPernas(e *Estado, sentido, menor, maior int) map[int][]pernaCandidata 
 				}
 				preco += c.PrecoTrecho[b-1]
 
-				cidadeB, _ := IndiceCidade(c.Rota[b])
-				if cidadeB < menor || cidadeB > maior {
-					continue
-				}
-				pernas[cidadeA] = append(pernas[cidadeA], pernaCandidata{
+				pernas[c.Rota[a]] = append(pernas[c.Rota[a]], pernaCandidata{
 					perna: PernaItinerario{
 						CaronaID:      c.ID,
 						Motorista:     motorista,
@@ -375,8 +356,7 @@ func gerarPernas(e *Estado, sentido, menor, maior int) map[int][]pernaCandidata 
 						Chegada:       c.Horarios[b],
 						PrecoCentavos: preco,
 					},
-					cidadeOrigem:  cidadeA,
-					cidadeDestino: cidadeB,
+					cidades: c.Rota[a : b+1],
 				})
 			}
 		}
@@ -425,38 +405,30 @@ func mesmaData(instante, data time.Time) bool {
 // resultado pode estar desatualizado quando ele confirmar, e por isso a
 // reserva revalida tudo.
 func buscarItinerarios(e *Estado, origem, destino string, data time.Time) ([]Itinerario, error) {
-	// Passo 1 — normalizar.
-	i, ok := IndiceCidade(origem)
-	if !ok {
+	// Passo 1 — validar.
+	if _, ok := IndiceCidade(origem); !ok {
 		return nil, fmt.Errorf("%w: origem %q", ErrCidadeDesconhecida, origem)
 	}
-	j, ok := IndiceCidade(destino)
-	if !ok {
+	if _, ok := IndiceCidade(destino); !ok {
 		return nil, fmt.Errorf("%w: destino %q", ErrCidadeDesconhecida, destino)
 	}
-	if i == j {
+	if origem == destino {
 		return nil, fmt.Errorf("%w: origem e destino são a mesma cidade %q", ErrRotaInvalida, origem)
 	}
 
-	sentido := 1
-	menor, maior := i, j
-	if j < i {
-		sentido = -1
-		menor, maior = j, i
-	}
-
 	// Passo 2 — gerar pernas candidatas.
-	pernas := gerarPernas(e, sentido, menor, maior)
+	pernas := gerarPernas(e)
 
-	// Passo 3 — busca em profundidade. O estado é a cidade atual e o instante
-	// em que o passageiro fica livre nela.
+	// Passo 3 — busca em profundidade. O estado é a cidade atual, o instante
+	// em que o passageiro fica livre nela e as cidades por onde ele já passou.
 	var encontrados []Itinerario
 	var acumulado []PernaItinerario
 	caronasUsadas := make(map[string]bool)
+	visitadas := map[string]bool{origem: true}
 
-	var expandir func(cidadeAtual int, livreEm time.Time)
-	expandir = func(cidadeAtual int, livreEm time.Time) {
-		if cidadeAtual == j {
+	var expandir func(cidadeAtual string, livreEm time.Time)
+	expandir = func(cidadeAtual string, livreEm time.Time) {
+		if cidadeAtual == destino {
 			encontrados = append(encontrados, montarItinerario(acumulado))
 			return
 		}
@@ -482,20 +454,31 @@ func buscarItinerarios(e *Estado, origem, destino string, data time.Time) ([]Iti
 			if caronasUsadas[p.CaronaID] {
 				continue
 			}
+			// Nenhuma cidade da perna pode ter sido visitada, exceto a de
+			// embarque, que é onde o passageiro já está. Contam também as
+			// intermediárias: passar por uma cidade dentro do carro é estar
+			// nela (D09).
+			if atravessaVisitada(candidata.cidades[1:], visitadas) {
+				continue
+			}
 
 			caronasUsadas[p.CaronaID] = true
+			marcar(candidata.cidades[1:], visitadas, true)
 			acumulado = append(acumulado, p)
-			expandir(candidata.cidadeDestino, p.Chegada)
+			expandir(p.Destino, p.Chegada)
 			acumulado = acumulado[:len(acumulado)-1]
+			marcar(candidata.cidades[1:], visitadas, false)
 			caronasUsadas[p.CaronaID] = false
 		}
 	}
-	// A recursão termina sem precisar marcar cidades visitadas: toda perna
-	// avança no sentido da busca, então a cidade atual é estritamente
-	// monotônica e nenhuma se repete. Com 4 cidades em linha, o itinerário
-	// tem no máximo 3 pernas — teto que vem da topologia (D09), e não de um
-	// limite arbitrário para conter explosão combinatória.
-	expandir(i, time.Time{})
+	// O conjunto de visitadas não é redundante com o encadeamento: horários
+	// avançando e carona não repetida não impedem um itinerário de ir e voltar
+	// (Salvador → Feira, Feira → Salvador, Salvador → Conquista encadeia). E é
+	// ele que dá o teto da recursão: cada perna acrescenta ao menos uma cidade
+	// nova, então um itinerário tem no máximo |cidades| − 1 pernas — teto que
+	// vem de uma regra do domínio, e não de um limite arbitrário para conter
+	// explosão combinatória.
+	expandir(origem, time.Time{})
 
 	// Passo 4 — ordenar e limitar.
 	ordenarItinerarios(encontrados)
@@ -509,6 +492,32 @@ func buscarItinerarios(e *Estado, origem, destino string, data time.Time) ([]Iti
 		encontrados = []Itinerario{}
 	}
 	return encontrados, nil
+}
+
+// atravessaVisitada responde se alguma das cidades já está no conjunto.
+func atravessaVisitada(cidades []string, visitadas map[string]bool) bool {
+	for _, cidade := range cidades {
+		if visitadas[cidade] {
+			return true
+		}
+	}
+	return false
+}
+
+// marcar põe as cidades no conjunto de visitadas, ou as tira dele, ao entrar
+// e ao sair de um ramo da busca em profundidade.
+//
+// Desmarcar é seguro porque atravessaVisitada garantiu, antes da marcação,
+// que nenhuma dessas cidades estava no conjunto: tirá-las devolve o conjunto
+// exatamente ao estado de antes do ramo.
+func marcar(cidades []string, visitadas map[string]bool, valor bool) {
+	for _, cidade := range cidades {
+		if valor {
+			visitadas[cidade] = true
+		} else {
+			delete(visitadas, cidade)
+		}
+	}
 }
 
 // montarItinerario fecha um itinerário a partir das pernas acumuladas.

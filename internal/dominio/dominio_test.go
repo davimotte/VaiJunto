@@ -815,3 +815,153 @@ func TestBuscarItinerarios_CenarioSecao92(t *testing.T) {
 		}
 	}
 }
+
+// --- Busca com paradas livres (D09; PROJETO.md, seção 6) ---
+//
+// Os testes abaixo montam as caronas em código, e não em dados/, ao contrário
+// do teste de regressão acima: cada um isola uma regra da busca com o menor
+// número de caronas capaz de exercitá-la. Todas as caronas saem em 15/09/2026
+// (helper as), e a busca é sempre dessa data.
+
+// publicarNoDia publica uma carona de joao com as paradas dadas, 2 assentos e
+// R$ 10,00 por trecho, e devolve o identificador gerado.
+func publicarNoDia(t *testing.T, e *Estado, rota []string, horarios ...time.Time) string {
+	t.Helper()
+	precos := make([]int, len(rota)-1)
+	for i := range precos {
+		precos[i] = 1000
+	}
+	c, err := e.PublicarCarona("joao", rota, horarios, 2, precos, agoraDaPublicacao())
+	if err != nil {
+		t.Fatalf("PublicarCarona(%v): %v", rota, err)
+	}
+	return c.ID
+}
+
+// buscarNoDia busca de origem a destino em 15/09/2026 e devolve as assinaturas
+// dos itinerários, na ordem da resposta.
+func buscarNoDia(t *testing.T, e *Estado, origem, destino string) ([]Itinerario, []string) {
+	t.Helper()
+	itinerarios, err := e.BuscarItinerarios(origem, destino, time.Date(2026, 9, 15, 0, 0, 0, 0, fusoBrasilia()))
+	if err != nil {
+		t.Fatalf("BuscarItinerarios(%s, %s): %v", origem, destino, err)
+	}
+	assinaturas := make([]string, len(itinerarios))
+	for i, it := range itinerarios {
+		assinaturas[i] = assinatura(it)
+	}
+	return itinerarios, assinaturas
+}
+
+// TestBuscarItinerarios_RotaForaDeOrdemServeABusca confere que a busca não
+// descarta carona pela ordem das suas paradas.
+//
+// A carona vai de Feira de Santana a Salvador e depois a Vitória da Conquista.
+// Sem corredor não existe "sentido" de viagem (D09), e a perna Salvador →
+// Vitória da Conquista serve à busca como qualquer outra. Uma poda que ainda
+// classificasse a carona pelas duas primeiras paradas a descartaria inteira —
+// falso negativo, e não excesso de cautela.
+func TestBuscarItinerarios_RotaForaDeOrdemServeABusca(t *testing.T) {
+	e := estadoDeTeste()
+	id := publicarNoDia(t, e, []string{"Feira de Santana", "Salvador", "Vitória da Conquista"},
+		as(6, 0), as(8, 0), as(18, 0))
+
+	_, obtidas := buscarNoDia(t, e, "Salvador", "Vitória da Conquista")
+
+	quero := []string{id + ":1-2"}
+	if fmt.Sprint(obtidas) != fmt.Sprint(quero) {
+		t.Fatalf("itinerários = %v, want %v", obtidas, quero)
+	}
+}
+
+// TestBuscarItinerarios_NaoVoltaACidadeVisitada é o contraexemplo da seção 6
+// do PROJETO.md: o encadeamento no espaço e no tempo, sozinho, não impede um
+// itinerário de voltar à origem.
+//
+// A (Salvador → Feira), B (Feira → Salvador) e C (Salvador → Conquista)
+// encadeiam com folgas dentro da janela de baldeação e são três caronas
+// distintas, então A|B|C passaria em todas as outras regras da busca. Só o
+// conjunto de cidades visitadas o recusa. C sozinha é o controle positivo: sem
+// ela, uma busca que não devolvesse nada também passaria.
+func TestBuscarItinerarios_NaoVoltaACidadeVisitada(t *testing.T) {
+	e := estadoDeTeste()
+	a := publicarNoDia(t, e, []string{"Salvador", "Feira de Santana"}, as(6, 0), as(8, 0))
+	b := publicarNoDia(t, e, []string{"Feira de Santana", "Salvador"}, as(8, 30), as(10, 30))
+	c := publicarNoDia(t, e, []string{"Salvador", "Vitória da Conquista"}, as(11, 0), as(18, 30))
+
+	_, obtidas := buscarNoDia(t, e, "Salvador", "Vitória da Conquista")
+
+	quero := []string{c + ":0-1"}
+	if fmt.Sprint(obtidas) != fmt.Sprint(quero) {
+		t.Fatalf("itinerários = %v, want %v\n(A=%s, B=%s, C=%s; A|B|C volta a Salvador)", obtidas, quero, a, b, c)
+	}
+}
+
+// TestBuscarItinerarios_PernaNaoAtravessaCidadeVisitada confere D-e: as
+// cidades por onde o passageiro passa dentro do veículo também contam como
+// visitadas, e não só as de embarque e desembarque.
+//
+// A leva de Salvador a Jequié. B vai de Jequié a Feira de Santana passando por
+// Salvador, e C segue de Feira a Vitória da Conquista. A perna Jequié → Feira
+// de B embarca e desembarca em cidades novas, mas atravessa Salvador, onde o
+// passageiro já esteve: A|B|C voltaria à origem sem descer do carro.
+//
+// Dois controles positivos. D, direta, garante que a busca não parou de
+// encontrar. B|C, embarcando em B já em Salvador (posição 1 da rota de B),
+// garante que a regra recusa a perna que atravessa a cidade visitada, e não a
+// carona B inteira: a mesma carona, num segmento que não revisita nada, serve.
+func TestBuscarItinerarios_PernaNaoAtravessaCidadeVisitada(t *testing.T) {
+	e := estadoDeTeste()
+	publicarNoDia(t, e, []string{"Salvador", "Jequié"}, as(6, 0), as(8, 0))
+	b := publicarNoDia(t, e, []string{"Jequié", "Salvador", "Feira de Santana"}, as(8, 30), as(9, 30), as(10, 30))
+	c := publicarNoDia(t, e, []string{"Feira de Santana", "Vitória da Conquista"}, as(11, 0), as(14, 0))
+	d := publicarNoDia(t, e, []string{"Salvador", "Vitória da Conquista"}, as(7, 0), as(12, 0))
+
+	_, obtidas := buscarNoDia(t, e, "Salvador", "Vitória da Conquista")
+
+	// D custa R$ 10,00 e B|C, R$ 20,00: a ordem abaixo é a de preço.
+	quero := []string{d + ":0-1", b + ":1-2|" + c + ":0-1"}
+	if fmt.Sprint(obtidas) != fmt.Sprint(quero) {
+		t.Fatalf("itinerários = %v, want %v", obtidas, quero)
+	}
+}
+
+// TestBuscarItinerarios_TetoDePernas confere o teto que decorre da regra de
+// não revisitar cidade: cada perna acrescenta ao menos uma cidade nova, então
+// nenhum itinerário tem mais de |cidades| − 1 pernas.
+//
+// As caronas formam, de propósito, uma cadeia que encadeia no tempo por seis
+// pernas indo e voltando entre as cidades (A, B, C, D, E, F). Sem o conjunto de
+// visitadas ela seria devolvida; com ele, o mais longo possível é A|B|G, que
+// passa pelas quatro cidades uma vez cada. A presença de A|B|G é o controle
+// positivo: garante que o teto veio da regra, e não de uma busca que parou de
+// encadear.
+func TestBuscarItinerarios_TetoDePernas(t *testing.T) {
+	e := estadoDeTeste()
+	a := publicarNoDia(t, e, []string{"Salvador", "Feira de Santana"}, as(6, 0), as(7, 0))
+	b := publicarNoDia(t, e, []string{"Feira de Santana", "Jequié"}, as(8, 0), as(9, 0))
+	g := publicarNoDia(t, e, []string{"Jequié", "Vitória da Conquista"}, as(10, 0), as(11, 0))
+	publicarNoDia(t, e, []string{"Jequié", "Feira de Santana"}, as(10, 0), as(11, 0))     // C
+	publicarNoDia(t, e, []string{"Feira de Santana", "Salvador"}, as(12, 0), as(13, 0))   // D
+	publicarNoDia(t, e, []string{"Salvador", "Jequié"}, as(14, 0), as(15, 0))             // E
+	publicarNoDia(t, e, []string{"Jequié", "Vitória da Conquista"}, as(16, 0), as(17, 0)) // F
+
+	itinerarios, obtidas := buscarNoDia(t, e, "Salvador", "Vitória da Conquista")
+
+	teto := len(CidadesCorredor()) - 1
+	for _, it := range itinerarios {
+		if len(it.Pernas) > teto {
+			t.Errorf("itinerário %s tem %d pernas, acima do teto de %d", assinatura(it), len(it.Pernas), teto)
+		}
+	}
+	maisLongo := a + ":0-1|" + b + ":0-1|" + g + ":0-1"
+	encontrado := false
+	for _, s := range obtidas {
+		if s == maisLongo {
+			encontrado = true
+		}
+	}
+	if !encontrado {
+		t.Errorf("A|B|G (%s) ausente; itinerários: %v", maisLongo, obtidas)
+	}
+}
