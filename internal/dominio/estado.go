@@ -37,12 +37,13 @@ func (e *Estado) Autenticar(usuario, senha string) (Usuario, error) {
 	return autenticar(e, usuario, senha)
 }
 
-// PublicarCarona registra uma nova carona do motorista (PROTOCOL.md, seção
-// 5.4). Validação e escrita acontecem juntas, na mesma seção crítica.
-func (e *Estado) PublicarCarona(motoristaID, origem, destino string, partida time.Time, assentos int, precos []int, agora time.Time) (Carona, error) {
+// PublicarCarona registra uma nova carona do motorista, com as paradas e os
+// horários que ele informou (PROTOCOL.md, seção 5.4; D09). Validação e escrita
+// acontecem juntas, na mesma seção crítica.
+func (e *Estado) PublicarCarona(motoristaID string, rota []string, horarios []time.Time, assentos int, precos []int, agora time.Time) (Carona, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return publicarCarona(e, motoristaID, origem, destino, partida, assentos, precos, agora)
+	return publicarCarona(e, motoristaID, rota, horarios, assentos, precos, agora)
 }
 
 // CaronasDoMotorista lista as caronas publicadas pelo motorista

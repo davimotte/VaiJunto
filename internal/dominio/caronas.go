@@ -144,29 +144,21 @@ func validarCarona(rota []string, horarios []time.Time, assentos int, precos []i
 // carona só entra no mapa depois que nenhuma regra pode mais falhar, então
 // não existe estado parcial a desfazer e não é preciso rollback.
 //
+// O motorista informa as paradas e o horário de cada uma (D09); nada é
+// derivado aqui. As regras comuns a toda carona ficam em validarCarona, que a
+// carga de boot também usa, e só a da partida no futuro é exclusiva da
+// publicação.
+//
 // agora é recebido de fora em vez de lido de time.Now() aqui para que a regra
 // "partida no futuro" seja testável sem depender do relógio da máquina.
-func publicarCarona(e *Estado, motoristaID, origem, destino string, partida time.Time, assentos int, precos []int, agora time.Time) (Carona, error) {
-	rota, horarios, err := DerivarRotaEHorarios(origem, destino, partida)
-	if err != nil {
+func publicarCarona(e *Estado, motoristaID string, rota []string, horarios []time.Time, assentos int, precos []int, agora time.Time) (Carona, error) {
+	if err := validarCarona(rota, horarios, assentos, precos); err != nil {
 		return Carona{}, err
 	}
-
-	trechos := len(rota) - 1
-	if len(precos) != trechos {
-		return Carona{}, fmt.Errorf("%w: %d preços para %d trechos", ErrRotaInvalida, len(precos), trechos)
-	}
-	for i, preco := range precos {
-		if preco < 0 {
-			return Carona{}, fmt.Errorf("%w: trecho %d com preço %d", ErrPrecoInvalido, i, preco)
-		}
-	}
-	if assentos < 1 {
-		return Carona{}, fmt.Errorf("%w: %d", ErrAssentosInvalidos, assentos)
-	}
-	// Comparação por After, nunca por ==: instantes iguais em fusos
-	// diferentes são o mesmo ponto no tempo (D11).
-	if !partida.After(agora) {
+	// Basta olhar a primeira parada: validarCarona já garantiu que as
+	// seguintes vêm depois dela. Comparação por After, nunca por ==: instantes
+	// iguais em fusos diferentes são o mesmo ponto no tempo (D11).
+	if partida := horarios[0]; !partida.After(agora) {
 		return Carona{}, fmt.Errorf("%w: %s não é posterior a %s", ErrPartidaInvalida, partida, agora)
 	}
 
@@ -175,19 +167,20 @@ func publicarCarona(e *Estado, motoristaID, origem, destino string, partida time
 		return Carona{}, err
 	}
 
-	livres := make([]int, trechos)
+	livres := make([]int, len(rota)-1)
 	for i := range livres {
 		livres[i] = assentos
 	}
 
-	// Primeira e única escrita. As fatias de preço vêm de fora (foram
-	// decodificadas do JSON do cliente), então entram copiadas: o estado não
-	// pode compartilhar memória com quem o alimentou.
+	// Primeira e única escrita. Rota, horários e preços vêm de fora (foram
+	// decodificados do JSON do cliente), então entram copiados: o estado não
+	// pode compartilhar memória com quem o alimentou. Sem a cópia, o chamador
+	// poderia reordenar os horários depois da validação, sem lock nenhum.
 	carona := &Carona{
 		ID:          id,
 		MotoristaID: motoristaID,
-		Rota:        rota,
-		Horarios:    horarios,
+		Rota:        append([]string(nil), rota...),
+		Horarios:    append([]time.Time(nil), horarios...),
 		Assentos:    assentos,
 		PrecoTrecho: append([]int(nil), precos...),
 		Livres:      livres,

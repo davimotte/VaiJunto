@@ -388,98 +388,160 @@ func TestAutenticar(t *testing.T) {
 	}
 }
 
-// TestPublicarCarona_DerivaRotaEInicializaLivres confere a seção 5.4 do
-// PROTOCOL.md: o motorista informa origem, destino e partida, e o servidor
-// deriva rota e horários, com Livres começando igual a Assentos em cada
-// trecho.
-func TestPublicarCarona_DerivaRotaEInicializaLivres(t *testing.T) {
-	e := estadoDeTeste()
-	fuso := fusoBrasilia()
-	partida := time.Date(2026, 9, 15, 8, 0, 0, 0, fuso)
-	agora := time.Date(2026, 9, 1, 0, 0, 0, 0, fuso)
+// agoraDaPublicacao é o relógio dos testes de publicação: 01/09/2026, antes
+// de todas as paradas usadas neles, que caem em 15/09/2026 (helper as).
+func agoraDaPublicacao() time.Time {
+	return time.Date(2026, 9, 1, 0, 0, 0, 0, fusoBrasilia())
+}
 
-	c, err := e.PublicarCarona("joao", "Salvador", "Vitória da Conquista", partida, 3, []int{3000, 5000, 4000}, agora)
+// TestPublicarCarona_GuardaParadasEInicializaLivres confere a D09 na
+// publicação: o motorista informa as paradas e o horário de cada uma, e o
+// estado guarda exatamente o que ele informou, com Livres começando igual a
+// Assentos em cada trecho.
+//
+// Rota e horários foram escolhidos para que nenhuma derivação pudesse
+// produzi-los — Jequié → Salvador → Vitória da Conquista não é sequência em
+// linha, e 50 minutos entre Jequié e Salvador não é duração de trajeto nenhuma.
+// Uma publicação que ainda calculasse horários falharia aqui.
+func TestPublicarCarona_GuardaParadasEInicializaLivres(t *testing.T) {
+	e := estadoDeTeste()
+	rota := []string{"Jequié", "Salvador", "Vitória da Conquista"}
+	horarios := []time.Time{as(8, 0), as(8, 50), as(20, 10)}
+
+	c, err := e.PublicarCarona("joao", rota, horarios, 3, []int{1000, 2000}, agoraDaPublicacao())
 	if err != nil {
 		t.Fatalf("PublicarCarona: %v", err)
 	}
-
-	if len(c.Rota) != 4 || len(c.Horarios) != 4 {
-		t.Fatalf("rota/horários com tamanho errado: %v / %v", c.Rota, c.Horarios)
-	}
-	chegada := time.Date(2026, 9, 15, 15, 30, 0, 0, fuso)
-	if !c.Horarios[3].Equal(chegada) {
-		t.Fatalf("chegada = %v, want %v", c.Horarios[3], chegada)
-	}
-	for i, livres := range c.Livres {
-		if livres != 3 {
-			t.Fatalf("Livres[%d] = %d, want 3 (todos: %v)", i, livres, c.Livres)
-		}
-	}
-	if c.MotoristaID != "joao" {
-		t.Fatalf("MotoristaID = %q, want joao", c.MotoristaID)
-	}
 	if c.ID == "" {
 		t.Fatalf("carona publicada sem identificador")
+	}
+
+	// Confere o que ficou no estado, e não só o valor devolvido: é o estado
+	// que a busca e a reserva vão ler.
+	guardada, _, err := e.DetalharCarona(c.ID, "joao")
+	if err != nil {
+		t.Fatalf("DetalharCarona: %v", err)
+	}
+	if fmt.Sprint(guardada.Rota) != fmt.Sprint(rota) {
+		t.Errorf("rota = %v, want %v", guardada.Rota, rota)
+	}
+	if len(guardada.Horarios) != len(horarios) {
+		t.Fatalf("horarios = %v, want %v", guardada.Horarios, horarios)
+	}
+	for i, quero := range horarios {
+		if !guardada.Horarios[i].Equal(quero) {
+			t.Errorf("horarios[%d] = %v, want %v", i, guardada.Horarios[i], quero)
+		}
+	}
+	if fmt.Sprint(guardada.Livres) != "[3 3]" {
+		t.Errorf("Livres = %v, want [3 3]", guardada.Livres)
+	}
+	if guardada.MotoristaID != "joao" || fmt.Sprint(guardada.PrecoTrecho) != "[1000 2000]" {
+		t.Errorf("carona guardada = %+v", guardada)
 	}
 }
 
 // TestPublicarCarona_Validacoes percorre as validações da seção 5.4, cada uma
 // com o sentinela que a seção 6 espera. Preço negativo e assento zero são
 // "fora de faixa", que a tabela de erros classifica como CAMPO_INVALIDO.
+//
+// A grafia divergente fica aqui, e não num teste da lista de cidades: a
+// comparação por igualdade exata só importa porque é ela que decide o que
+// entra no estado.
 func TestPublicarCarona_Validacoes(t *testing.T) {
-	fuso := fusoBrasilia()
-	agora := time.Date(2026, 9, 1, 0, 0, 0, 0, fuso)
-	futuro := time.Date(2026, 9, 15, 8, 0, 0, 0, fuso)
+	agora := agoraDaPublicacao()
+
+	type paradas struct {
+		rota     []string
+		horarios []time.Time
+	}
+	duas := func(a, b string) paradas {
+		return paradas{[]string{a, b}, []time.Time{as(8, 0), as(10, 0)}}
+	}
 
 	casos := []struct {
 		nome     string
-		origem   string
-		destino  string
-		partida  time.Time
+		paradas  paradas
 		assentos int
 		precos   []int
 		querido  error
 	}{
-		{"cidade fora do corredor", "Ilhéus", "Salvador", futuro, 3, []int{3000}, ErrCidadeDesconhecida},
-		{"origem igual ao destino", "Jequié", "Jequié", futuro, 3, []int{3000}, ErrRotaInvalida},
-		{"preços a menos", "Salvador", "Vitória da Conquista", futuro, 3, []int{3000, 5000}, ErrRotaInvalida},
-		{"preços a mais", "Salvador", "Feira de Santana", futuro, 3, []int{3000, 5000}, ErrRotaInvalida},
-		{"preço negativo", "Salvador", "Feira de Santana", futuro, 3, []int{-1}, ErrPrecoInvalido},
-		{"sem assentos", "Salvador", "Feira de Santana", futuro, 0, []int{3000}, ErrAssentosInvalidos},
-		{"partida no passado", "Salvador", "Feira de Santana", agora.Add(-time.Hour), 3, []int{3000}, ErrPartidaInvalida},
-		{"partida igual a agora", "Salvador", "Feira de Santana", agora, 3, []int{3000}, ErrPartidaInvalida},
+		{"cidade desconhecida", duas("Ilhéus", "Salvador"), 3, []int{3000}, ErrCidadeDesconhecida},
+		{"grafia em minúsculas", duas("jequié", "Salvador"), 3, []int{3000}, ErrCidadeDesconhecida},
+		{"grafia sem acento", duas("Jequie", "Salvador"), 3, []int{3000}, ErrCidadeDesconhecida},
+		{"espaço antes", duas(" Jequié", "Salvador"), 3, []int{3000}, ErrCidadeDesconhecida},
+		{"espaço depois", duas("Jequié ", "Salvador"), 3, []int{3000}, ErrCidadeDesconhecida},
+
+		{"nenhuma parada", paradas{nil, nil}, 3, []int{}, ErrRotaInvalida},
+		{"uma parada só", paradas{[]string{"Salvador"}, []time.Time{as(8, 0)}}, 3, []int{}, ErrRotaInvalida},
+		{"origem igual ao destino", duas("Jequié", "Jequié"), 3, []int{3000}, ErrRotaInvalida},
+		{"cidade repetida no meio", paradas{
+			[]string{"Salvador", "Feira de Santana", "Salvador"},
+			[]time.Time{as(8, 0), as(10, 0), as(12, 0)},
+		}, 3, []int{3000, 3000}, ErrRotaInvalida},
+		{"horário igual ao anterior", paradas{
+			[]string{"Salvador", "Feira de Santana"},
+			[]time.Time{as(8, 0), as(8, 0)},
+		}, 3, []int{3000}, ErrRotaInvalida},
+		{"horário antes do anterior", paradas{
+			[]string{"Salvador", "Feira de Santana", "Jequié"},
+			[]time.Time{as(8, 0), as(10, 0), as(9, 0)},
+		}, 3, []int{3000, 4500}, ErrRotaInvalida},
+		{"horários a menos", paradas{
+			[]string{"Salvador", "Feira de Santana", "Jequié"},
+			[]time.Time{as(8, 0), as(10, 0)},
+		}, 3, []int{3000, 4500}, ErrRotaInvalida},
+		{"preços a menos", duas("Salvador", "Feira de Santana"), 3, []int{}, ErrRotaInvalida},
+		{"preços a mais", duas("Salvador", "Feira de Santana"), 3, []int{3000, 5000}, ErrRotaInvalida},
+
+		{"preço negativo", duas("Salvador", "Feira de Santana"), 3, []int{-1}, ErrPrecoInvalido},
+		{"sem assentos", duas("Salvador", "Feira de Santana"), 0, []int{3000}, ErrAssentosInvalidos},
+
+		{"primeira parada no passado", paradas{
+			[]string{"Salvador", "Feira de Santana"},
+			[]time.Time{agora.Add(-time.Hour), as(10, 0)},
+		}, 3, []int{3000}, ErrPartidaInvalida},
+		{"primeira parada igual a agora", paradas{
+			[]string{"Salvador", "Feira de Santana"},
+			[]time.Time{agora, as(10, 0)},
+		}, 3, []int{3000}, ErrPartidaInvalida},
 	}
 
 	for _, caso := range casos {
-		e := estadoDeTeste()
-		_, err := e.PublicarCarona("joao", caso.origem, caso.destino, caso.partida, caso.assentos, caso.precos, agora)
-		if !errors.Is(err, caso.querido) {
-			t.Errorf("%s: err = %v, want %v", caso.nome, err, caso.querido)
-		}
-		// D07 aplicado à publicação: validação antes de qualquer escrita,
-		// então uma recusa não pode deixar carona pela metade no estado.
-		if len(e.caronas) != 0 {
-			t.Errorf("%s: recusa deixou %d carona(s) no estado", caso.nome, len(e.caronas))
-		}
+		t.Run(caso.nome, func(t *testing.T) {
+			e := estadoDeTeste()
+			_, err := e.PublicarCarona("joao", caso.paradas.rota, caso.paradas.horarios, caso.assentos, caso.precos, agora)
+			if !errors.Is(err, caso.querido) {
+				t.Errorf("err = %v, want %v", err, caso.querido)
+			}
+			// D07 aplicado à publicação: validação antes de qualquer escrita,
+			// então uma recusa não pode deixar carona pela metade no estado.
+			if len(e.caronas) != 0 {
+				t.Errorf("recusa deixou %d carona(s) no estado", len(e.caronas))
+			}
+		})
 	}
 }
 
-// TestPublicarCarona_NaoCompartilhaMemoriaComOChamador confere que a fatia de
-// preços é copiada ao entrar no estado. Sem a cópia, quem publicou continuaria
-// com um ponteiro para dentro da estrutura protegida pelo mutex e poderia
-// alterar o preço de uma carona já publicada, sem lock nenhum.
+// TestPublicarCarona_NaoCompartilhaMemoriaComOChamador confere que as fatias
+// de rota, horários e preços são copiadas ao entrar no estado. Sem a cópia,
+// quem publicou continuaria com um ponteiro para dentro da estrutura protegida
+// pelo mutex e poderia trocar uma parada, um horário ou um preço de uma carona
+// já publicada, sem lock nenhum — e com os horários fora de ordem, sem passar
+// pela validação.
 func TestPublicarCarona_NaoCompartilhaMemoriaComOChamador(t *testing.T) {
 	e := estadoDeTeste()
-	fuso := fusoBrasilia()
+	rota := []string{"Salvador", "Feira de Santana"}
+	horarios := []time.Time{as(8, 0), as(10, 0)}
 	precos := []int{3000}
 
-	c, err := e.PublicarCarona("joao", "Salvador", "Feira de Santana",
-		time.Date(2026, 9, 15, 8, 0, 0, 0, fuso), 2, precos,
-		time.Date(2026, 9, 1, 0, 0, 0, 0, fuso))
+	c, err := e.PublicarCarona("joao", rota, horarios, 2, precos, agoraDaPublicacao())
 	if err != nil {
 		t.Fatalf("PublicarCarona: %v", err)
 	}
 
+	rota[0] = "Ilhéus"
+	horarios[1] = as(7, 0)
 	precos[0] = 999999
 	c.Livres[0] = 999999
 
@@ -487,8 +549,14 @@ func TestPublicarCarona_NaoCompartilhaMemoriaComOChamador(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DetalharCarona: %v", err)
 	}
+	if guardada.Rota[0] != "Salvador" {
+		t.Errorf("rota no estado = %v: a fatia de rota do chamador não foi copiada", guardada.Rota)
+	}
+	if !guardada.Horarios[1].Equal(as(10, 0)) {
+		t.Errorf("horário no estado = %v, want 10:00: a fatia de horários do chamador não foi copiada", guardada.Horarios[1])
+	}
 	if guardada.PrecoTrecho[0] != 3000 {
-		t.Errorf("preço no estado = %d, want 3000: a fatia do chamador não foi copiada", guardada.PrecoTrecho[0])
+		t.Errorf("preço no estado = %d, want 3000: a fatia de preços do chamador não foi copiada", guardada.PrecoTrecho[0])
 	}
 	if guardada.Livres[0] != 2 {
 		t.Errorf("Livres no estado = %d, want 2: a carona devolvida não era uma cópia", guardada.Livres[0])
@@ -500,13 +568,10 @@ func TestPublicarCarona_NaoCompartilhaMemoriaComOChamador(t *testing.T) {
 func TestCaronasDoMotorista_FiltraPorDonoEOrdena(t *testing.T) {
 	e := estadoDeTeste()
 	e.usuarios["carlos"] = &Usuario{Usuario: "carlos", Senha: "1234", Nome: "Carlos Lima", Perfil: "MOTORISTA"}
-	fuso := fusoBrasilia()
-	agora := time.Date(2026, 9, 1, 0, 0, 0, 0, fuso)
-
 	publicar := func(motorista string, hora int) {
 		t.Helper()
-		if _, err := e.PublicarCarona(motorista, "Salvador", "Feira de Santana",
-			time.Date(2026, 9, 15, hora, 0, 0, 0, fuso), 2, []int{3000}, agora); err != nil {
+		if _, err := e.PublicarCarona(motorista, []string{"Salvador", "Feira de Santana"},
+			[]time.Time{as(hora, 0), as(hora+2, 0)}, 2, []int{3000}, agoraDaPublicacao()); err != nil {
 			t.Fatalf("PublicarCarona: %v", err)
 		}
 	}
@@ -539,10 +604,8 @@ func TestCaronasDoMotorista_FiltraPorDonoEOrdena(t *testing.T) {
 // motorista e carona inexistente têm erros distintos.
 func TestDetalharCarona_DonoEInexistente(t *testing.T) {
 	e := estadoDeTeste()
-	fuso := fusoBrasilia()
-	c, err := e.PublicarCarona("joao", "Salvador", "Jequié",
-		time.Date(2026, 9, 15, 8, 0, 0, 0, fuso), 2, []int{3000, 4500},
-		time.Date(2026, 9, 1, 0, 0, 0, 0, fuso))
+	c, err := e.PublicarCarona("joao", []string{"Salvador", "Feira de Santana", "Jequié"},
+		[]time.Time{as(8, 0), as(10, 0), as(13, 0)}, 2, []int{3000, 4500}, agoraDaPublicacao())
 	if err != nil {
 		t.Fatalf("PublicarCarona: %v", err)
 	}
@@ -575,10 +638,8 @@ func TestDetalharCarona_DonoEInexistente(t *testing.T) {
 // testa aqui é a leitura que o motorista faz, não a escrita da reserva.
 func TestDetalharCarona_ListaPassageirosPorTrecho(t *testing.T) {
 	e := estadoDeTeste()
-	fuso := fusoBrasilia()
-	c, err := e.PublicarCarona("joao", "Salvador", "Vitória da Conquista",
-		time.Date(2026, 9, 15, 8, 0, 0, 0, fuso), 3, []int{3000, 5000, 4000},
-		time.Date(2026, 9, 1, 0, 0, 0, 0, fuso))
+	c, err := e.PublicarCarona("joao", []string{"Salvador", "Feira de Santana", "Jequié", "Vitória da Conquista"},
+		[]time.Time{as(8, 0), as(10, 0), as(13, 0), as(15, 30)}, 3, []int{3000, 5000, 4000}, agoraDaPublicacao())
 	if err != nil {
 		t.Fatalf("PublicarCarona: %v", err)
 	}

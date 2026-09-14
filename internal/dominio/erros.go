@@ -16,8 +16,10 @@ var (
 	// ErrCidadeDesconhecida — cidade fora do corredor fixo (D09).
 	ErrCidadeDesconhecida = errors.New("dominio: cidade fora do corredor")
 
-	// ErrRotaInvalida — origem igual ao destino, ou quantidade de preços
-	// diferente do número de trechos entre as duas cidades.
+	// ErrRotaInvalida — as paradas não formam uma carona (D09): menos de duas,
+	// cidade repetida, horários que não crescem estritamente, ou quantidade de
+	// preços diferente do número de trechos. Também é a recusa da busca com
+	// origem igual ao destino.
 	ErrRotaInvalida = errors.New("dominio: rota inválida")
 
 	// ErrPartidaInvalida — instante de partida que não está no futuro.

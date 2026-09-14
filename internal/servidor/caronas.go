@@ -55,13 +55,24 @@ func tratarPublicarCarona(req protocolo.Requisicao, estado *dominio.Estado, s *s
 		return respostaErro(req.ID, protocolo.CodigoPartidaInvalida, "A partida precisa estar no formato RFC 3339, com fuso (ex.: 2026-09-15T08:00:00-03:00).")
 	}
 
+	// ADAPTAÇÃO TEMPORÁRIA. O domínio já recebe as paradas informadas pelo
+	// motorista (D09), mas esta borda ainda fala o formato antigo de
+	// PUBLICAR_CARONA, com origem, destino e partida. Até o protocolo passar a
+	// receber "paradas" (PROTOCOL.md, seção 5.4), as paradas são montadas aqui
+	// a partir do corredor. Manter o contrato externo intacto nesta etapa é o
+	// que permite usar os testes de integração, sem edição, como prova de que a
+	// troca no domínio não mudou o comportamento visível.
+	rota, horarios, err := dominio.DerivarRotaEHorarios(*pedido.Origem, *pedido.Destino, partida)
+	if err != nil {
+		return respostaDeErroDeDominio(req.ID, err)
+	}
+
 	// O relógio é lido aqui, na borda, e passado ao domínio: as regras de
 	// domínio não consultam o relógio por conta própria, o que as torna
 	// testáveis sem depender da data em que o teste roda.
 	carona, err := estado.PublicarCarona(
 		s.usuario.Usuario,
-		*pedido.Origem, *pedido.Destino,
-		partida,
+		rota, horarios,
 		*pedido.Assentos,
 		*pedido.PrecosCentavos,
 		time.Now(),
