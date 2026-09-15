@@ -13,7 +13,7 @@ import (
 	"os"
 	"time"
 
-	_ "time/tzdata" // fusos embutidos no binário: a imagem Alpine do cliente não traz tzdata, e sem eles FusoDasCidades cairia no deslocamento fixo.
+	_ "time/tzdata" // fusos embutidos no binário: a imagem Alpine do cliente não traz tzdata, e sem eles dominio.FusoDasCidades cairia no deslocamento fixo.
 
 	"vaijunto/internal/cliente"
 	"vaijunto/internal/protocolo"

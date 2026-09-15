@@ -255,7 +255,7 @@ func (t *Terminal) lerDataISO(rotulo, padrao string) (string, error) {
 
 // LerInstante pede data e hora e monta o time.Time no fuso informado.
 //
-// O fuso é explícito e vem de quem chama (FusoDasCidades): um instante sem
+// O fuso é explícito e vem de quem chama (dominio.FusoDasCidades): um instante sem
 // fuso definido seria interpretado em UTC dentro do contêiner Alpine, e a
 // carona publicada para as 08:00 apareceria às 05:00 para todo mundo.
 func (t *Terminal) LerInstante(rotuloData, rotuloHora string, fuso *time.Location) (time.Time, error) {

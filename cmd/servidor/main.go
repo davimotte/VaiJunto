@@ -5,7 +5,7 @@ import (
 	"flag"
 	"log"
 
-	_ "time/tzdata" // fusos embutidos no binário: necessário em imagens Alpine, que não trazem tzdata.
+	_ "time/tzdata" // fusos embutidos no binário: a imagem Alpine não traz tzdata, e sem eles dominio.FusoDasCidades cairia no deslocamento fixo.
 
 	"vaijunto/internal/dominio"
 	"vaijunto/internal/servidor"

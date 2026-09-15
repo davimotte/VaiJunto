@@ -9,30 +9,9 @@ import (
 	"vaijunto/internal/protocolo"
 )
 
-// Peças que os dois menus compartilham: o fuso das cidades, a escolha de
-// cidade, a coleta de paradas, o laço de login e a política de tratamento de
-// erro.
-
-// nomeFusoDasCidades é o fuso das cidades atendidas (D09), todas na Bahia.
-const nomeFusoDasCidades = "America/Bahia"
-
-// FusoDasCidades devolve o fuso em que os horários digitados pelo motorista
-// são interpretados.
-//
-// Precisa ser explícito, e não time.Local: dentro do contêiner Alpine o fuso
-// local é UTC, e uma partida digitada como 08:00 viraria 08:00Z — três horas
-// à frente do que o motorista quis dizer e do que o passageiro veria.
-//
-// Depende do import de time/tzdata no main do cliente. O deslocamento fixo é
-// a rede de segurança para o caso de esse import sumir: perde o horário de
-// verão hipotético, mas mantém o cliente utilizável em vez de recusar toda
-// publicação.
-func FusoDasCidades() *time.Location {
-	if fuso, err := time.LoadLocation(nomeFusoDasCidades); err == nil {
-		return fuso
-	}
-	return time.FixedZone("-03", -3*60*60)
-}
+// Peças que os dois menus compartilham: a escolha de cidade, a coleta de
+// paradas, o laço de login e a política de tratamento de erro. O fuso das
+// cidades vem de dominio.FusoDasCidades, o mesmo que o servidor usa.
 
 // EscolherCidade mostra as cidades atendidas enumeradas e devolve a grafia
 // canônica.

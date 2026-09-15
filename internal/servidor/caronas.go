@@ -244,9 +244,10 @@ func tratarBuscarItinerarios(req protocolo.Requisicao, estado *dominio.Estado, s
 	// "2026-09-15" não designa um instante: designa um dia, e um dia só existe
 	// dentro de um fuso. O fuso é resolvido aqui, na borda, e entregue pronto
 	// ao domínio — que assim não precisa consultar relógio nem configuração
-	// de ambiente. time.Local vem de TZ, e o binário embute tzdata para que
-	// isso funcione também no contêiner Alpine (PROJETO.md, seção 10.1).
-	data, err := time.ParseInLocation("2006-01-02", *pedido.Data, time.Local)
+	// de ambiente. É o fuso das cidades, e não time.Local: este vem de TZ, que
+	// no contêiner Alpine é UTC, e a carona das 22:00 cairia no dia seguinte
+	// (PROJETO.md, seção 10.1).
+	data, err := time.ParseInLocation("2006-01-02", *pedido.Data, dominio.FusoDasCidades())
 	if err != nil {
 		return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "A data precisa estar no formato AAAA-MM-DD (ex.: 2026-09-15).")
 	}

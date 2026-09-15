@@ -289,7 +289,9 @@ Erros: `CARONA_NAO_ENCONTRADA`, `NAO_E_DONO`, `CARONA_CANCELADA`,
 ```
 
 `data` filtra pelo horário de partida do **primeiro** trecho do itinerário, o que
-permite baldeação atravessando a meia-noite.
+permite baldeação atravessando a meia-noite. O dia é lido no fuso das cidades
+atendidas (`America/Bahia`, −03:00), e não no fuso da máquina do servidor: uma
+partida às `2026-10-01T22:00:00-03:00` pertence à busca de `2026-10-01`.
 
 Resposta, com um dos itinerários do cenário do `PROJETO.md` (seção 9.2); os
 demais foram omitidos:

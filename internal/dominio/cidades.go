@@ -1,5 +1,40 @@
 package dominio
 
+import (
+	"sync"
+	"time"
+)
+
+// nomeFusoDasCidades é o fuso das cidades atendidas, todas na Bahia.
+const nomeFusoDasCidades = "America/Bahia"
+
+// FusoDasCidades devolve o fuso em que um dia civil e uma hora digitada
+// ganham sentido: o servidor lê nele a data de BUSCAR_ITINERARIOS, e o cliente
+// monta nele os horários que o motorista digita.
+//
+// É uma única função para as duas pontas porque o fuso é propriedade das
+// cidades (D09), e não da máquina: time.Local vem de TZ, que dentro do
+// contêiner Alpine é UTC. Lida em UTC, a carona das 22:00 de Salvador cairia
+// na busca do dia seguinte (PROJETO.md, seção 10.1).
+//
+// Depende do import de time/tzdata no main de cada binário. O deslocamento
+// fixo é a rede de segurança para o caso de esse import sumir: perde um
+// horário de verão hipotético, mas mantém o sistema em -03:00 em vez de
+// cair em UTC.
+func FusoDasCidades() *time.Location {
+	return fusoDasCidades()
+}
+
+// fusoDasCidades resolve o fuso uma vez só. Resolver na primeira chamada, e
+// não na inicialização do pacote, garante que o tzdata embutido pelo main já
+// esteja registrado.
+var fusoDasCidades = sync.OnceValue(func() *time.Location {
+	if fuso, err := time.LoadLocation(nomeFusoDasCidades); err == nil {
+		return fuso
+	}
+	return time.FixedZone("-03", -3*60*60)
+})
+
 // cidadesAtendidas é o conjunto fixo de cidades do sistema (D09; PROTOCOL.md,
 // seção 3.1).
 //

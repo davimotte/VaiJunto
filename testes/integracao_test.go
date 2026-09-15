@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -38,6 +39,18 @@ const (
 	// esconde o defeito atrás de um timeout de suíte, em vez de apontá-lo.
 	prazoLeitura = 5 * time.Second
 )
+
+// TestMain roda a suíte inteira com o fuso local em UTC, que é o que o
+// servidor encontra dentro do contêiner Alpine (PROJETO.md, seção 10.1).
+//
+// Sem isto, a máquina de desenvolvimento em -03:00 esconde qualquer código
+// que dependa de time.Local: o teste passa aqui e o sistema erra na
+// apresentação. A atribuição acontece antes de m.Run, com uma única goroutine
+// viva, então não há corrida com os servidores que os testes sobem.
+func TestMain(m *testing.M) {
+	time.Local = time.UTC
+	os.Exit(m.Run())
+}
 
 // subirServidor sobe um servidor com o estado da carga de demonstração em uma
 // porta efêmera de loopback e devolve o endereço.
@@ -448,6 +461,52 @@ func TestPublicarCaronaPreservaFuso(t *testing.T) {
 		if len(instante) < 6 || instante[len(instante)-6:] != "-03:00" {
 			t.Fatalf("horarios[%d] = %q perdeu o fuso -03:00", i, instante)
 		}
+	}
+}
+
+// TestBuscarDataNoFusoDasCidades confere que a data da busca é o dia civil
+// das cidades atendidas, e não o dia no fuso da máquina do servidor.
+//
+// Uma carona que sai às 22:00 em Salvador sai à 01:00 do dia seguinte em UTC.
+// Se o servidor ler a data em time.Local (UTC no contêiner, e na suíte por
+// causa de TestMain), a carona some da busca do seu dia e aparece na do dia
+// seguinte.
+func TestBuscarDataNoFusoDasCidades(t *testing.T) {
+	endereco := subirServidor(t)
+
+	motorista := conectar(t, endereco)
+	motorista.entrar("joao", "1234")
+
+	dia := futuro(72)
+	partida := time.Date(dia.Year(), dia.Month(), dia.Day(), 22, 0, 0, 0, dia.Location())
+	motorista.exigirOK(protocolo.TipoPublicarCarona,
+		publicacao(2, []int{2000},
+			parada("Salvador", partida), parada("Feira de Santana", partida.Add(90*time.Minute))), nil)
+
+	passageiro := conectar(t, endereco)
+	passageiro.entrar("pedro", "abcd")
+
+	// encontrada responde se a busca da data traz algum itinerário partindo
+	// no instante publicado. Compara com Equal porque o mesmo instante pode
+	// voltar com outra representação de fuso.
+	encontrada := func(data time.Time) bool {
+		var busca protocolo.BuscarItinerariosResposta
+		passageiro.exigirOK(protocolo.TipoBuscarItinerarios, protocolo.BuscarItinerariosRequisicao{
+			Origem: "Salvador", Destino: "Feira de Santana", Data: data.Format("2006-01-02"),
+		}, &busca)
+		for _, it := range busca.Itinerarios {
+			if it.Partida.Equal(partida) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !encontrada(partida) {
+		t.Errorf("carona das 22:00 de %s ausente na busca do próprio dia", partida.Format("2006-01-02"))
+	}
+	if seguinte := partida.AddDate(0, 0, 1); encontrada(seguinte) {
+		t.Errorf("carona das 22:00 de %s apareceu na busca de %s", partida.Format("2006-01-02"), seguinte.Format("2006-01-02"))
 	}
 }
 

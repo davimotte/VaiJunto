@@ -11,9 +11,10 @@ import (
 	"fmt"
 	"os"
 
-	_ "time/tzdata" // fusos embutidos no binário: a imagem Alpine do cliente não traz tzdata, e sem eles FusoDasCidades cairia no deslocamento fixo.
+	_ "time/tzdata" // fusos embutidos no binário: a imagem Alpine do cliente não traz tzdata, e sem eles dominio.FusoDasCidades cairia no deslocamento fixo.
 
 	"vaijunto/internal/cliente"
+	"vaijunto/internal/dominio"
 	"vaijunto/internal/protocolo"
 )
 
@@ -109,7 +110,7 @@ func menu(term *cliente.Terminal, conexao *cliente.Conexao) error {
 // como ele a guardou, e é ela que o menu mostra no final.
 func publicarCarona(term *cliente.Terminal, conexao *cliente.Conexao) error {
 	term.Imprimir("\nInforme as paradas na ordem em que o carro passa por elas.\n")
-	paradas, err := cliente.ColetarParadas(term, cliente.FusoDasCidades())
+	paradas, err := cliente.ColetarParadas(term, dominio.FusoDasCidades())
 	if err != nil {
 		return err
 	}

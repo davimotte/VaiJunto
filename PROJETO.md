@@ -726,6 +726,24 @@ import _ "time/tzdata"
 Sem isso, tudo funciona na máquina de desenvolvimento e quebra dentro do
 contêiner, com horários deslocando três horas.
 
+O import resolve só metade do problema: ele embute o banco de fusos, mas não
+escolhe o fuso. `time.Local` continua vindo da variável `TZ`, que no contêiner
+não está definida e vale UTC. Por isso **nenhum código do sistema usa
+`time.Local`**. O fuso das cidades atendidas é uma propriedade do domínio
+(D09), exposta por `dominio.FusoDasCidades()` (`America/Bahia`, com
+deslocamento fixo de −03:00 como rede de segurança), e é a mesma função nas duas
+pontas:
+
+- o servidor lê nela a `data` de `BUSCAR_ITINERARIOS`, que é um dia civil e só
+  existe dentro de um fuso;
+- o cliente monta nela os horários que o motorista digita.
+
+Com a data lida em UTC, uma carona que sai às 22:00 de Salvador (01:00 UTC do
+dia seguinte) sumiria da busca do próprio dia e apareceria na do dia seguinte. O
+teste `TestBuscarDataNoFusoDasCidades` cobre esse caso, e o pacote `testes` roda
+com `time.Local` forçado para UTC, reproduzindo o contêiner na máquina de
+desenvolvimento.
+
 ### 10.2 Execução no laboratório
 
 Máquina A, servidor:

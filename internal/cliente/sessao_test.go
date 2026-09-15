@@ -267,32 +267,6 @@ func TestColetarParadas_FimDaEntrada(t *testing.T) {
 	}
 }
 
-// TestFusoDasCidades confere que os instantes montados pelo cliente saem no
-// deslocamento das cidades atendidas, todas na Bahia.
-//
-// Vale com ou sem tzdata na máquina: se LoadLocation falhar, o deslocamento
-// fixo responde o mesmo -03:00. O que não pode acontecer é o cliente cair em
-// UTC, que é o fuso local dentro do contêiner Alpine.
-func TestFusoDasCidades(t *testing.T) {
-	fuso := FusoDasCidades()
-
-	instante := time.Date(2026, 9, 15, 8, 0, 0, 0, fuso)
-	if _, deslocamento := instante.Zone(); deslocamento != -3*60*60 {
-		t.Errorf("deslocamento em 15/09/2026 = %d s, want %d s", deslocamento, -3*60*60)
-	}
-	if got := instante.Format(time.RFC3339); got != "2026-09-15T08:00:00-03:00" {
-		t.Errorf("instante = %s, want 2026-09-15T08:00:00-03:00", got)
-	}
-
-	// Em janeiro também: a Bahia não observa horário de verão, e um fuso que
-	// mudasse de deslocamento faria a carona publicada em dezembro sair uma
-	// hora fora.
-	verao := time.Date(2027, 1, 15, 8, 0, 0, 0, fuso)
-	if got := verao.Format(time.RFC3339); got != "2027-01-15T08:00:00-03:00" {
-		t.Errorf("instante = %s, want 2027-01-15T08:00:00-03:00", got)
-	}
-}
-
 // TestEscolherCidade confere que a cidade sai com a grafia canônica das
 // cidades atendidas. A seção 3 do PROTOCOL.md compara cidade por igualdade
 // exata e não normaliza grafia: é o menu enumerado que garante a string
