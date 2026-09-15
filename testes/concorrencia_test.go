@@ -227,11 +227,11 @@ func publicarComo(t *testing.T, endereco string, m credencial, assentos int, pre
 	return publicada.CaronaID
 }
 
-// --- T1 — 50 clientes disputam o assento único de car-7 ---
+// --- T1 — 50 clientes disputam o assento único de car-4 ---
 
 // TestT1AssentoUnicoDisputadoPor50Clientes é o cenário T1 da seção 8.2.
 //
-// car-7 existe na carga de demonstração exatamente para isto: Feira de Santana
+// car-4 existe na carga de demonstração exatamente para isto: Feira de Santana
 // → Jequié, um trecho, um assento (PROJETO.md, seção 9.2). Cinquenta conexões
 // pedem o mesmo assento no mesmo instante; o resultado correto é uma única
 // confirmação.
@@ -246,7 +246,7 @@ func TestT1AssentoUnicoDisputadoPor50Clientes(t *testing.T) {
 
 	participantes := passageirosDaCarga()[3:] // os 50 teste01..teste50
 	respostas := disputa(t, endereco, participantes, func(int) protocolo.ReservarRequisicao {
-		return reserva(trecho("car-7", 0, 1))
+		return reserva(trecho("car-4", 0, 1))
 	})
 
 	oks, porCodigo := contar(respostas)
@@ -259,8 +259,8 @@ func TestT1AssentoUnicoDisputadoPor50Clientes(t *testing.T) {
 	}
 
 	caronas := observarCaronas(t, endereco)
-	if livres := caronas["car-7"].livres[0]; livres != 0 {
-		t.Errorf("car-7 trecho 0: livres = %d, want 0", livres)
+	if livres := caronas["car-4"].livres[0]; livres != 0 {
+		t.Errorf("car-4 trecho 0: livres = %d, want 0", livres)
 	}
 	verificarInvariantes(t, endereco)
 }

@@ -602,43 +602,112 @@ como autenticar 50 conexões distintas.
 
 ### 9.2 Caronas
 
-> **A redesenhar.** Este cenário foi montado sobre o corredor fixo da versão
-> anterior da D09, e alguns papéis abaixo (como o controle negativo de "sentido
-> oposto") só fazem sentido nela. Ele será substituído por um cenário próprio
-> para paradas informadas pelo motorista. Até lá, continua valendo como teste de
-> regressão, com as mesmas caronas e os mesmos horários.
+Todas em **01/10/2026**, salvo indicação. A data fica com folga em relação ao
+dia da apresentação: os prazos de cancelamento são aplicados com o relógio real,
+e a demonstração cancela reserva e carona deste cenário.
 
-Todas em 15/09/2026, salvo indicação.
+| ID | Motorista | Rota e horários | Assentos | Preço por trecho (R$) | Papel no cenário |
+|---|---|---|---|---|---|
+| car-1 | joao | Salvador 06:00 → Feira de Santana 07:45 → Jequié 10:45 | 3 | 25,00 · 35,00 | Primeira perna das baldeações |
+| car-2 | carlos | Jequié 12:15 → Vitória da Conquista 14:30 | 2 | 40,00 | Segunda perna da baldeação do enunciado (folga de 90 min) |
+| car-3 | ana | Feira de Santana 09:30 → Vitória da Conquista 16:45 | 2 | 55,00 | Opção com uma troca mais barata e que chega mais tarde |
+| car-4 | ana | Feira de Santana 08:15 → Jequié 11:15 | **1** | 30,00 | Perna do meio do itinerário de três pernas; assento escasso (T1 e disputa) |
+| car-5 | joao | Jequié 05:30 → Salvador 10:30 → Vitória da Conquista 17:30 | 3 | 60,00 · 110,00 | Direta mais cara; rota impossível num corredor fixo (D09); embarque no meio |
+| car-6 | carlos | Jequié 11:00 → Vitória da Conquista 13:15 | 4 | 40,00 | **Controle negativo:** margem de baldeação |
+| car-7 | ana | **02/10** Salvador 06:00 → Feira de Santana 07:45 → Jequié 10:45 → Vitória da Conquista 13:00 | 4 | 25,00 · 35,00 · 40,00 | **Controle negativo:** data da primeira perna e teto de espera |
+| car-8 | carlos | Feira de Santana 08:15 → Salvador 10:00 | 2 | 25,00 | **Controle negativo:** fecha um ciclo com car-1 |
 
-| ID | Motorista | Rota | Partida | Chegada | Assentos | Papel no cenário |
-|---|---|---|---|---|---|---|
-| car-1 | joao | Salvador → Jequié | 06:00 | 11:00 | 3 | Primeira perna da baldeação |
-| car-2 | carlos | Jequié → Vitória da Conquista | 12:30 | 15:00 | 2 | Segunda perna, folga de 90 min |
-| car-3 | ana | Feira de Santana → Vitória da Conquista | 09:00 | 14:30 | 1 | Itinerário alternativo, assento escasso |
-| car-4 | joao | Jequié → Vitória da Conquista | 11:15 | 13:45 | 4 | **Deve ser rejeitada** como conexão de car-1 |
-| car-5 | carlos | Vitória da Conquista → Salvador | 08:00 | 15:30 | 3 | Sentido oposto; não pode aparecer na busca |
-| car-6 | ana | Salvador → Vitória da Conquista (**16/09**) | 07:00 | 14:30 | 4 | Direta, mas fora da data pedida |
-| car-7 | joao | Feira de Santana → Jequié | 08:30 | 11:30 | 1 | Trecho de assento único para T1 |
+#### Resultado esperado
 
-A consulta **Salvador → Vitória da Conquista em 15/09** exercita tudo:
+A consulta **Salvador → Vitória da Conquista em 01/10/2026** devolve exatamente
+estes quatro itinerários, nesta ordem:
 
-- Não existe carona direta na data, então a baldeação é obrigatória. É
-  exatamente o exemplo do enunciado.
-- `car-1 + car-2` é válido: chegada em Jequié às 11:00, partida às 12:30, folga
-  de 90 min.
-- `car-1 + car-4` é **inválido**: partida às 11:15, folga de 15 min, abaixo da
-  margem. Se aparecer no resultado, a validação de margem está quebrada.
-- `car-1 + car-3` é válido: chegada em Feira às 08:00, partida às 09:00.
-- `car-1 + car-7 + car-2` é um itinerário de três pernas, e o assento único de
-  `car-7` é o gargalo do teste de concorrência.
-- `car-5` e `car-6` devem estar sempre ausentes. São os controles negativos de
-  sentido e de data. `car-6` cobre especificamente o teto de espera: como o
-  filtro de data só olha a primeira perna, ela **encadeia** depois de `car-1`
-  (chegada em Jequié às 11:00 de 15/09, partida de lá ao meio-dia de 16/09) e só
-  é rejeitada por `ESPERA_MAXIMA_BALDEACAO`.
+| # | Itinerário | Trechos | Baldeações | Preço | Partida → chegada |
+|---|---|---|---|---|---|
+| 1 | car-5 | `car-5:1-2` | 0 | R$ 110,00 | 10:30 → 17:30 |
+| 2 | car-1 até Feira + car-3 | `car-1:0-1 \| car-3:0-1` | 1 | R$ 80,00 | 06:00 → 16:45 |
+| 3 | car-1 até Jequié + car-2 | `car-1:0-2 \| car-2:0-1` | 1 | R$ 100,00 | 06:00 → 14:30 |
+| 4 | car-1 até Feira + car-4 + car-2 | `car-1:0-1 \| car-4:0-1 \| car-2:0-1` | 2 | R$ 95,00 | 06:00 → 14:30 |
 
-Escrever um teste que fixe o resultado esperado dessa consulta. Ele serve de
-regressão para o algoritmo de busca e de evidência de corretude no relatório.
+Derivação, pelas regras da seção 6 e das decisões D13 e D16:
+
+- A primeira perna precisa sair de Salvador em 01/10. Servem car-1 até Feira,
+  car-1 até Jequié e car-5 a partir de Salvador; car-7 é de 02/10.
+- De Feira, com chegada às 07:45, são aceitas partidas entre 08:15 e 19:45.
+  car-3 (09:30) chega ao destino: **#2**. car-4 (08:15, folga exata de 30 min)
+  leva a Jequié às 11:15, e de lá car-2 (12:15) chega ao destino: **#4**. car-8
+  volta a Salvador, cidade já visitada.
+- De Jequié, com chegada às 10:45 por car-1, car-2 (12:15) chega ao destino:
+  **#3**. car-6 (11:00) fica a 15 min da chegada.
+- car-5 vai de Salvador direto ao destino: **#1**.
+
+A ordem é a da D16, e cada par prova um critério:
+
+- **#1 antes de todos** mesmo sendo a mais cara: menos baldeações vem antes de
+  preço.
+- **#2 antes de #3** mesmo chegando mais tarde: dentro do mesmo número de trocas,
+  preço vem antes de chegada.
+- **#4 por último** mesmo mais barato que #1 e #3: tem duas trocas.
+
+#### O que cada caso exercita
+
+| Caso | Onde |
+|---|---|
+| Baldeação combinando dois motoristas, o exemplo do enunciado | #3 (joao e carlos) |
+| Direta mais cara que uma baldeação | #1 (R$ 110,00) antes de #2 (R$ 80,00) |
+| Mesmo número de pernas, preços diferentes | #2 e #3 |
+| Itinerário de três pernas | #4, com três motoristas diferentes |
+| Embarque no meio de uma carona (`de > 0`) | #1: car-5 embarcando em Salvador (`de = 1`) |
+| Rota que um corredor fixo não permitiria (D09) | car-5: Jequié → Salvador → Vitória da Conquista |
+| Assento escasso | car-4, no #4, no T1 e na disputa da demonstração |
+
+#### Controles negativos
+
+Cada controle cumpre todas as regras da busca exceto uma. Se um deles aparecer
+no resultado, a regra que ele isola está quebrada.
+
+| Itinerário que nunca pode aparecer | Regra que o recusa |
+|---|---|
+| car-1 até Jequié (10:45) + car-6 (11:00) | `MARGEM_BALDEACAO`: folga de 15 min |
+| car-1 até Feira (01/10 07:45) + car-7 a partir de Feira (02/10 07:45) | `ESPERA_MAXIMA_BALDEACAO`: espera de 24 h |
+| car-7 inteira, como direta | Filtro de data da primeira perna |
+| car-1 até Feira (07:45) + car-8 (08:15 → 10:00) + car-5 a partir de Salvador (10:30) | Cidade repetida: volta a Salvador (D09) |
+
+O ciclo é o contraexemplo da seção 6 em forma de dados: as duas folgas são de 30
+min exatos, nenhuma espera passa de 12 h e as três caronas são distintas. Só o
+conjunto de cidades visitadas o recusa.
+
+As regras de trecho que atravessa cidade visitada, de trecho sem assento e de
+carona cancelada não têm caso próprio neste cenário, para não inflá-lo: ficam
+cobertas pelos testes unitários do domínio. O limite de 10 itinerários (D16)
+também não aparece aqui, porque exigiria mais de 10 combinações na mesma
+consulta; ele tem um teste próprio, com itinerários montados em código.
+
+Um teste fixa essa lista completa e ordenada, e não só a presença dos
+itinerários válidos: um bug de validação costuma acrescentar um itinerário
+errado sem remover nenhum correto. Ele serve de regressão para o algoritmo de
+busca e de evidência de corretude no relatório.
+
+#### Uso nos testes e na demonstração
+
+As caronas do arquivo servem só a operações **sem prazo**: busca, reserva,
+listagem, detalhamento e o T1. Todo teste que cancela reserva ou carona publica
+as próprias caronas pelo protocolo, com partida relativa ao relógio, para não
+expirar quando a data do cenário passar.
+
+Roteiro dos 20 minutos, sem nenhuma carona além das oito:
+
+1. **Publicar.** ana publica uma carona ao vivo, com data de 25/09 ou posterior
+   a 02/10, para que ela não altere a busca do passo seguinte.
+2. **Buscar com baldeação.** maria busca Salvador → Vitória da Conquista em
+   01/10 e recebe os quatro itinerários acima.
+3. **Reservar.** maria reserva o #3. Livres: car-1 [2, 2], car-2 [1].
+4. **Disputar o último assento.** pedro e lucia reservam o #4 ao mesmo tempo.
+   Um confirma; o outro recebe `SEM_ASSENTO` no trecho 0 de car-4. Livres: car-4
+   [0], car-2 [0].
+5. **Cancelar em cascata.** joao cancela car-1. As duas reservas caem, e os
+   assentos voltam nas caronas dos outros motoristas: car-2 volta a [2] e car-4
+   a [1].
 
 ---
 

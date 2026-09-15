@@ -17,29 +17,65 @@ import (
 	"vaijunto/internal/protocolo"
 )
 
+// diaSeguroNoFuturo devolve 10:00 de daqui a dois dias, no fuso das cidades.
+//
+// Serve aos testes que cancelam alguma coisa: os prazos de cancelamento usam o
+// relógio real, e uma carona publicada a partir daqui nunca vence, seja qual
+// for o dia em que o teste rode. A hora fixa no meio da manhã, e não
+// time.Now() somado a um intervalo, mantém a data do instante igual à data da
+// busca mesmo que a máquina esteja em UTC — a busca interpreta "AAAA-MM-DD" no
+// fuso local do servidor.
+func diaSeguroNoFuturo() time.Time {
+	fuso := time.FixedZone("-03:00", -3*60*60)
+	d := time.Now().In(fuso).AddDate(0, 0, 2)
+	return time.Date(d.Year(), d.Month(), d.Day(), 10, 0, 0, 0, fuso)
+}
+
 // TestSessaoCompletaDoPassageiro percorre o exemplo da seção 7 do PROTOCOL.md
 // em uma conexão só: buscar, reservar o itinerário escolhido, listar e
 // cancelar.
+//
+// As caronas são publicadas pelo próprio teste, e não lidas de dados/: o
+// cancelamento tem prazo contado do relógio real, e uma reserva sobre o cenário
+// da seção 9.2 do PROJETO.md deixaria de poder ser cancelada assim que a data
+// dele passasse (seção 9.2, "Uso nos testes e na demonstração").
 //
 // O passageiro devolve ao servidor exatamente os campos carona_id, de e ate
 // que recebeu da busca, sem nunca digitar identificador (D15). É o que este
 // teste imita: os trechos do pedido saem do resultado da busca, e não de
 // constantes escritas aqui.
 func TestSessaoCompletaDoPassageiro(t *testing.T) {
-	c := conectar(t, subirServidor(t))
+	endereco := subirServidor(t)
+
+	// Uma baldeação entre dois motoristas, com uma hora de folga em Feira.
+	partida := diaSeguroNoFuturo()
+	primeira := publicarComo(t, endereco, credencial{"joao", "1234"}, 3, []int{3000},
+		parada("Salvador", partida), parada("Feira de Santana", partida.Add(2*time.Hour)))
+	segunda := publicarComo(t, endereco, credencial{"carlos", "1234"}, 3, []int{4500},
+		parada("Feira de Santana", partida.Add(3*time.Hour)), parada("Jequié", partida.Add(6*time.Hour)))
+
+	c := conectar(t, endereco)
 	c.entrar("maria", "abcd")
 
 	var busca protocolo.BuscarItinerariosResposta
 	c.exigirOK(protocolo.TipoBuscarItinerarios, protocolo.BuscarItinerariosRequisicao{
 		Origem:  "Salvador",
-		Destino: "Vitória da Conquista",
-		Data:    "2026-09-15",
+		Destino: "Jequié",
+		Data:    partida.Format("2006-01-02"),
 	}, &busca)
-	if len(busca.Itinerarios) == 0 {
-		t.Fatalf("a busca do cenário da seção 9.2 não devolveu itinerário")
-	}
 
-	escolhido := busca.Itinerarios[0]
+	// O itinerário é escolhido pelas caronas que o teste publicou, e não pela
+	// posição: se o teste rodar perto da data do cenário, as caronas de dados/
+	// também aparecem nesta busca.
+	var escolhido *protocolo.Itinerario
+	for i, it := range busca.Itinerarios {
+		if len(it.Trechos) == 2 && it.Trechos[0].CaronaID == primeira && it.Trechos[1].CaronaID == segunda {
+			escolhido = &busca.Itinerarios[i]
+		}
+	}
+	if escolhido == nil {
+		t.Fatalf("a busca não devolveu a baldeação %s + %s: %+v", primeira, segunda, busca.Itinerarios)
+	}
 	itens := make([]protocolo.ItemReserva, 0, len(escolhido.Trechos))
 	for _, perna := range escolhido.Trechos {
 		itens = append(itens, trecho(perna.CaronaID, perna.De, perna.Ate))
@@ -107,15 +143,15 @@ func TestSessaoCompletaDoPassageiro(t *testing.T) {
 func TestSemAssentoTrazTrechoNoDados(t *testing.T) {
 	endereco := subirServidor(t)
 
-	// car-7 tem um assento só.
+	// car-4 tem um assento só (PROJETO.md, seção 9.2).
 	primeiro := conectar(t, endereco)
 	primeiro.entrar("maria", "abcd")
-	primeiro.exigirOK(protocolo.TipoReservar, reserva(trecho("car-7", 0, 1)), nil)
+	primeiro.exigirOK(protocolo.TipoReservar, reserva(trecho("car-4", 0, 1)), nil)
 
 	segundo := conectar(t, endereco)
 	segundo.entrar("pedro", "abcd")
 
-	resp := segundo.enviar(protocolo.TipoReservar, reserva(trecho("car-7", 0, 1)))
+	resp := segundo.enviar(protocolo.TipoReservar, reserva(trecho("car-4", 0, 1)))
 	if resp.Codigo != protocolo.CodigoSemAssento {
 		t.Fatalf("codigo = %q, want %s (mensagem: %q)", resp.Codigo, protocolo.CodigoSemAssento, resp.Mensagem)
 	}
@@ -124,8 +160,8 @@ func TestSemAssentoTrazTrechoNoDados(t *testing.T) {
 	if err := json.Unmarshal(resp.Dados, &dados); err != nil {
 		t.Fatalf("decodificar dados %s: %v", resp.Dados, err)
 	}
-	if dados.CaronaID != "car-7" || dados.IndiceTrecho != 0 {
-		t.Errorf("dados = %+v, want car-7 trecho 0", dados)
+	if dados.CaronaID != "car-4" || dados.IndiceTrecho != 0 {
+		t.Errorf("dados = %+v, want car-4 trecho 0", dados)
 	}
 }
 
@@ -136,11 +172,11 @@ func TestConflitoHorarioTrazReservaNoDados(t *testing.T) {
 	c := conectar(t, subirServidor(t))
 	c.entrar("maria", "abcd")
 
-	// car-1 ocupa maria das 06:00 às 11:00; car-7 vai das 08:30 às 11:30.
+	// car-1 ocupa maria das 06:00 às 10:45; car-4 vai das 08:15 às 11:15.
 	var primeira protocolo.ReservarResposta
 	c.exigirOK(protocolo.TipoReservar, reserva(trecho("car-1", 0, 2)), &primeira)
 
-	resp := c.enviar(protocolo.TipoReservar, reserva(trecho("car-7", 0, 1)))
+	resp := c.enviar(protocolo.TipoReservar, reserva(trecho("car-4", 0, 1)))
 	if resp.Codigo != protocolo.CodigoConflitoHorario {
 		t.Fatalf("codigo = %q, want %s (mensagem: %q)", resp.Codigo, protocolo.CodigoConflitoHorario, resp.Mensagem)
 	}
@@ -254,7 +290,8 @@ func TestRecusasDeReserva(t *testing.T) {
 		{"carona inexistente", reserva(trecho("car-99", 0, 1)), protocolo.CodigoCaronaNaoEncontrada},
 		{"mesma carona duas vezes", reserva(trecho("car-1", 0, 1), trecho("car-1", 1, 2)), protocolo.CodigoItinerarioInvalido},
 		{"não encadeia no espaço", reserva(trecho("car-1", 0, 1), trecho("car-2", 0, 1)), protocolo.CodigoItinerarioInvalido},
-		{"folga abaixo da margem", reserva(trecho("car-1", 0, 2), trecho("car-4", 0, 1)), protocolo.CodigoItinerarioInvalido},
+		{"folga abaixo da margem", reserva(trecho("car-1", 0, 2), trecho("car-6", 0, 1)), protocolo.CodigoItinerarioInvalido},
+		{"volta a cidade visitada", reserva(trecho("car-1", 0, 1), trecho("car-8", 0, 1), trecho("car-5", 1, 2)), protocolo.CodigoItinerarioInvalido},
 	}
 
 	for _, caso := range casos {
@@ -267,13 +304,23 @@ func TestRecusasDeReserva(t *testing.T) {
 // TestRecusasDeCancelamento confere os códigos das seções 5.7 e 5.11 que não
 // dependem de prazo, incluindo a distinção entre recurso inexistente e recurso
 // de outro usuário.
+//
+// Os códigos não dependem de prazo, mas os dois cancelamentos aceitos no meio
+// do teste dependem. Por isso as caronas são publicadas aqui, com partida
+// relativa ao relógio, e não lidas de dados/ (PROJETO.md, seção 9.2).
 func TestRecusasDeCancelamento(t *testing.T) {
 	endereco := subirServidor(t)
+
+	partida := diaSeguroNoFuturo()
+	doJoao := publicarComo(t, endereco, credencial{"joao", "1234"}, 1, []int{4500},
+		parada("Feira de Santana", partida), parada("Jequié", partida.Add(3*time.Hour)))
+	doCarlos := publicarComo(t, endereco, credencial{"carlos", "1234"}, 2, []int{4000},
+		parada("Jequié", partida), parada("Vitória da Conquista", partida.Add(2*time.Hour)))
 
 	maria := conectar(t, endereco)
 	maria.entrar("maria", "abcd")
 	var confirmada protocolo.ReservarResposta
-	maria.exigirOK(protocolo.TipoReservar, reserva(trecho("car-7", 0, 1)), &confirmada)
+	maria.exigirOK(protocolo.TipoReservar, reserva(trecho(doJoao, 0, 1)), &confirmada)
 
 	maria.exigirErro(protocolo.TipoCancelarReserva,
 		protocolo.CancelarReservaRequisicao{ReservaID: "res-inexistente"}, protocolo.CodigoReservaNaoEncontrada)
@@ -293,18 +340,17 @@ func TestRecusasDeCancelamento(t *testing.T) {
 	joao.entrar("joao", "1234")
 	joao.exigirErro(protocolo.TipoCancelarCarona,
 		protocolo.CancelarCaronaRequisicao{CaronaID: "car-99"}, protocolo.CodigoCaronaNaoEncontrada)
-	// car-2 é do carlos.
 	joao.exigirErro(protocolo.TipoCancelarCarona,
-		protocolo.CancelarCaronaRequisicao{CaronaID: "car-2"}, protocolo.CodigoNaoEDono)
+		protocolo.CancelarCaronaRequisicao{CaronaID: doCarlos}, protocolo.CodigoNaoEDono)
 	joao.exigirErro(protocolo.TipoCancelarCarona, vazio, protocolo.CodigoCampoInvalido)
 
 	joao.exigirOK(protocolo.TipoCancelarCarona,
-		protocolo.CancelarCaronaRequisicao{CaronaID: "car-7"}, nil)
+		protocolo.CancelarCaronaRequisicao{CaronaID: doJoao}, nil)
 	joao.exigirErro(protocolo.TipoCancelarCarona,
-		protocolo.CancelarCaronaRequisicao{CaronaID: "car-7"}, protocolo.CodigoCaronaCancelada)
+		protocolo.CancelarCaronaRequisicao{CaronaID: doJoao}, protocolo.CodigoCaronaCancelada)
 
 	// Reservar em carona cancelada reprova, mesmo com o assento devolvido.
-	pedro.exigirErro(protocolo.TipoReservar, reserva(trecho("car-7", 0, 1)), protocolo.CodigoCaronaCancelada)
+	pedro.exigirErro(protocolo.TipoReservar, reserva(trecho(doJoao, 0, 1)), protocolo.CodigoCaronaCancelada)
 }
 
 // TestPerfisDasNovasOperacoes confere a tabela da seção 5: as três operações de

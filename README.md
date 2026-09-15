@@ -82,21 +82,30 @@ Conectado a 192.168.0.10:9000 como Maria Souza
 4) Sair
 Escolha: 1
 
-Origem: Salvador
-Destino: Vitória da Conquista
-Data (AAAA-MM-DD): 2026-09-15
+Origem: 1) Salvador
+Destino: 4) Vitória da Conquista
+Data (AAAA-MM-DD): 2026-10-01
 
-3 itinerários encontrados:
+4 itinerários encontrados:
 
-[1] R$ 115,00 — 06:00 → 15:00 (1 baldeação)
-    Salvador → Jequié          06:00-11:00  João Silva    R$ 75,00
-    Jequié → V. da Conquista   12:30-15:00  Carlos Lima   R$ 40,00
+[1] R$ 110,00 — 01/10/2026 10:30 → 17:30 (0 baldeações)
+    Salvador → Vitória da Conquista          10:30 → 17:30  João Silva   R$ 110,00
 
-[2] R$ 120,00 — 06:00 → 14:30 (1 baldeação)
-    ...
+[2] R$ 80,00 — 01/10/2026 06:00 → 16:45 (1 baldeação)
+    Salvador → Feira de Santana              06:00 → 07:45  João Silva   R$ 25,00
+    Feira de Santana → Vitória da Conquista  09:30 → 16:45  Ana Ribeiro  R$ 55,00
 
-Reservar qual? (0 para voltar): 1
-Reserva res-91c confirmada. Total: R$ 115,00
+[3] R$ 100,00 — 01/10/2026 06:00 → 14:30 (1 baldeação)
+    Salvador → Jequié                        06:00 → 10:45  João Silva   R$ 60,00
+    Jequié → Vitória da Conquista            12:15 → 14:30  Carlos Lima  R$ 40,00
+
+[4] R$ 95,00 — 01/10/2026 06:00 → 14:30 (2 baldeações)
+    Salvador → Feira de Santana              06:00 → 07:45  João Silva   R$ 25,00
+    Feira de Santana → Jequié                08:15 → 11:15  Ana Ribeiro  R$ 30,00
+    Jequié → Vitória da Conquista            12:15 → 14:30  Carlos Lima  R$ 40,00
+
+Reservar qual? (0 para voltar): 3
+Reserva res-05b7 confirmada. Total: R$ 100,00
 ```
 
 O menu do motorista segue o mesmo padrão, com publicar carona, listar as próprias
@@ -152,7 +161,9 @@ não vale como evidência.
 
 ## Cenário de demonstração
 
-Buscar **Salvador → Vitória da Conquista em 15/09/2026**. Não existe carona
-direta na data, então a baldeação é obrigatória, exatamente como no exemplo do
-enunciado. Os detalhes do cenário e dos controles negativos estão na seção 9 do
-`PROJETO.md`.
+Buscar **Salvador → Vitória da Conquista em 01/10/2026**. A busca devolve
+quatro itinerários: uma carona direta, duas baldeações com preços diferentes
+(uma delas é o exemplo do enunciado, combinando dois motoristas) e um itinerário
+de três pernas. Eles saem ordenados por menos baldeações, depois por preço,
+depois por chegada. O cenário, o resultado esperado, os controles negativos e o
+roteiro da demonstração estão na seção 9.2 do `PROJETO.md`.

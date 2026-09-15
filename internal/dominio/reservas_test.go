@@ -19,10 +19,10 @@ import (
 // operação acontece e cobrir as regras de prazo de forma determinística —
 // coisa que um teste por socket não consegue, porque a borda lê time.Now().
 
-// as devolve um instante de 15/09/2026, o dia das caronas do cenário, no fuso
+// as devolve um instante de 01/10/2026, o dia das caronas do cenário, no fuso
 // de Brasília. Serve para posicionar a operação em relação às partidas.
 func as(hora, minuto int) time.Time {
-	return time.Date(2026, 9, 15, hora, minuto, 0, 0, fusoBrasilia())
+	return time.Date(2026, 10, 1, hora, minuto, 0, 0, fusoBrasilia())
 }
 
 // reservarNoCenario é o atalho das reservas bem-sucedidas, que aparecem como
@@ -53,10 +53,12 @@ func livresDe(t *testing.T, e *Estado, motorista, caronaID string) []int {
 
 // TestReservar_BaldeacaoDaCargaDecrementaSoOsTrechosUsados confere o caminho
 // feliz do exemplo do PROTOCOL.md (seção 5.9): car-1 de Salvador a Jequié mais
-// car-2 até Vitória da Conquista, 11500 centavos no total.
+// car-2 até Vitória da Conquista, 10000 centavos no total — o itinerário #3 da
+// seção 9.2 do PROJETO.md, a baldeação do enunciado.
 //
-// A afirmação que importa é a última: car-3 e car-7 não podem ter perdido
-// assento. Disponibilidade é por trecho (RF11, D10), e uma implementação que
+// A afirmação que importa é a última: car-3 e car-4, que partem de Feira de
+// Santana, cidade por onde car-1 passa, não podem ter perdido assento.
+// Disponibilidade é por trecho (RF11, D10), e uma implementação que
 // decrementasse a carona inteira, ou que errasse a faixa [De, Ate), apareceria
 // aqui como assento sumindo onde ninguém embarcou.
 func TestReservar_BaldeacaoDaCargaDecrementaSoOsTrechosUsados(t *testing.T) {
@@ -70,11 +72,11 @@ func TestReservar_BaldeacaoDaCargaDecrementaSoOsTrechosUsados(t *testing.T) {
 	if reserva.ID == "" || !reserva.Ativa || reserva.PassageiroID != "maria" {
 		t.Fatalf("reserva mal formada: %+v", reserva)
 	}
-	if itinerario.PrecoTotalCentavos != 11500 {
-		t.Errorf("preço total = %d, want 11500", itinerario.PrecoTotalCentavos)
+	if itinerario.PrecoTotalCentavos != 10000 {
+		t.Errorf("preço total = %d, want 10000", itinerario.PrecoTotalCentavos)
 	}
-	if !itinerario.Partida.Equal(as(6, 0)) || !itinerario.Chegada.Equal(as(15, 0)) {
-		t.Errorf("intervalo do itinerário = [%v, %v], want [06:00, 15:00]", itinerario.Partida, itinerario.Chegada)
+	if !itinerario.Partida.Equal(as(6, 0)) || !itinerario.Chegada.Equal(as(14, 30)) {
+		t.Errorf("intervalo do itinerário = [%v, %v], want [06:00, 14:30]", itinerario.Partida, itinerario.Chegada)
 	}
 
 	// car-1 tem 3 assentos e os dois trechos foram usados; car-2 tem 2 e só
@@ -85,23 +87,24 @@ func TestReservar_BaldeacaoDaCargaDecrementaSoOsTrechosUsados(t *testing.T) {
 	if got := livresDe(t, e, "carlos", "car-2"); got[0] != 1 {
 		t.Errorf("car-2 livres = %v, want [1]", got)
 	}
-	if got := livresDe(t, e, "ana", "car-3"); got[0] != 1 || got[1] != 1 {
-		t.Errorf("car-3 livres = %v, want [1 1] — a reserva mexeu em carona que não usou", got)
+	if got := livresDe(t, e, "ana", "car-3"); got[0] != 2 {
+		t.Errorf("car-3 livres = %v, want [2] — a reserva mexeu em carona que não usou", got)
 	}
-	if got := livresDe(t, e, "joao", "car-7"); got[0] != 1 {
-		t.Errorf("car-7 livres = %v, want [1] — a reserva mexeu em carona que não usou", got)
+	if got := livresDe(t, e, "ana", "car-4"); got[0] != 1 {
+		t.Errorf("car-4 livres = %v, want [1] — a reserva mexeu em carona que não usou", got)
 	}
 }
 
 // TestReservar_Recusas percorre os passos 1 e 2 do algoritmo da seção 7 do
 // PROJETO.md, um caso por regra.
 //
-// Os dois últimos casos são os controles negativos do cenário da seção 9.2
-// aplicados à reserva, e não à busca: car-4 fica 15 minutos depois de car-1, e
-// car-6 fica 25 horas depois. Eles precisam ser recusados aqui também — a busca
-// e a reserva usam as mesmas constantes de propósito (D13), e uma reserva mais
-// frouxa que a busca deixaria o cliente confirmar, por chamada direta ao
-// protocolo, um itinerário que a busca nunca ofereceria.
+// Os três últimos casos são os controles negativos do cenário da seção 9.2
+// aplicados à reserva, e não à busca: car-6 fica 15 minutos depois de car-1,
+// car-7 fica 24 horas depois, e car-8 leva o passageiro de volta a Salvador
+// antes de car-5. Eles precisam ser recusados aqui também — a busca e a reserva
+// aplicam as mesmas regras de propósito (D09, D13), e uma reserva mais frouxa
+// que a busca deixaria o cliente confirmar, por chamada direta ao protocolo, um
+// itinerário que a busca nunca ofereceria.
 func TestReservar_Recusas(t *testing.T) {
 	casos := []struct {
 		nome     string
@@ -116,8 +119,9 @@ func TestReservar_Recusas(t *testing.T) {
 		{"ate além da rota", []ItemReserva{item("car-1", 0, 3)}, ErrItemInvalido},
 		{"mesma carona duas vezes", []ItemReserva{item("car-1", 0, 1), item("car-1", 1, 2)}, ErrItinerarioInvalido},
 		{"não encadeia no espaço", []ItemReserva{item("car-1", 0, 1), item("car-2", 0, 1)}, ErrItinerarioInvalido},
-		{"folga abaixo da margem (car-4)", []ItemReserva{item("car-1", 0, 2), item("car-4", 0, 1)}, ErrItinerarioInvalido},
-		{"espera acima do teto (car-6)", []ItemReserva{item("car-1", 0, 2), item("car-6", 2, 3)}, ErrItinerarioInvalido},
+		{"folga abaixo da margem (car-6)", []ItemReserva{item("car-1", 0, 2), item("car-6", 0, 1)}, ErrItinerarioInvalido},
+		{"espera acima do teto (car-7)", []ItemReserva{item("car-1", 0, 2), item("car-7", 2, 3)}, ErrItinerarioInvalido},
+		{"volta a cidade visitada (car-8)", []ItemReserva{item("car-1", 0, 1), item("car-8", 0, 1), item("car-5", 1, 2)}, ErrItinerarioInvalido},
 	}
 
 	for _, caso := range casos {
@@ -208,19 +212,19 @@ func TestReservar_RecusaPernaQueAtravessaCidadeVisitada(t *testing.T) {
 // TestReservar_SemAssentoNaoDecrementaAPernaDisponivel é o argumento de
 // atomicidade no nível do domínio, e o par determinístico do cenário T2.
 //
-// car-3 tem um único assento. Com ele já ocupado, um itinerário que use car-1 e
-// car-3 tem que falhar **inteiro**: car-1, que tinha assento de sobra, não pode
+// car-4 tem um único assento. Com ele já ocupado, um itinerário que use car-1 e
+// car-4 tem que falhar **inteiro**: car-1, que tinha assento de sobra, não pode
 // ter sido decrementado no caminho. É a separação entre os passos 1–4 e o passo
 // 6 que garante isso, e é por ela que nenhum rollback é necessário (RNF06).
 func TestReservar_SemAssentoNaoDecrementaAPernaDisponivel(t *testing.T) {
 	e := estadoDoCenario(t)
 
-	// maria toma o assento único de car-3 (Feira → Vitória da Conquista).
-	reservarNoCenario(t, e, "maria", item("car-3", 0, 2))
+	// maria toma o assento único de car-4 (Feira de Santana → Jequié).
+	reservarNoCenario(t, e, "maria", item("car-4", 0, 1))
 
-	// pedro tenta chegar lá via car-1 até Feira (06:00 → 08:00) e car-3 a
-	// partir das 09:00, folga de 60 min, encadeamento válido. Só falta assento.
-	_, _, err := e.Reservar("pedro", []ItemReserva{item("car-1", 0, 1), item("car-3", 0, 2)}, as(0, 0))
+	// pedro tenta chegar lá via car-1 até Feira (06:00 → 07:45) e car-4 a
+	// partir das 08:15, folga de 30 min, encadeamento válido. Só falta assento.
+	_, _, err := e.Reservar("pedro", []ItemReserva{item("car-1", 0, 1), item("car-4", 0, 1)}, as(0, 0))
 	if !errors.Is(err, ErrSemAssento) {
 		t.Fatalf("erro = %v, want ErrSemAssento", err)
 	}
@@ -229,8 +233,8 @@ func TestReservar_SemAssentoNaoDecrementaAPernaDisponivel(t *testing.T) {
 	if !errors.As(err, &detalhe) {
 		t.Fatalf("erro %v não carrega ErroSemAssento; PROTOCOL.md 5.9 exige dizer qual trecho esgotou", err)
 	}
-	if detalhe.CaronaID != "car-3" || detalhe.IndiceTrecho != 0 {
-		t.Errorf("detalhe = %+v, want car-3 trecho 0", detalhe)
+	if detalhe.CaronaID != "car-4" || detalhe.IndiceTrecho != 0 {
+		t.Errorf("detalhe = %+v, want car-4 trecho 0", detalhe)
 	}
 
 	if got := livresDe(t, e, "joao", "car-1"); got[0] != 3 {
@@ -241,11 +245,11 @@ func TestReservar_SemAssentoNaoDecrementaAPernaDisponivel(t *testing.T) {
 // TestReservar_ConflitoDeHorarioDoMesmoPassageiro confere D14, e é o par
 // determinístico do cenário T8.
 //
-// car-1 ocupa maria das 06:00 às 11:00 e car-7 das 08:30 às 11:30: os
+// car-1 ocupa maria das 06:00 às 10:45 e car-4 vai das 08:15 às 11:15: os
 // intervalos se cruzam, e ninguém viaja em dois veículos ao mesmo tempo. A
 // comparação é sobre o itinerário inteiro, não trecho a trecho.
 //
-// O último caso é o complemento necessário: car-2 parte às 12:30, depois de a
+// O último caso é o complemento necessário: car-2 parte às 12:15, depois de a
 // primeira reserva terminar, e precisa ser aceito. Uma implementação que
 // recusasse qualquer segunda reserva também passaria nas duas primeiras
 // afirmações.
@@ -254,7 +258,7 @@ func TestReservar_ConflitoDeHorarioDoMesmoPassageiro(t *testing.T) {
 
 	primeira := reservarNoCenario(t, e, "maria", item("car-1", 0, 2))
 
-	_, _, err := e.Reservar("maria", []ItemReserva{item("car-7", 0, 1)}, as(0, 0))
+	_, _, err := e.Reservar("maria", []ItemReserva{item("car-4", 0, 1)}, as(0, 0))
 	if !errors.Is(err, ErrConflitoHorario) {
 		t.Fatalf("erro = %v, want ErrConflitoHorario", err)
 	}
@@ -273,7 +277,7 @@ func TestReservar_ConflitoDeHorarioDoMesmoPassageiro(t *testing.T) {
 	}
 
 	// E o conflito é por passageiro: pedro não é afetado pela reserva de maria.
-	if _, _, err := e.Reservar("pedro", []ItemReserva{item("car-7", 0, 1)}, as(0, 0)); err != nil {
+	if _, _, err := e.Reservar("pedro", []ItemReserva{item("car-4", 0, 1)}, as(0, 0)); err != nil {
 		t.Fatalf("reserva de outro passageiro recusada: %v", err)
 	}
 }

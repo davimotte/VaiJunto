@@ -284,27 +284,30 @@ Erros: `CARONA_NAO_ENCONTRADA`, `NAO_E_DONO`, `CARONA_CANCELADA`,
 
 ```json
 {"id":"6","tipo":"BUSCAR_ITINERARIOS","dados":{
-  "origem":"Salvador","destino":"Vitória da Conquista","data":"2026-09-15"
+  "origem":"Salvador","destino":"Vitória da Conquista","data":"2026-10-01"
 }}
 ```
 
 `data` filtra pelo horário de partida do **primeiro** trecho do itinerário, o que
 permite baldeação atravessando a meia-noite.
 
+Resposta, com um dos itinerários do cenário do `PROJETO.md` (seção 9.2); os
+demais foram omitidos:
+
 ```json
 {"id":"6","status":"OK","dados":{"itinerarios":[{
-  "preco_total_centavos":11500,
-  "partida":"2026-09-15T06:00:00-03:00",
-  "chegada":"2026-09-15T15:00:00-03:00",
+  "preco_total_centavos":10000,
+  "partida":"2026-10-01T06:00:00-03:00",
+  "chegada":"2026-10-01T14:30:00-03:00",
   "baldeacoes":1,
   "trechos":[
     {"carona_id":"car-1","motorista":"João Silva","de":0,"ate":2,
      "origem":"Salvador","destino":"Jequié",
-     "partida":"2026-09-15T06:00:00-03:00","chegada":"2026-09-15T11:00:00-03:00",
-     "preco_centavos":7500},
+     "partida":"2026-10-01T06:00:00-03:00","chegada":"2026-10-01T10:45:00-03:00",
+     "preco_centavos":6000},
     {"carona_id":"car-2","motorista":"Carlos Lima","de":0,"ate":1,
      "origem":"Jequié","destino":"Vitória da Conquista",
-     "partida":"2026-09-15T12:30:00-03:00","chegada":"2026-09-15T15:00:00-03:00",
+     "partida":"2026-10-01T12:15:00-03:00","chegada":"2026-10-01T14:30:00-03:00",
      "preco_centavos":4000}
   ]
 }]}}
@@ -363,7 +366,7 @@ o que garante a atomicidade. Nenhuma escrita ocorre antes de toda a validação
 passar, então não existe estado parcial a desfazer.
 
 ```json
-{"id":"7","status":"OK","dados":{"reserva_id":"res-91c","preco_total_centavos":11500}}
+{"id":"7","status":"OK","dados":{"reserva_id":"res-91c","preco_total_centavos":10000}}
 ```
 
 Erro por indisponibilidade, com detalhe suficiente para o CLI explicar:
@@ -393,13 +396,19 @@ Requisição: `{"incluir_canceladas": false}`
 {"id":"8","status":"OK","dados":{"reservas":[{
   "reserva_id":"res-91c","ativa":true,
   "criada_em":"2026-08-27T14:02:11-03:00",
-  "preco_total_centavos":11500,
-  "partida":"2026-09-15T06:00:00-03:00",
-  "chegada":"2026-09-15T15:00:00-03:00",
-  "trechos":[{"carona_id":"car-1","motorista":"João Silva",
-    "origem":"Salvador","destino":"Jequié",
-    "partida":"2026-09-15T06:00:00-03:00","chegada":"2026-09-15T11:00:00-03:00",
-    "preco_centavos":7500}]
+  "preco_total_centavos":10000,
+  "partida":"2026-10-01T06:00:00-03:00",
+  "chegada":"2026-10-01T14:30:00-03:00",
+  "trechos":[
+    {"carona_id":"car-1","motorista":"João Silva",
+     "origem":"Salvador","destino":"Jequié",
+     "partida":"2026-10-01T06:00:00-03:00","chegada":"2026-10-01T10:45:00-03:00",
+     "preco_centavos":6000},
+    {"carona_id":"car-2","motorista":"Carlos Lima",
+     "origem":"Jequié","destino":"Vitória da Conquista",
+     "partida":"2026-10-01T12:15:00-03:00","chegada":"2026-10-01T14:30:00-03:00",
+     "preco_centavos":4000}
+  ]
 }]}}
 ```
 
@@ -419,7 +428,7 @@ consumia, em seção crítica única.
 ```json
 {"id":"9","status":"ERRO","codigo":"PRAZO_CANCELAMENTO_EXPIRADO",
  "mensagem":"Cancelamento permitido até 1h antes da partida.",
- "dados":{"partida":"2026-09-15T06:00:00-03:00"}}
+ "dados":{"partida":"2026-10-01T06:00:00-03:00"}}
 ```
 
 Outros erros: `RESERVA_NAO_ENCONTRADA`, `NAO_E_DONO`, `RESERVA_JA_CANCELADA`.
@@ -460,19 +469,21 @@ Outros erros: `RESERVA_NAO_ENCONTRADA`, `NAO_E_DONO`, `RESERVA_JA_CANCELADA`.
 → {"id":"1","tipo":"LOGIN","dados":{"usuario":"maria","senha":"abcd"}}
 ← {"id":"1","status":"OK","dados":{"usuario":"maria","nome":"Maria Souza","perfil":"PASSAGEIRO"}}
 
-→ {"id":"2","tipo":"BUSCAR_ITINERARIOS","dados":{"origem":"Salvador","destino":"Vitória da Conquista","data":"2026-09-15"}}
-← {"id":"2","status":"OK","dados":{"itinerarios":[ ... 3 opções ... ]}}
+→ {"id":"2","tipo":"BUSCAR_ITINERARIOS","dados":{"origem":"Salvador","destino":"Vitória da Conquista","data":"2026-10-01"}}
+← {"id":"2","status":"OK","dados":{"itinerarios":[ ... 4 opções ... ]}}
 
-→ {"id":"3","tipo":"RESERVAR","dados":{"trechos":[{"carona_id":"car-1","de":0,"ate":1},{"carona_id":"car-3","de":0,"ate":2}]}}
-← {"id":"3","status":"ERRO","codigo":"SEM_ASSENTO","mensagem":"...","dados":{"carona_id":"car-3","indice_trecho":0}}
+→ {"id":"3","tipo":"RESERVAR","dados":{"trechos":[{"carona_id":"car-1","de":0,"ate":1},{"carona_id":"car-4","de":0,"ate":1},{"carona_id":"car-2","de":0,"ate":1}]}}
+← {"id":"3","status":"ERRO","codigo":"SEM_ASSENTO","mensagem":"...","dados":{"carona_id":"car-4","indice_trecho":0}}
 
 → {"id":"4","tipo":"RESERVAR","dados":{"trechos":[{"carona_id":"car-1","de":0,"ate":2},{"carona_id":"car-2","de":0,"ate":1}]}}
-← {"id":"4","status":"OK","dados":{"reserva_id":"res-91c","preco_total_centavos":11500}}
+← {"id":"4","status":"OK","dados":{"reserva_id":"res-91c","preco_total_centavos":10000}}
 
 → {"id":"5","tipo":"LOGOUT","dados":{}}
 ← {"id":"5","status":"OK","dados":{}}
 ```
 
-A requisição 3 falhando e a 4 tendo sucesso demonstra o comportamento exigido: o
-passageiro perdeu a disputa pelo assento único de `car-3`, nada foi reservado
-pela metade, e ele escolheu outro itinerário.
+As caronas são as do cenário do `PROJETO.md` (seção 9.2). A requisição 3
+falhando e a 4 tendo sucesso demonstra o comportamento exigido: o passageiro
+perdeu a disputa pelo assento único de `car-4`, nada foi reservado pela metade —
+nem o trecho de `car-1`, que tinha assento sobrando —, e ele escolheu outro
+itinerário.

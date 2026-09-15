@@ -62,7 +62,7 @@ func autenticar(e *Estado, usuario, senha string) (Usuario, error) {
 // Roda dentro da seção crítica, então checar colisão contra o mapa é grátis e
 // remove qualquer dúvida sobre duas publicações simultâneas gerarem o mesmo
 // id. Um contador sequencial seria mais simples, mas colidiria com os ids
-// fixos de dados/caronas.json ("car-1" a "car-7") depois de um reinício.
+// fixos de dados/caronas.json ("car-1", "car-2", ...) depois de um reinício.
 func gerarIDCarona(e *Estado) (string, error) {
 	var sufixo [2]byte
 	for tentativa := 0; tentativa < 10; tentativa++ {
@@ -283,10 +283,10 @@ const (
 	// permite a baldeação atravessar a meia-noite (PROJETO.md, seção 6). Sem
 	// um teto, esse mesmo afrouxamento deixa entrar caronas de dias
 	// seguintes como perna intermediária: no cenário da seção 9.2, car-1
-	// chega a Jequié em 15/09 às 11:00 e car-6 parte de lá em 16/09 ao meio-
-	// dia, encadeamento válido no espaço e no tempo que produziria um
-	// "itinerário" com 25 h de espera. Doze horas separa a conexão noturna
-	// legítima da espera de um dia inteiro.
+	// chega a Feira de Santana em 01/10 às 07:45 e car-7 parte de lá em 02/10
+	// no mesmo horário, encadeamento válido no espaço e no tempo que
+	// produziria um "itinerário" com 24 h de espera. Doze horas separa a
+	// conexão noturna legítima da espera de um dia inteiro.
 	ESPERA_MAXIMA_BALDEACAO = 12 * time.Hour
 
 	// MAXIMO_ITINERARIOS limita a resposta da busca (D16; PROTOCOL.md, seção

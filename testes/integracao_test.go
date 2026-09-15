@@ -29,6 +29,11 @@ const (
 	caminhoUsuarios = "../dados/usuarios.json"
 	caminhoCaronas  = "../dados/caronas.json"
 
+	// caronasDeJoaoNaCarga é quantas caronas joao tem no cenário da seção 9.2
+	// do PROJETO.md: car-1 e car-5. Os testes que publicam como joao somam as
+	// publicadas a este número.
+	caronasDeJoaoNaCarga = 2
+
 	// Toda leitura de socket tem prazo: um teste que trava esperando resposta
 	// esconde o defeito atrás de um timeout de suíte, em vez de apontá-lo.
 	prazoLeitura = 5 * time.Second
@@ -321,13 +326,13 @@ func TestIdentidadeEhPorConexao(t *testing.T) {
 	deCarlos := listar(carlos)
 	deJoaoDeNovo := listar(joao)
 
-	if !deJoao["car-1"] || !deJoao["car-4"] || !deJoao["car-7"] || len(deJoao) != 3 {
-		t.Fatalf("caronas de joao = %v, want car-1, car-4 e car-7", deJoao)
+	if !deJoao["car-1"] || !deJoao["car-5"] || len(deJoao) != caronasDeJoaoNaCarga {
+		t.Fatalf("caronas de joao = %v, want car-1 e car-5", deJoao)
 	}
-	if !deCarlos["car-2"] || !deCarlos["car-5"] || len(deCarlos) != 2 {
-		t.Fatalf("caronas de carlos = %v, want car-2 e car-5", deCarlos)
+	if !deCarlos["car-2"] || !deCarlos["car-6"] || !deCarlos["car-8"] || len(deCarlos) != 3 {
+		t.Fatalf("caronas de carlos = %v, want car-2, car-6 e car-8", deCarlos)
 	}
-	if len(deJoaoDeNovo) != 3 || !deJoaoDeNovo["car-1"] {
+	if len(deJoaoDeNovo) != caronasDeJoaoNaCarga || !deJoaoDeNovo["car-1"] {
 		t.Fatalf("a segunda listagem de joao mudou: %v", deJoaoDeNovo)
 	}
 
@@ -530,11 +535,11 @@ func TestPublicarCaronaValidacoes(t *testing.T) {
 	}
 
 	// Nenhuma das recusas pode ter deixado carona no estado: o joão continua
-	// com exatamente as três da carga inicial.
+	// com exatamente as da carga inicial.
 	var lista protocolo.ListarMinhasCaronasResposta
 	c.exigirOK(protocolo.TipoListarMinhasCaronas, protocolo.ListarMinhasCaronasRequisicao{IncluirCanceladas: true}, &lista)
-	if len(lista.Caronas) != 3 {
-		t.Fatalf("após %d recusas, joao tem %d caronas, want 3", len(casos), len(lista.Caronas))
+	if len(lista.Caronas) != caronasDeJoaoNaCarga {
+		t.Fatalf("após %d recusas, joao tem %d caronas, want %d", len(casos), len(lista.Caronas), caronasDeJoaoNaCarga)
 	}
 }
 
@@ -570,9 +575,10 @@ func TestListarMinhasCaronasDetalhaTrechos(t *testing.T) {
 	var lista protocolo.ListarMinhasCaronasResposta
 	c.exigirOK(protocolo.TipoListarMinhasCaronas, protocolo.ListarMinhasCaronasRequisicao{}, &lista)
 
-	// A carga inicial coloca car-1 às 06:00, car-7 às 08:30 e car-4 às 11:15:
-	// a lista sai ordenada por partida, e não na ordem aleatória do mapa.
-	ordemEsperada := []string{"car-1", "car-7", "car-4"}
+	// A carga inicial coloca car-5 às 05:30 e car-1 às 06:00: a lista sai
+	// ordenada por partida, e não na ordem do arquivo nem na ordem aleatória
+	// do mapa — car-1 vem antes de car-5 no arquivo e no identificador.
+	ordemEsperada := []string{"car-5", "car-1"}
 	if len(lista.Caronas) != len(ordemEsperada) {
 		t.Fatalf("joao tem %d caronas, want %d", len(lista.Caronas), len(ordemEsperada))
 	}
@@ -584,7 +590,7 @@ func TestListarMinhasCaronasDetalhaTrechos(t *testing.T) {
 
 	// car-1 vai de Salvador a Jequié com 3 assentos: dois trechos, ambos
 	// livres por inteiro, com os preços da carga.
-	car1 := lista.Caronas[0]
+	car1 := lista.Caronas[1]
 	if car1.Assentos != 3 || car1.Cancelada {
 		t.Fatalf("car-1 = %+v", car1)
 	}
@@ -592,8 +598,8 @@ func TestListarMinhasCaronasDetalhaTrechos(t *testing.T) {
 		t.Fatalf("car-1 tem %d trechos para uma rota de %d cidades", len(car1.Trechos), len(car1.Rota))
 	}
 	esperados := []protocolo.TrechoResumo{
-		{Indice: 0, Origem: "Salvador", Destino: "Feira de Santana", PrecoCentavos: 3000, Livres: 3},
-		{Indice: 1, Origem: "Feira de Santana", Destino: "Jequié", PrecoCentavos: 4500, Livres: 3},
+		{Indice: 0, Origem: "Salvador", Destino: "Feira de Santana", PrecoCentavos: 2500, Livres: 3},
+		{Indice: 1, Origem: "Feira de Santana", Destino: "Jequié", PrecoCentavos: 3500, Livres: 3},
 	}
 	for i, querido := range esperados {
 		if car1.Trechos[i] != querido {
@@ -735,8 +741,9 @@ func TestConexaoPersistenteComVariasOperacoes(t *testing.T) {
 
 	var lista protocolo.ListarMinhasCaronasResposta
 	c.exigirOK(protocolo.TipoListarMinhasCaronas, protocolo.ListarMinhasCaronasRequisicao{}, &lista)
-	if len(lista.Caronas) != 33 {
-		t.Fatalf("joao tem %d caronas, want 33 (3 da carga + 30 publicadas)", len(lista.Caronas))
+	if len(lista.Caronas) != caronasDeJoaoNaCarga+30 {
+		t.Fatalf("joao tem %d caronas, want %d (%d da carga + 30 publicadas)",
+			len(lista.Caronas), caronasDeJoaoNaCarga+30, caronasDeJoaoNaCarga)
 	}
 
 	c.exigirOK(protocolo.TipoLogout, vazio, nil)
@@ -831,8 +838,8 @@ func TestClienteDerrubadoNaoAfetaOsDemais(t *testing.T) {
 	// A conexão saudável segue intacta, com a sessão preservada.
 	var lista protocolo.ListarMinhasCaronasResposta
 	saudavel.exigirOK(protocolo.TipoListarMinhasCaronas, protocolo.ListarMinhasCaronasRequisicao{}, &lista)
-	if len(lista.Caronas) != 3 {
-		t.Fatalf("a conexão saudável perdeu estado: %d caronas, want 3", len(lista.Caronas))
+	if len(lista.Caronas) != caronasDeJoaoNaCarga {
+		t.Fatalf("a conexão saudável perdeu estado: %d caronas, want %d", len(lista.Caronas), caronasDeJoaoNaCarga)
 	}
 }
 
@@ -886,7 +893,8 @@ func TestPublicacoesSimultaneas(t *testing.T) {
 	conferente.entrar("joao", "1234")
 	var lista protocolo.ListarMinhasCaronasResposta
 	conferente.exigirOK(protocolo.TipoListarMinhasCaronas, protocolo.ListarMinhasCaronasRequisicao{}, &lista)
-	if len(lista.Caronas) != 3+conexoes*porConexao {
-		t.Fatalf("estado final com %d caronas, want %d: houve escrita perdida", len(lista.Caronas), 3+conexoes*porConexao)
+	if len(lista.Caronas) != caronasDeJoaoNaCarga+conexoes*porConexao {
+		t.Fatalf("estado final com %d caronas, want %d: houve escrita perdida",
+			len(lista.Caronas), caronasDeJoaoNaCarga+conexoes*porConexao)
 	}
 }
