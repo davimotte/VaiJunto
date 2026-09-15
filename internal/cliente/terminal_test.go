@@ -186,6 +186,58 @@ func TestLerInstante_UsaOFusoInformado(t *testing.T) {
 	}
 }
 
+// TestLerInstanteComDataPadrao cobre a data opcional das paradas seguintes à
+// primeira: Enter vazio usa a data padrão, uma data digitada a substitui, e
+// uma data inválida continua sendo recusada — a resposta vazia é a única que
+// ganhou significado novo.
+func TestLerInstanteComDataPadrao(t *testing.T) {
+	fuso := time.FixedZone("-03", -3*60*60)
+	padrao := time.Date(2026, 9, 20, 8, 0, 0, 0, fuso)
+
+	casos := []struct {
+		nome     string
+		entrada  string
+		esperado time.Time
+		recusas  int
+	}{
+		{"Enter usa a data padrão", "\n10:15\n", time.Date(2026, 9, 20, 10, 15, 0, 0, fuso), 0},
+		{"data digitada substitui a padrão", "2026-09-21\n01:30\n", time.Date(2026, 9, 21, 1, 30, 0, 0, fuso), 0},
+		{"data inválida é recusada e Enter ainda vale", "20/09\n\n10:15\n", time.Date(2026, 9, 20, 10, 15, 0, 0, fuso), 1},
+	}
+	for _, caso := range casos {
+		t.Run(caso.nome, func(t *testing.T) {
+			term, saida := terminalDeTeste(caso.entrada)
+			instante, err := term.LerInstanteComDataPadrao("Data: ", "Hora: ", padrao, fuso)
+			if err != nil {
+				t.Fatalf("LerInstanteComDataPadrao: %v", err)
+			}
+			if !instante.Equal(caso.esperado) {
+				t.Errorf("instante = %v, want %v", instante, caso.esperado)
+			}
+			if n := strings.Count(saida.String(), "Data inválida"); n != caso.recusas {
+				t.Errorf("%d recusas de data, want %d:\n%s", n, caso.recusas, saida.String())
+			}
+		})
+	}
+}
+
+// TestLerInstanteComDataPadrao_DataPadraoNoFusoInformado: a data que o Enter
+// repete é a do dia civil no fuso das cidades, e não no fuso em que o instante
+// padrão chegou. 02:00 UTC de 21/09 ainda é 23:00 de 20/09 na Bahia.
+func TestLerInstanteComDataPadrao_DataPadraoNoFusoInformado(t *testing.T) {
+	fuso := time.FixedZone("-03", -3*60*60)
+	padrao := time.Date(2026, 9, 21, 2, 0, 0, 0, time.UTC)
+
+	term, _ := terminalDeTeste("\n23:30\n")
+	instante, err := term.LerInstanteComDataPadrao("Data: ", "Hora: ", padrao, fuso)
+	if err != nil {
+		t.Fatalf("LerInstanteComDataPadrao: %v", err)
+	}
+	if got := instante.Format(time.RFC3339); got != "2026-09-20T23:30:00-03:00" {
+		t.Errorf("instante = %s, want 2026-09-20T23:30:00-03:00", got)
+	}
+}
+
 func TestAnalisarCentavos(t *testing.T) {
 	validos := []struct {
 		texto    string

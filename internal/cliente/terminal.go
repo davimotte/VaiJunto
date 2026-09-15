@@ -230,10 +230,20 @@ const formatoDataISO = "2006-01-02"
 // chegaria ao servidor como CAMPO_INVALIDO depois de uma ida e volta na rede,
 // enquanto o cliente pode repetir a pergunta na hora.
 func (t *Terminal) LerDataISO(rotulo string) (string, error) {
+	return t.lerDataISO(rotulo, "")
+}
+
+// lerDataISO é LerDataISO com uma data padrão opcional, já em "AAAA-MM-DD":
+// com padrao preenchido, a resposta vazia a devolve; com padrao vazio, a
+// resposta vazia é uma data inválida como qualquer outra.
+func (t *Terminal) lerDataISO(rotulo, padrao string) (string, error) {
 	for {
 		texto, err := t.lerBruto(rotulo)
 		if err != nil {
 			return "", err
+		}
+		if texto == "" && padrao != "" {
+			return padrao, nil
 		}
 		if _, err := time.Parse(formatoDataISO, texto); err != nil {
 			t.recusar("Data inválida. Use o formato AAAA-MM-DD, por exemplo 2026-09-15.")
@@ -253,7 +263,25 @@ func (t *Terminal) LerInstante(rotuloData, rotuloHora string, fuso *time.Locatio
 	if err != nil {
 		return time.Time{}, err
 	}
+	return t.lerHora(rotuloHora, data, fuso)
+}
 
+// LerInstanteComDataPadrao é LerInstante com a data opcional: Enter vazio usa
+// o dia de padrao, e uma data digitada o substitui.
+//
+// O dia é o de padrao lido no fuso informado, e não no fuso em que o instante
+// chegou: 02:00 UTC de 21/09 ainda é 20/09 na Bahia, e é essa a data que o
+// motorista vê e confirma.
+func (t *Terminal) LerInstanteComDataPadrao(rotuloData, rotuloHora string, padrao time.Time, fuso *time.Location) (time.Time, error) {
+	data, err := t.lerDataISO(rotuloData, padrao.In(fuso).Format(formatoDataISO))
+	if err != nil {
+		return time.Time{}, err
+	}
+	return t.lerHora(rotuloHora, data, fuso)
+}
+
+// lerHora pede a hora do dia data e monta o instante no fuso informado.
+func (t *Terminal) lerHora(rotuloHora, data string, fuso *time.Location) (time.Time, error) {
 	// Só a hora é repetida quando a hora está errada. Reabrir a pergunta da
 	// data obrigaria a redigitar um dado que já foi aceito, que é o tipo de
 	// atrito que faz o operador errar de novo.

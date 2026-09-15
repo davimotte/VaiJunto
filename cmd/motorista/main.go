@@ -196,7 +196,7 @@ func detalharCarona(term *cliente.Terminal, conexao *cliente.Conexao) error {
 		return err
 	}
 
-	term.Imprimir("\nCarona %s — %s\n\n", detalhe.CaronaID, extremos(alvo.Rota))
+	term.Imprimir("\nCarona %s — %s\n\n", detalhe.CaronaID, cliente.DescreverRota(alvo.Rota))
 	var tabela cliente.Tabela
 	for i, trecho := range detalhe.Trechos {
 		if i > 0 {
@@ -316,7 +316,7 @@ func acrescentarCarona(tabela *cliente.Tabela, numero int, carona protocolo.Caro
 	partida := carona.Horarios[0]
 	chegada := carona.Horarios[len(carona.Horarios)-1]
 
-	tabela.LinhaSolta("[%d] %s — %s%s", numero, carona.CaronaID, extremos(carona.Rota), situacao)
+	tabela.LinhaSolta("[%d] %s — %s%s", numero, carona.CaronaID, cliente.DescreverRota(carona.Rota), situacao)
 	tabela.LinhaSolta("    %s → %s  •  %s",
 		cliente.FormatarInstante(partida),
 		cliente.FormatarHoraRelativa(chegada, partida),
@@ -345,12 +345,4 @@ func intervaloDoTrecho(carona protocolo.CaronaResumo, indice int) string {
 		return ""
 	}
 	return cliente.FormatarIntervalo(carona.Horarios[indice], carona.Horarios[indice+1], carona.Horarios[0])
-}
-
-// extremos descreve uma rota pelas suas pontas: "Salvador → Jequié".
-func extremos(rota []string) string {
-	if len(rota) == 0 {
-		return ""
-	}
-	return rota[0] + " → " + rota[len(rota)-1]
 }

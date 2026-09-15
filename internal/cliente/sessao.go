@@ -51,6 +51,29 @@ func EscolherCidade(term *Terminal, titulo string) (string, error) {
 	return cidades[escolhida], nil
 }
 
+// EscolherOrigemEDestino pergunta a origem e o destino de uma busca, repetindo
+// a pergunta do destino enquanto ele for igual à origem.
+//
+// Segue D15: a recusa acontece no menu, e não depois de uma ida ao servidor
+// que só poderia voltar como ROTA_INVALIDA. Só o destino se repete, porque a
+// origem escolhida estava certa.
+func EscolherOrigemEDestino(term *Terminal) (origem, destino string, err error) {
+	origem, err = EscolherCidade(term, "Origem:")
+	if err != nil {
+		return "", "", err
+	}
+	for {
+		destino, err = EscolherCidade(term, "Destino:")
+		if err != nil {
+			return "", "", err
+		}
+		if destino != origem {
+			return origem, destino, nil
+		}
+		term.recusar("O destino precisa ser diferente da origem.")
+	}
+}
+
 // Entrar executa o LOGIN da sessão, repetindo a pergunta enquanto o servidor
 // recusar as credenciais ou o perfil não for o exigido por este cliente.
 //
@@ -137,6 +160,11 @@ func TratarErro(term *Terminal, err error) error {
 // — um cliente escrito em outra linguagem não passa por aqui —, é só o menu
 // poupando o operador de um dedo errado.
 //
+// As cidades que já estão na rota continuam no menu, marcadas com "(já na
+// rota)", em vez de sumirem: a numeração fica a mesma em toda pergunta —
+// Salvador é sempre 1, e encerrar é sempre a última opção —, o que importa a
+// quem digita de memória, e a marca avisa antes da escolha, e não só depois.
+//
 // A opção de encerrar só entra no menu a partir da terceira parada, quando já
 // existe uma carona possível; e, com todas as cidades na rota, a coleta
 // termina sozinha, porque nenhuma outra poderia entrar sem repetir.
@@ -144,7 +172,6 @@ func TratarErro(term *Terminal, err error) error {
 // O fuso vem de quem chama, pelo mesmo motivo de LerInstante.
 func ColetarParadas(term *Terminal, fuso *time.Location) ([]protocolo.Parada, error) {
 	cidades := dominio.CidadesAtendidas()
-	comEncerrar := append(append([]string(nil), cidades...), "Encerrar a rota aqui")
 	encerrar := len(cidades)
 
 	var paradas []protocolo.Parada
@@ -153,9 +180,16 @@ func ColetarParadas(term *Terminal, fuso *time.Location) ([]protocolo.Parada, er
 	for len(paradas) < len(cidades) {
 		numero := len(paradas) + 1
 		titulo := fmt.Sprintf("Cidade da parada %d:", numero)
-		opcoes := cidades
+
+		opcoes := make([]string, 0, len(cidades)+1)
+		for _, cidade := range cidades {
+			if naRota[cidade] {
+				cidade += " (já na rota)"
+			}
+			opcoes = append(opcoes, cidade)
+		}
 		if len(paradas) >= 2 {
-			opcoes = comEncerrar
+			opcoes = append(opcoes, "Encerrar a rota aqui")
 		}
 
 		escolha, err := term.LerOpcao(titulo, opcoes)
@@ -186,22 +220,30 @@ func ColetarParadas(term *Terminal, fuso *time.Location) ([]protocolo.Parada, er
 // enquanto ele não for posterior ao da parada anterior.
 //
 // Só o horário se repete: a cidade já foi aceita, e reabri-la obrigaria a
-// redigitar um dado correto. A data é perguntada em toda parada porque uma
-// carona noturna atravessa a meia-noite, e deduzir o dia seguinte a partir de
-// uma hora "menor" seria adivinhar o que o motorista quis dizer.
+// redigitar um dado correto.
+//
+// A partir da segunda parada, Enter na data repete o dia da parada anterior,
+// e o rótulo mostra qual é. É o caso comum, e poupa digitar a mesma data a cada
+// parada. Uma carona noturna que atravessa a meia-noite continua explícita: o
+// motorista digita o dia seguinte. O que o menu não faz é deduzir esse dia a
+// partir de uma hora "menor" que a anterior — isso seria adivinhar, e um
+// 07:00 digitado no lugar de 17:00 viraria, sem aviso, uma viagem de um dia
+// para o outro. A primeira parada não tem data anterior, e nela a data é
+// obrigatória.
 func lerHorarioDaParada(term *Terminal, numero int, anteriores []protocolo.Parada, fuso *time.Location) (time.Time, error) {
+	rotuloHora := fmt.Sprintf("Hora da parada %d (HH:MM): ", numero)
+	if len(anteriores) == 0 {
+		return term.LerInstante(fmt.Sprintf("Data da parada %d (AAAA-MM-DD): ", numero), rotuloHora, fuso)
+	}
+
+	anterior := anteriores[len(anteriores)-1]
+	rotuloData := fmt.Sprintf("Data da parada %d (AAAA-MM-DD, Enter para %s): ",
+		numero, anterior.Horario.In(fuso).Format(formatoData))
 	for {
-		horario, err := term.LerInstante(
-			fmt.Sprintf("Data da parada %d (AAAA-MM-DD): ", numero),
-			fmt.Sprintf("Hora da parada %d (HH:MM): ", numero),
-			fuso)
+		horario, err := term.LerInstanteComDataPadrao(rotuloData, rotuloHora, anterior.Horario, fuso)
 		if err != nil {
 			return time.Time{}, err
 		}
-		if len(anteriores) == 0 {
-			return horario, nil
-		}
-		anterior := anteriores[len(anteriores)-1]
 		// Estritamente depois, e comparado com After: um horário igual seria um
 		// trecho de duração zero, e o servidor o recusaria do mesmo jeito.
 		if horario.After(anterior.Horario) {

@@ -88,7 +88,7 @@ Data (AAAA-MM-DD): 2026-10-01
 
 4 itinerários encontrados:
 
-[1] R$ 110,00 — 01/10/2026 10:30 → 17:30 (0 baldeações)
+[1] R$ 110,00 — 01/10/2026 10:30 → 17:30 (direta)
     Salvador → Vitória da Conquista          10:30 → 17:30  João Silva   R$ 110,00
 
 [2] R$ 80,00 — 01/10/2026 06:00 → 16:45 (1 baldeação)

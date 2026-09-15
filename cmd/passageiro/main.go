@@ -117,11 +117,7 @@ func menu(term *cliente.Terminal, conexao *cliente.Conexao) error {
 // assento nesse intervalo, a confirmação volta como SEM_ASSENTO e a mensagem
 // do protocolo explica qual trecho esgotou.
 func buscarEReservar(term *cliente.Terminal, conexao *cliente.Conexao) error {
-	origem, err := cliente.EscolherCidade(term, "Origem:")
-	if err != nil {
-		return err
-	}
-	destino, err := cliente.EscolherCidade(term, "Destino:")
+	origem, destino, err := cliente.EscolherOrigemEDestino(term)
 	if err != nil {
 		return err
 	}
@@ -198,6 +194,9 @@ func listarReservas(term *cliente.Terminal, conexao *cliente.Conexao) error {
 		return nil
 	}
 
+	// Mesmo cabeçalho das demais listagens dos menus: a contagem, e uma linha
+	// em branco separando a lista da pergunta que veio antes.
+	term.Imprimir("\n%s:\n\n", cliente.Plural(len(resposta.Reservas), "reserva", "reservas"))
 	exibirReservas(term, resposta.Reservas)
 	return nil
 }
@@ -258,7 +257,7 @@ func acrescentarItinerario(tabela *cliente.Tabela, numero int, itinerario protoc
 		cliente.FormatarCentavos(itinerario.PrecoTotalCentavos),
 		cliente.FormatarInstante(itinerario.Partida),
 		cliente.FormatarHoraRelativa(itinerario.Chegada, itinerario.Partida),
-		cliente.Plural(itinerario.Baldeacoes, "baldeação", "baldeações"))
+		cliente.DescreverBaldeacoes(itinerario.Baldeacoes))
 
 	for _, trecho := range itinerario.Trechos {
 		acrescentarPerna(tabela, trecho.Origem, trecho.Destino,
@@ -302,7 +301,7 @@ func acrescentarReserva(tabela *cliente.Tabela, numero int, reserva protocolo.Re
 		cliente.FormatarInstante(reserva.Partida),
 		cliente.FormatarHoraRelativa(reserva.Chegada, reserva.Partida),
 		cliente.FormatarCentavos(reserva.PrecoTotalCentavos),
-		cliente.Plural(baldeacoes, "baldeação", "baldeações"))
+		cliente.DescreverBaldeacoes(baldeacoes))
 
 	for _, trecho := range reserva.Trechos {
 		acrescentarPerna(tabela, trecho.Origem, trecho.Destino,

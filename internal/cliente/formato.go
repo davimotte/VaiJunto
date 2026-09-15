@@ -29,6 +29,7 @@ func FormatarCentavos(centavos int) string {
 // Formatos de exibição, em convenção brasileira (dia/mês/ano, hora de 24 h).
 const (
 	formatoInstante = "02/01/2006 15:04"
+	formatoData     = "02/01/2006"
 	formatoDiaHora  = "02/01 15:04"
 	formatoHora     = "15:04"
 )
@@ -99,6 +100,27 @@ func Plural(n int, singular, plural string) string {
 		return fmt.Sprintf("%d %s", n, singular)
 	}
 	return fmt.Sprintf("%d %s", n, plural)
+}
+
+// DescreverBaldeacoes escreve o número de trocas de veículo de um itinerário.
+//
+// Zero sai como "direta", e não como "0 baldeações": pela D16 a direta vem em
+// primeiro na busca, e "direta" é o que o passageiro quer saber dela.
+func DescreverBaldeacoes(n int) string {
+	if n == 0 {
+		return "direta"
+	}
+	return Plural(n, "baldeação", "baldeações")
+}
+
+// DescreverRota escreve todas as paradas de uma rota, na ordem:
+// "Jequié → Salvador → Vitória da Conquista".
+//
+// Todas, e não só as pontas: a sequência de paradas é informada pelo motorista
+// (D09), e mostrar só origem e destino esconderia justamente as cidades por
+// onde a carona passa — que são onde um passageiro pode embarcar.
+func DescreverRota(rota []string) string {
+	return strings.Join(rota, " → ")
 }
 
 // espacamentoColunas é o respiro entre uma coluna e a seguinte.

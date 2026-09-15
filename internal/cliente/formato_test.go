@@ -170,6 +170,46 @@ func TestPlural(t *testing.T) {
 	}
 }
 
+// TestDescreverBaldeacoes: zero trocas é "direta", e não "0 baldeações".
+// Pela D16 a direta é a primeira da lista, e é a primeira linha que o
+// passageiro lê.
+func TestDescreverBaldeacoes(t *testing.T) {
+	casos := []struct {
+		n        int
+		esperado string
+	}{
+		{0, "direta"},
+		{1, "1 baldeação"},
+		{2, "2 baldeações"},
+	}
+	for _, caso := range casos {
+		if got := DescreverBaldeacoes(caso.n); got != caso.esperado {
+			t.Errorf("DescreverBaldeacoes(%d) = %q, want %q", caso.n, got, caso.esperado)
+		}
+	}
+}
+
+// TestDescreverRota: o cabeçalho da carona mostra todas as paradas, e não só
+// as pontas. Numa rota como Jequié → Salvador → Vitória da Conquista, mostrar
+// só "Jequié → Vitória da Conquista" esconderia a cidade que torna a rota
+// diferente de uma sequência em linha (D09).
+func TestDescreverRota(t *testing.T) {
+	casos := []struct {
+		rota     []string
+		esperado string
+	}{
+		{[]string{"Jequié", "Salvador", "Vitória da Conquista"}, "Jequié → Salvador → Vitória da Conquista"},
+		{[]string{"Feira de Santana", "Jequié"}, "Feira de Santana → Jequié"},
+		// A lista vem da rede; vazia não pode virar pânico nem seta solta.
+		{nil, ""},
+	}
+	for _, caso := range casos {
+		if got := DescreverRota(caso.rota); got != caso.esperado {
+			t.Errorf("DescreverRota(%v) = %q, want %q", caso.rota, got, caso.esperado)
+		}
+	}
+}
+
 // TestTabela_AlinhaPelaLarguraDoConteudo: a largura de cada coluna sai do
 // conteúdo, e não de uma constante escolhida na mão. Constante precisaria
 // caber o pior caso de todas as cidades e deixaria um vão em toda listagem

@@ -33,6 +33,41 @@ func em(hora, minuto int) time.Time {
 	return time.Date(2026, 9, 20, hora, minuto, 0, 0, fusoDasCidadesFixo)
 }
 
+// TestEscolherOrigemEDestino_DestinoIgualRepetePergunta confere D15 na busca
+// do passageiro: destino igual à origem é recusado no menu, e só a pergunta do
+// destino se repete. Sem isso, a requisição iria ao servidor e voltaria como
+// ROTA_INVALIDA, com uma mensagem escrita para a publicação de carona.
+func TestEscolherOrigemEDestino_DestinoIgualRepetePergunta(t *testing.T) {
+	term, saida := terminalDeTeste(
+		"1\n" + // origem: Salvador
+			"1\n" + // destino: Salvador de novo, recusado
+			"4\n") // destino: Vitória da Conquista
+
+	origem, destino, err := EscolherOrigemEDestino(term)
+	if err != nil {
+		t.Fatalf("EscolherOrigemEDestino: %v", err)
+	}
+	if origem != "Salvador" || destino != "Vitória da Conquista" {
+		t.Errorf("origem, destino = %q, %q, want Salvador, Vitória da Conquista", origem, destino)
+	}
+	if !strings.Contains(saida.String(), "O destino precisa ser diferente da origem") {
+		t.Errorf("a recusa não explicou o motivo:\n%s", saida.String())
+	}
+	// A origem é perguntada uma vez só: a resposta dela estava certa.
+	if n := strings.Count(saida.String(), "Origem:"); n != 1 {
+		t.Errorf("origem perguntada %d vezes, want 1:\n%s", n, saida.String())
+	}
+}
+
+// TestEscolherOrigemEDestino_FimDaEntrada confere que EOF sobe como
+// ErrEntradaEncerrada, e não como uma busca pela metade.
+func TestEscolherOrigemEDestino_FimDaEntrada(t *testing.T) {
+	term, _ := terminalDeTeste("1\n")
+	if _, _, err := EscolherOrigemEDestino(term); !errors.Is(err, ErrEntradaEncerrada) {
+		t.Fatalf("err = %v, want ErrEntradaEncerrada", err)
+	}
+}
+
 // TestColetarParadas_MontaRotaNaOrdemInformada confere o caminho feliz de D09
 // no menu: o motorista escolhe cada cidade e digita o horário de cada parada,
 // e as paradas saem na ordem em que foram informadas — que não precisa ser a
@@ -51,6 +86,85 @@ func TestColetarParadas_MontaRotaNaOrdemInformada(t *testing.T) {
 	paradasEsperadas(t, paradas,
 		[]string{"Jequié", "Salvador", "Vitória da Conquista"},
 		[]time.Time{em(8, 0), em(8, 50), em(20, 10)})
+}
+
+// TestColetarParadas_EnterRepeteADataDaParadaAnterior confere a data opcional
+// a partir da segunda parada: Enter mantém o dia da parada anterior, que é o
+// caso comum, e uma data digitada leva a parada para outro dia — o jeito
+// explícito de uma carona noturna atravessar a meia-noite, sem que o menu
+// adivinhe o dia seguinte a partir de uma hora "menor".
+func TestColetarParadas_EnterRepeteADataDaParadaAnterior(t *testing.T) {
+	term, saida := terminalDeTeste(
+		"1\n2026-09-20\n20:00\n" + // Salvador, 20/09
+			"2\n\n22:00\n" + // Feira de Santana, Enter: ainda 20/09
+			"3\n2026-09-21\n01:00\n" + // Jequié, já em 21/09
+			"5\n")
+
+	paradas, err := ColetarParadas(term, fusoDasCidadesFixo)
+	if err != nil {
+		t.Fatalf("ColetarParadas: %v", err)
+	}
+	paradasEsperadas(t, paradas,
+		[]string{"Salvador", "Feira de Santana", "Jequié"},
+		[]time.Time{em(20, 0), em(22, 0), time.Date(2026, 9, 21, 1, 0, 0, 0, fusoDasCidadesFixo)})
+
+	// O rótulo diz qual data o Enter repete, para que ninguém a confirme no
+	// escuro. A da terceira parada é a da segunda, e não a da primeira.
+	if !strings.Contains(saida.String(), "Data da parada 2 (AAAA-MM-DD, Enter para 20/09/2026): ") {
+		t.Errorf("o rótulo da parada 2 não mostra a data padrão:\n%s", saida.String())
+	}
+	if !strings.Contains(saida.String(), "Data da parada 3 (AAAA-MM-DD, Enter para 20/09/2026): ") {
+		t.Errorf("o rótulo da parada 3 não mostra a data padrão:\n%s", saida.String())
+	}
+	// A primeira parada não tem data anterior: a data continua obrigatória.
+	if !strings.Contains(saida.String(), "Data da parada 1 (AAAA-MM-DD): ") {
+		t.Errorf("o rótulo da parada 1 deveria exigir a data:\n%s", saida.String())
+	}
+}
+
+// TestColetarParadas_PrimeiraParadaExigeData: na primeira parada não há data
+// a repetir, e Enter vazio é recusado como qualquer data inválida.
+func TestColetarParadas_PrimeiraParadaExigeData(t *testing.T) {
+	term, saida := terminalDeTeste(
+		"1\n\n2026-09-20\n08:00\n" + // Enter recusado, depois a data
+			"2\n\n10:00\n" +
+			"5\n")
+
+	paradas, err := ColetarParadas(term, fusoDasCidadesFixo)
+	if err != nil {
+		t.Fatalf("ColetarParadas: %v", err)
+	}
+	paradasEsperadas(t, paradas,
+		[]string{"Salvador", "Feira de Santana"},
+		[]time.Time{em(8, 0), em(10, 0)})
+	if n := strings.Count(saida.String(), "Data inválida"); n != 1 {
+		t.Errorf("%d recusas de data, want 1 (o Enter da primeira parada):\n%s", n, saida.String())
+	}
+}
+
+// TestColetarParadas_MarcaCidadesJaNaRota confere que o menu sinaliza, antes
+// da escolha, as cidades que já estão na rota, sem mudar a numeração: Salvador
+// continua sendo 1 em toda pergunta, o que importa a quem digita de memória.
+func TestColetarParadas_MarcaCidadesJaNaRota(t *testing.T) {
+	term, saida := terminalDeTeste(
+		"1\n2026-09-20\n08:00\n" + // Salvador
+			"2\n\n10:00\n" + // Feira de Santana
+			"5\n")
+
+	if _, err := ColetarParadas(term, fusoDasCidadesFixo); err != nil {
+		t.Fatalf("ColetarParadas: %v", err)
+	}
+	texto := saida.String()
+	for _, linha := range []string{"1) Salvador (já na rota)", "2) Feira de Santana (já na rota)", "3) Jequié\n", "4) Vitória da Conquista\n"} {
+		if !strings.Contains(texto, linha) {
+			t.Errorf("menu sem a linha %q:\n%s", linha, texto)
+		}
+	}
+	// Nenhuma marca na primeira pergunta; Salvador marcada na segunda; as duas
+	// na terceira.
+	if n := strings.Count(texto, "(já na rota)"); n != 3 {
+		t.Errorf("%d marcas \"(já na rota)\", want 3:\n%s", n, texto)
+	}
 }
 
 // TestColetarParadas_CidadeRepetidaRepetePergunta confere D15 aplicado à regra
