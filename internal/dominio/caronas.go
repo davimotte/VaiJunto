@@ -56,7 +56,7 @@ func autenticar(e *Estado, usuario, senha string) (Usuario, error) {
 	return *u, nil
 }
 
-// gerarIDCarona sorteia um identificador opaco no formato "car-3f2a"
+// gerarIDCarona sorteia um identificador opaco no formato "car-3f2a8b1d"
 // (PROTOCOL.md, seção 3).
 //
 // Roda dentro da seção crítica, então checar colisão contra o mapa é grátis e
@@ -64,7 +64,7 @@ func autenticar(e *Estado, usuario, senha string) (Usuario, error) {
 // id. Um contador sequencial seria mais simples, mas colidiria com os ids
 // fixos de dados/caronas.json ("car-1", "car-2", ...) depois de um reinício.
 func gerarIDCarona(e *Estado) (string, error) {
-	var sufixo [2]byte
+	var sufixo [4]byte
 	for tentativa := 0; tentativa < 10; tentativa++ {
 		if _, err := rand.Read(sufixo[:]); err != nil {
 			return "", fmt.Errorf("%w: %v", ErrGeracaoDeID, err)

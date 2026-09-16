@@ -27,11 +27,11 @@ import (
 // sentido da regra, prendendo o passageiro a um veículo que não vai sair.
 const ANTECEDENCIA_CANCELAMENTO = 1 * time.Hour
 
-// gerarIDReserva sorteia um identificador opaco no formato "res-91c2"
+// gerarIDReserva sorteia um identificador opaco no formato "res-91c2a07e"
 // (PROTOCOL.md, seção 3), pelos mesmos motivos de gerarIDCarona: roda dentro da
 // seção crítica, então conferir colisão contra o mapa é grátis.
 func gerarIDReserva(e *Estado) (string, error) {
-	var sufixo [2]byte
+	var sufixo [4]byte
 	for tentativa := 0; tentativa < 10; tentativa++ {
 		if _, err := rand.Read(sufixo[:]); err != nil {
 			return "", fmt.Errorf("%w: %v", ErrGeracaoDeID, err)
