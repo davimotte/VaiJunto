@@ -134,6 +134,12 @@ docker run --rm -p 9000:9000 -v $(pwd)/dados:/dados vaijunto-servidor \
 # Máquina B — cliente
 docker build -f Dockerfile.cliente -t vaijunto-cliente .
 docker run --rm -it -e VAIJUNTO_SERVIDOR=192.168.0.10:9000 vaijunto-cliente /bin/passageiro
+
+# Máquina B — teste de carga pela rede, com o servidor recém-iniciado na máquina A
+docker run --rm --user "$(id -u):$(id -g)" \
+  -e VAIJUNTO_CARGA=1 -e VAIJUNTO_CARGA_ENDERECO=192.168.0.10:9000 \
+  -v $(pwd)/resultados:/carga/resultados -w /carga/testes \
+  vaijunto-cliente /bin/carga -test.run '^TestCarga$' -test.v
 ```
 
 O servidor precisa escutar em `0.0.0.0`, não em `127.0.0.1`, ou o mapeamento de

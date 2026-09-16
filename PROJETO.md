@@ -95,10 +95,6 @@ poucos KB, então centenas de clientes simultâneos não são problema.
 simples para RNF05 e RNF06. Granularidade fina (lock por carona) traria risco de
 *deadlock* na reserva multi-carona, sem ganho mensurável nesta escala.
 
-Evolução prevista: trocar por `sync.RWMutex` após o sistema funcionar, com
-leitura compartilhada na busca e escrita exclusiva na reserva, e comparar as duas
-versões com os números do teste de carga.
-
 ### D05 — Só a camada de estado conhece o lock
 
 As funções de domínio recebem o estado já travado e nunca adquirem o mutex por
@@ -643,8 +639,7 @@ mesmo quando o teste passa por sorte de escalonamento.
 Usando o campo `id` do envelope, o teste registra o instante de envio e o de
 recebimento de cada requisição e calcula latência média, p50, p95 e p99, além de
 vazão em requisições por segundo. Executar com N = 1, 10, 50 e 100 clientes
-concorrentes para gerar a curva do relatório e a base de comparação entre
-`Mutex` e `RWMutex`.
+concorrentes para gerar a curva do relatório.
 
 Medir duas vezes: com o teste na mesma máquina do servidor (sem latência de rede)
 e na segunda máquina do laboratório (com rede real).
@@ -677,8 +672,8 @@ respondeu por 22,6% do tempo do processo e a reserva por 9%. Medindo cada ponto
 por 20 s em vez de 5 s, a vazão caiu à metade e a latência dobrou. A otimização,
 um índice das reservas ativas de cada passageiro, foi deliberadamente deixada de
 fora (seção 12). A consequência para a medição é que **só são comparáveis
-rodadas com a mesma duração e começando com servidor novo**: é o que vale para
-as curvas com e sem rede e para a comparação entre `Mutex` e `RWMutex`.
+rodadas com a mesma duração e começando com servidor novo**, que é o que vale
+para as curvas com e sem rede.
 
 ---
 
@@ -857,6 +852,31 @@ docker run --rm -it \
   vaijunto-cliente /bin/passageiro
 ```
 
+Máquina B, teste de carga (seção 8.3), com o servidor recém-iniciado na máquina A:
+
+```bash
+docker run --rm --user "$(id -u):$(id -g)" \
+  -e VAIJUNTO_CARGA=1 -e VAIJUNTO_CARGA_ENDERECO=192.168.0.10:9000 \
+  -e VAIJUNTO_CARGA_ROTULO=rede-lab \
+  -v $(pwd)/resultados:/carga/resultados -w /carga/testes \
+  vaijunto-cliente /bin/carga -test.run '^TestCarga$' -test.v
+```
+
+A imagem do cliente traz o teste de carga compilado em `/bin/carga`, então a
+máquina B não precisa de Go instalado. O binário grava em `../resultados`,
+relativo ao diretório de trabalho: `-w` e `-v` fazem esse caminho cair na pasta
+`resultados/` da máquina, e `--user` evita que o CSV saia com dono `root`. A
+curva sem rede sai do mesmo comando executado na própria máquina A, com o IP
+dela: as duas curvas passam pelo mesmo caminho de contêiner, e só a rede muda.
+
+**Conectividade entre máquinas.** Cada contêiner fica na rede *bridge* do
+Docker da sua máquina, e redes *bridge* de máquinas diferentes não se enxergam.
+A solução é publicar a porta do servidor no host (`-p 9000:9000`): o Docker
+encaminha ao contêiner o que chega à porta 9000 do IP da máquina A, e o cliente
+na máquina B usa esse IP em `VAIJUNTO_SERVIDOR`. Não há rede *overlay* nem
+descoberta de serviço: com um servidor único (RNF10), um endereço fixo resolve,
+e um orquestrador acrescentaria infraestrutura sem resolver nada a mais.
+
 Três pontos que costumam consumir tempo em laboratório:
 
 - O servidor escuta em `0.0.0.0:9000`, nunca em `127.0.0.1`. Ouvindo em loopback,
@@ -899,7 +919,7 @@ Itens deliberadamente fora do escopo, úteis para a seção final do relatório:
 - Paginação da busca e das listagens, para mostrar mais de 10 itinerários e
   mais de 50 caronas ou reservas sem estourar o limite de linha do protocolo
   (D16).
-- `RWMutex` ou granularidade fina de lock, com medição comparativa.
+- `RWMutex` ou granularidade fina de lock.
 - Persistência do estado e recuperação após reinício.
 - Réplicas do servidor, o que traria o problema de consenso distribuído.
 - Notificação ativa do passageiro quando o motorista cancela a carona, o que

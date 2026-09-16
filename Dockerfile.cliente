@@ -2,9 +2,12 @@ FROM golang:1.23-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 COPY . .
+# /bin/carga é o teste de carga compilado (PROJETO.md, seção 8.3), para que a
+# máquina B meça o servidor pela rede sem precisar de Go instalado.
 RUN CGO_ENABLED=0 go build -o /bin/motorista ./cmd/motorista && \
-    CGO_ENABLED=0 go build -o /bin/passageiro ./cmd/passageiro
+    CGO_ENABLED=0 go build -o /bin/passageiro ./cmd/passageiro && \
+    CGO_ENABLED=0 go test -c -o /bin/carga ./testes
 
 FROM alpine:3.20
-COPY --from=build /bin/motorista /bin/passageiro /bin/
+COPY --from=build /bin/motorista /bin/passageiro /bin/carga /bin/
 ENV VAIJUNTO_SERVIDOR=localhost:9000
