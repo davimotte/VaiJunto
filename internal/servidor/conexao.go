@@ -2,8 +2,11 @@ package servidor
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"runtime/debug"
+	"time"
 
 	"vaijunto/internal/dominio"
 	"vaijunto/internal/protocolo"
@@ -22,8 +25,18 @@ import (
 //
 // O ponteiro do Estado é compartilhado por todas as conexões; é o mutex de
 // dentro dele que serializa o acesso (D04), não esta camada.
-func atenderConexao(conn net.Conn, estado *dominio.Estado) error {
+//
+// Um pânico durante o atendimento vira o erro desta conexão (D18): sem o
+// recover, um defeito em qualquer handler derrubaria o processo, todas as
+// sessões e o estado, que só existe em memória. O mutex não fica preso, porque
+// toda seção crítica o libera com defer.
+func atenderConexao(conn net.Conn, estado *dominio.Estado, prazoEscrita time.Duration) (err error) {
 	defer conn.Close()
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("pânico ao atender a conexão: %v\n%s", r, debug.Stack())
+		}
+	}()
 
 	leitor := protocolo.NovoLeitorMensagens(conn)
 	sess := &sessao{}
@@ -45,6 +58,12 @@ func atenderConexao(conn net.Conn, estado *dominio.Estado) error {
 
 		resp := processarLinha(linha, estado, sess)
 
+		// Renovado a cada resposta, e não uma vez por conexão: o prazo mede
+		// quanto o cliente demora a ler esta resposta, e não quanto a sessão
+		// dura (D17).
+		if err := conn.SetWriteDeadline(time.Now().Add(prazoEscrita)); err != nil {
+			return err
+		}
 		if err := protocolo.EscreverLinha(conn, resp); err != nil {
 			return err
 		}

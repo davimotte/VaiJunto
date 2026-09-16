@@ -15,6 +15,7 @@ package cliente
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -33,13 +34,17 @@ const VariavelServidor = "VAIJUNTO_SERVIDOR"
 // desenvolvimento com servidor e cliente na mesma máquina.
 const enderecoPadrao = "localhost:9000"
 
-// prazoConexao limita apenas o estabelecimento do socket. Não há prazo de
-// leitura: o protocolo é estritamente requisição/resposta (PROTOCOL.md,
-// seção 1), então o cliente só espera resposta depois de ter enviado uma
-// requisição, e o servidor sempre responde. Um prazo que disparasse deixaria
-// a conexão dessincronizada — a resposta atrasada chegaria como se fosse da
-// requisição seguinte —, o que é pior que esperar.
+// prazoConexao limita o estabelecimento do socket (D17).
 const prazoConexao = 10 * time.Second
+
+// prazoRespostaPadrao limita cada requisição, do envio à leitura da resposta
+// (D17). Sem ele, um servidor travado ou uma máquina desligada congelaria o
+// menu sem mensagem nenhuma.
+//
+// O estouro descarta a conexão, e é isso que torna o prazo seguro: uma resposta
+// atrasada nunca chega a ser lida como se fosse da requisição seguinte, porque
+// não existe requisição seguinte naquela conexão.
+const prazoRespostaPadrao = 30 * time.Second
 
 // EnderecoDoServidor devolve o endereço lido de VAIJUNTO_SERVIDOR, ou o
 // padrão de desenvolvimento.
@@ -88,6 +93,10 @@ type Conexao struct {
 	conn     net.Conn
 	leitor   *protocolo.LeitorMensagens
 
+	// prazoResposta é prazoRespostaPadrao fora dos testes, que o encurtam para
+	// não esperar 30 s a cada execução.
+	prazoResposta time.Duration
+
 	// seq numera as requisições da sessão para formar o campo "id" do
 	// envelope (seção 2.1). O id é conferido na resposta: como o servidor o
 	// ecoa, um id diferente do enviado denuncia que requisição e resposta
@@ -102,9 +111,10 @@ func Conectar(endereco string) (*Conexao, error) {
 		return nil, err
 	}
 	return &Conexao{
-		endereco: endereco,
-		conn:     conn,
-		leitor:   protocolo.NovoLeitorMensagens(conn),
+		endereco:      endereco,
+		conn:          conn,
+		leitor:        protocolo.NovoLeitorMensagens(conn),
+		prazoResposta: prazoRespostaPadrao,
 	}, nil
 }
 
@@ -115,6 +125,20 @@ func (c *Conexao) Endereco() string { return c.endereco }
 // PROTOCOL.md trata o fechamento como desconexão normal, e não há estado
 // transitório preso à conexão para limpar (D07).
 func (c *Conexao) Fechar() error { return c.conn.Close() }
+
+// descartar fecha a conexão depois de uma falha de transporte e devolve o erro.
+//
+// Fechar aqui, e não confiar que o menu vá encerrar a sessão, é o que garante
+// por construção a propriedade da D17: depois de um prazo estourado, nenhuma
+// requisição nova sai por este socket, então a resposta atrasada da anterior
+// nunca é lida como se fosse dela.
+func (c *Conexao) descartar(err error) error {
+	_ = c.conn.Close()
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return fmt.Errorf("o servidor não respondeu em %s: %w", c.prazoResposta, err)
+	}
+	return err
+}
 
 // executar envia uma requisição e devolve a resposta correspondente,
 // decodificando o "dados" em destino quando ele não é nil.
@@ -131,13 +155,19 @@ func (c *Conexao) executar(tipo string, dados any, destino any) error {
 		return fmt.Errorf("montar os dados de %s: %w", tipo, err)
 	}
 
+	// Um único prazo para envio e leitura, renovado a cada requisição: o que
+	// importa ao usuário é quanto a operação inteira demora (D17).
+	if err := c.conn.SetDeadline(time.Now().Add(c.prazoResposta)); err != nil {
+		return c.descartar(fmt.Errorf("preparar o prazo de %s: %w", tipo, err))
+	}
+
 	if err := protocolo.EscreverLinha(c.conn, protocolo.Requisicao{ID: id, Tipo: tipo, Dados: corpo}); err != nil {
-		return fmt.Errorf("enviar %s ao servidor: %w", tipo, err)
+		return c.descartar(fmt.Errorf("enviar %s ao servidor: %w", tipo, err))
 	}
 
 	linha, err := c.leitor.LerLinha()
 	if err != nil {
-		return fmt.Errorf("ler a resposta de %s: %w", tipo, err)
+		return c.descartar(fmt.Errorf("ler a resposta de %s: %w", tipo, err))
 	}
 	resposta, err := protocolo.DecodificarResposta(linha)
 	if err != nil {

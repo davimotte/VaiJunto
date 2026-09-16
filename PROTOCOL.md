@@ -20,6 +20,8 @@ respeite interopera com o servidor.
 - Uma mensagem só é considerada completa quando o `\n` é recebido. Bytes
   pendentes sem terminador no momento do EOF são **descartados sem resposta**. O
   receptor não deve tentar processar uma linha incompleta.
+- O cliente precisa ler cada resposta em até **10 s**. Se o servidor não
+  conseguir entregá-la nesse prazo, a conexão é encerrada.
 - Linha vazia é ignorada silenciosamente.
 - Linha que não decodifica como JSON válido gera resposta `JSON_INVALIDO` e a
   conexão permanece aberta.

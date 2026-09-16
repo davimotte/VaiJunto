@@ -4,11 +4,20 @@
 package servidor
 
 import (
+	"errors"
 	"log"
 	"net"
+	"time"
 
 	"vaijunto/internal/dominio"
 )
+
+// prazoEscrita limita a entrega de cada resposta ao cliente (D17).
+const prazoEscrita = 10 * time.Second
+
+// pausaAposFalhaDeAccept evita um laço ocupado enquanto o recurso que faltou
+// ao Accept não volta (D18).
+const pausaAposFalhaDeAccept = 100 * time.Millisecond
 
 // Servidor aceita conexões TCP e despacha cada uma para sua própria
 // goroutine (camada 1 — modelo thread-per-connection, PROJETO.md, decisão
@@ -39,14 +48,23 @@ func (s *Servidor) Endereco() string {
 // goroutine. Uma conexão que falha não derruba as demais nem o servidor: o
 // erro fica isolado dentro da goroutine que a atende. Aceitar só retorna
 // quando o listener é fechado.
+//
+// Qualquer outra falha do Accept é tratada como transitória (D18): o caso
+// típico é o esgotamento de descritores, que some quando conexões fecham, e
+// encerrar o laço por ela derrubaria o servidor inteiro.
 func (s *Servidor) Aceitar() error {
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
-			return err
+			if errors.Is(err, net.ErrClosed) {
+				return err
+			}
+			log.Printf("servidor: falha ao aceitar conexão, nova tentativa em %s: %v", pausaAposFalhaDeAccept, err)
+			time.Sleep(pausaAposFalhaDeAccept)
+			continue
 		}
 		go func() {
-			if err := atenderConexao(conn, s.estado); err != nil {
+			if err := atenderConexao(conn, s.estado, prazoEscrita); err != nil {
 				log.Printf("servidor: conexão %s encerrada: %v", conn.RemoteAddr(), err)
 			}
 		}()

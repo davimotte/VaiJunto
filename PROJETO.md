@@ -281,6 +281,54 @@ itinerário com menos trocas enquanto mantém um com mais. Limitação conhecida
 registrada como tal: numa busca com mais de 10 possibilidades, o passageiro não
 vê todas.
 
+### D17 — Prazos só no transporte, nunca no estado
+
+| Prazo | Valor | Onde se aplica | Ao estourar |
+|---|---|---|---|
+| Escrita da resposta | 10 s | Servidor, renovado a cada resposta | A conexão é encerrada |
+| Resposta à requisição | 30 s | Cliente, renovado a cada requisição, cobre envio e leitura | A conexão é descartada e a sessão termina |
+| Estabelecimento da conexão | 10 s | Cliente, no `connect` | O cliente não inicia |
+
+O prazo de escrita existe porque um cliente que envia requisições e nunca lê as
+respostas prende a goroutine do servidor no `Write` para sempre, junto com o
+descritor do socket. Não bloqueia os demais clientes, porque a escrita acontece
+fora da seção crítica, mas é um vazamento. Um cliente correto lê a resposta logo
+após enviar a requisição, então o prazo nunca dispara para ele.
+
+O prazo de resposta existe porque, sem ele, um servidor travado ou uma máquina
+desligada congela o menu do cliente sem mensagem nenhuma. Descartar a conexão no
+estouro é o que impede a dessincronização: uma resposta atrasada nunca é lida
+como se fosse da requisição seguinte, porque não existe requisição seguinte
+naquela conexão.
+
+**Não há prazo de leitura no servidor.** A goroutine parada esperando a próxima
+requisição não segura o mutex, e os clientes são interativos: o passageiro pode
+passar minutos lendo o menu, e derrubar a conexão por ociosidade obrigaria a um
+novo `LOGIN` (D08). Um cliente que some sem fechar a conexão (cabo, energia) é
+detectado pelo *keep-alive* TCP que o Go liga por padrão nas conexões aceitas:
+15 s de ociosidade e 9 sondas a cada 15 s.
+
+Nenhum prazo toca o estado de domínio. Pela D07, não existe assento em espera,
+então não existe nada que precise expirar.
+
+### D18 — Falha de uma conexão não derruba o servidor
+
+Um pânico dentro do atendimento de uma conexão é recuperado na goroutine dela: a
+conexão é encerrada, o erro é registrado e as demais conexões seguem. O mutex não
+fica preso, porque toda seção crítica o libera com `defer` (D05), e o `defer`
+roda durante o desempilhamento do pânico.
+
+O `recover` não desfaz escrita. Um pânico no meio do commit da reserva deixaria
+o estado parcial; a estrutura da seção 7 torna isso improvável, porque o commit
+só decrementa índices que a validação já conferiu. A alternativa, deixar o
+processo morrer, perderia o estado inteiro, que só existe em memória (D02).
+
+Pelo mesmo motivo, uma falha ao aceitar conexão não encerra o servidor. O caso
+típico é o esgotamento de descritores (*too many open files*), que é transitório:
+some quando conexões fecham. O erro é registrado e o laço de aceitação tenta de
+novo após 100 ms, pausa que evita um laço ocupado enquanto o recurso não volta.
+Só o fechamento do próprio listener encerra o laço.
+
 ---
 
 ## 4. Modelo de domínio

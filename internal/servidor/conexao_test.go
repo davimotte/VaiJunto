@@ -6,7 +6,9 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -177,7 +179,7 @@ func (c *conexaoFalsa) SetWriteDeadline(time.Time) error { return nil }
 func TestAtenderConexao_EOFLimpo(t *testing.T) {
 	conn := &conexaoFalsa{entrada: strings.NewReader(`{"id":"1","tipo":"PING","dados":{}}` + "\n")}
 
-	if err := atenderConexao(conn, dominio.NovoEstado()); err != nil {
+	if err := atenderConexao(conn, dominio.NovoEstado(), prazoEscrita); err != nil {
 		t.Fatalf("EOF limpo não deveria produzir erro: %v", err)
 	}
 	if !conn.fechada {
@@ -196,7 +198,7 @@ func TestAtenderConexao_LinhaIncompletaNaoResponde(t *testing.T) {
 	// JSON sintaticamente completo, mas sem o '\n': não é uma mensagem.
 	conn := &conexaoFalsa{entrada: strings.NewReader(`{"id":"1","tipo":"PING","dados":{}}`)}
 
-	err := atenderConexao(conn, dominio.NovoEstado())
+	err := atenderConexao(conn, dominio.NovoEstado(), prazoEscrita)
 	if !errors.Is(err, protocolo.ErrLinhaIncompleta) {
 		t.Fatalf("err = %v, want protocolo.ErrLinhaIncompleta", err)
 	}
@@ -215,7 +217,7 @@ func TestAtenderConexao_RespondeAntesDeDescartarFragmento(t *testing.T) {
 	entrada := `{"id":"1","tipo":"PING","dados":{}}` + "\n" + `{"id":"2","tipo":"PIN`
 	conn := &conexaoFalsa{entrada: strings.NewReader(entrada)}
 
-	if err := atenderConexao(conn, dominio.NovoEstado()); !errors.Is(err, protocolo.ErrLinhaIncompleta) {
+	if err := atenderConexao(conn, dominio.NovoEstado(), prazoEscrita); !errors.Is(err, protocolo.ErrLinhaIncompleta) {
 		t.Fatalf("err = %v, want protocolo.ErrLinhaIncompleta", err)
 	}
 
@@ -225,5 +227,110 @@ func TestAtenderConexao_RespondeAntesDeDescartarFragmento(t *testing.T) {
 	}
 	if !strings.Contains(conn.saida.String(), `"id":"1"`) {
 		t.Fatalf("a resposta deveria ser a da mensagem completa: %q", conn.saida.String())
+	}
+}
+
+// TestAtenderConexao_ClienteQueNaoLeEncerraNoPrazo confere o prazo de escrita
+// da D17: um cliente que envia uma requisição e nunca lê a resposta não pode
+// prender a goroutine do servidor para sempre.
+//
+// Aqui net.Pipe é exatamente o que se quer, pelo motivo que o descarta em
+// conexaoFalsa: sem buffer, a escrita do servidor bloqueia até alguém ler do
+// outro lado, e ninguém lê.
+func TestAtenderConexao_ClienteQueNaoLeEncerraNoPrazo(t *testing.T) {
+	ladoServidor, ladoCliente := net.Pipe()
+	t.Cleanup(func() { _ = ladoCliente.Close() })
+
+	resultado := make(chan error, 1)
+	go func() {
+		resultado <- atenderConexao(ladoServidor, dominio.NovoEstado(), 50*time.Millisecond)
+	}()
+
+	if _, err := ladoCliente.Write([]byte(`{"id":"1","tipo":"PING","dados":{}}` + "\n")); err != nil {
+		t.Fatalf("enviar requisição: %v", err)
+	}
+
+	select {
+	case err := <-resultado:
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Fatalf("err = %v, want os.ErrDeadlineExceeded", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("o servidor ficou preso escrevendo para um cliente que não lê")
+	}
+}
+
+// TestAtenderConexao_PanicoEncerraSoAConexao confere a D18: um pânico no
+// atendimento vira erro da conexão, e não a queda do processo.
+//
+// O Estado nil provoca um pânico de verdade no primeiro acesso ao estado,
+// dentro do handler de LOGIN — o mesmo tipo de defeito que o recover existe
+// para conter.
+func TestAtenderConexao_PanicoEncerraSoAConexao(t *testing.T) {
+	conn := &conexaoFalsa{entrada: strings.NewReader(`{"id":"1","tipo":"LOGIN","dados":{"usuario":"joao","senha":"1234"}}` + "\n")}
+
+	err := atenderConexao(conn, nil, prazoEscrita)
+	if err == nil || !strings.Contains(err.Error(), "pânico") {
+		t.Fatalf("err = %v, want erro de pânico recuperado", err)
+	}
+	if !conn.fechada {
+		t.Fatalf("a conexão deveria ter sido fechada")
+	}
+}
+
+// listenerFalso devolve, na ordem, os erros roteirizados e depois
+// net.ErrClosed, como um listener que falhou e em seguida foi fechado.
+type listenerFalso struct {
+	erros    []error
+	chamadas int
+}
+
+func (l *listenerFalso) Accept() (net.Conn, error) {
+	l.chamadas++
+	if l.chamadas <= len(l.erros) {
+		return nil, l.erros[l.chamadas-1]
+	}
+	return nil, net.ErrClosed
+}
+func (l *listenerFalso) Close() error   { return nil }
+func (l *listenerFalso) Addr() net.Addr { return nil }
+
+// TestAceitar_FalhaTransitoriaNaoEncerra confere a D18: esgotar os descritores
+// do processo é transitório, e não pode encerrar o laço de aceitação.
+func TestAceitar_FalhaTransitoriaNaoEncerra(t *testing.T) {
+	semDescritor := &net.OpError{Op: "accept", Net: "tcp", Err: syscall.EMFILE}
+	listener := &listenerFalso{erros: []error{semDescritor, semDescritor}}
+	s := &Servidor{listener: listener, estado: dominio.NovoEstado()}
+
+	if err := s.Aceitar(); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("Aceitar = %v, want net.ErrClosed", err)
+	}
+	if listener.chamadas != 3 {
+		t.Fatalf("Accept chamado %d vezes, want 3: o laço parou na falha transitória", listener.chamadas)
+	}
+}
+
+// TestAceitar_RetornaQuandoOListenerFecha garante o outro lado da regra: com
+// um listener real, Fechar ainda encerra o laço, em vez de fazê-lo tentar de
+// novo para sempre.
+func TestAceitar_RetornaQuandoOListenerFecha(t *testing.T) {
+	s, err := Escutar("127.0.0.1:0", dominio.NovoEstado())
+	if err != nil {
+		t.Fatalf("escutar: %v", err)
+	}
+
+	resultado := make(chan error, 1)
+	go func() { resultado <- s.Aceitar() }()
+	if err := s.Fechar(); err != nil {
+		t.Fatalf("fechar: %v", err)
+	}
+
+	select {
+	case err := <-resultado:
+		if !errors.Is(err, net.ErrClosed) {
+			t.Fatalf("Aceitar = %v, want net.ErrClosed", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Aceitar continuou tentando depois de o listener fechar")
 	}
 }

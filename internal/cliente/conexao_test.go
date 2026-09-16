@@ -3,10 +3,13 @@ package cliente
 import (
 	"bytes"
 	"errors"
+	"io"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"vaijunto/internal/protocolo"
 )
@@ -221,6 +224,65 @@ func TestConexao_ServidorQueSomeNaoEErroDeServidor(t *testing.T) {
 	var erroServidor *ErroServidor
 	if errors.As(err, &erroServidor) {
 		t.Errorf("erro de transporte classificado como *ErroServidor")
+	}
+}
+
+// novoServidorMudo aceita uma conexão, lê tudo o que chega e nunca responde:
+// é o servidor travado da D17. A goroutine termina quando o cliente fecha a
+// conexão.
+func novoServidorMudo(t *testing.T) string {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("escutar: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_, _ = io.Copy(io.Discard, conn)
+	}()
+	return listener.Addr().String()
+}
+
+// TestConexao_ServidorMudoEncerraASessaoNoPrazo confere o prazo de resposta da
+// D17: o cliente não fica preso esperando, o erro é de transporte (encerra a
+// sessão, não volta ao menu), e a conexão é descartada, para que nenhuma
+// resposta atrasada seja lida fora de lugar.
+func TestConexao_ServidorMudoEncerraASessaoNoPrazo(t *testing.T) {
+	conexao, err := Conectar(novoServidorMudo(t))
+	if err != nil {
+		t.Fatalf("conectar: %v", err)
+	}
+	t.Cleanup(func() { _ = conexao.Fechar() })
+	conexao.prazoResposta = 50 * time.Millisecond
+
+	resultado := make(chan error, 1)
+	go func() {
+		_, err := conexao.Ping()
+		resultado <- err
+	}()
+
+	select {
+	case err := <-resultado:
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Fatalf("Ping = %v, want os.ErrDeadlineExceeded", err)
+		}
+		var erroServidor *ErroServidor
+		if errors.As(err, &erroServidor) {
+			t.Fatalf("estouro de prazo classificado como *ErroServidor: o menu continuaria")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("o cliente ficou preso esperando um servidor que não responde")
+	}
+
+	if _, err := conexao.Ping(); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("Ping depois do estouro = %v, want net.ErrClosed: a conexão deveria ter sido descartada", err)
 	}
 }
 
