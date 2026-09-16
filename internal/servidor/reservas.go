@@ -71,7 +71,7 @@ func tratarReservar(req protocolo.Requisicao, estado *dominio.Estado, s *sessao)
 
 	// O relógio é lido na borda e entregue ao domínio, como em
 	// PUBLICAR_CARONA: as regras não consultam time.Now() por conta própria.
-	reserva, itinerario, err := estado.Reservar(s.usuario.Usuario, itens, time.Now())
+	reserva, itinerario, err := estado.Reservar(s.usuario.Usuario, itens, time.Now().In(dominio.FusoDasCidades()))
 	if err != nil {
 		return respostaDeErroDeDominio(req.ID, err)
 	}
@@ -141,7 +141,7 @@ func tratarCancelarReserva(req protocolo.Requisicao, estado *dominio.Estado, s *
 		return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "Informe reserva_id.")
 	}
 
-	if err := estado.CancelarReserva(pedido.ReservaID, s.usuario.Usuario, time.Now()); err != nil {
+	if err := estado.CancelarReserva(pedido.ReservaID, s.usuario.Usuario, time.Now().In(dominio.FusoDasCidades())); err != nil {
 		return respostaDeErroDeDominio(req.ID, err)
 	}
 

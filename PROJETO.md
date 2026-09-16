@@ -502,8 +502,8 @@ Entrada: lista ordenada de itens `{carona_id, de, ate}`.
 
 Tudo executa dentro de **uma única seção crítica**:
 
-1. **Formato.** Lista não vazia; `de < ate`; índices dentro da rota de cada
-   carona; nenhuma carona repetida.
+1. **Formato.** Lista não vazia; toda carona existe e não está cancelada;
+   `de < ate`; índices dentro da rota de cada carona; nenhuma carona repetida.
 2. **Encadeamento.** Para cada par consecutivo, a cidade de chegada do anterior é
    a de partida do seguinte, e a partida do seguinte ocorre no mínimo
    `MARGEM_BALDEACAO` e no máximo `ESPERA_MAXIMA_BALDEACAO` após a chegada do
@@ -511,7 +511,7 @@ Tudo executa dentro de **uma única seção crítica**:
    intermediárias de cada item: é a mesma regra do Passo 3 da busca, pelo mesmo
    motivo de as margens serem constantes únicas.
 3. **Disponibilidade.** Para todo trecho `t` em `[de, ate)` de cada carona,
-   `Livres[t] >= 1`. Caronas canceladas reprovam.
+   `Livres[t] >= 1`.
 4. **Sobreposição.** Para cada reserva ativa do mesmo passageiro, o intervalo
    `[partida, chegada]` do novo itinerário não pode intersectar o intervalo da
    reserva existente.

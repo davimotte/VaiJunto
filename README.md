@@ -144,7 +144,7 @@ leem do terminal.
 
 ```bash
 go test -race ./...                  # unidade e integração
-go test -race ./testes -run Carga -v # concorrência e carga
+go test -race -count=20 ./testes -run '^TestT[0-9]' # concorrência
 ```
 
 O detector de corrida do Go encontra acesso concorrente não sincronizado ao

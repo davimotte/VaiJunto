@@ -54,7 +54,7 @@ func rotear(req protocolo.Requisicao, estado *dominio.Estado, s *sessao) protoco
 // tratarPing responde ao diagnóstico PING (PROTOCOL.md, seção 5.1). Não
 // exige autenticação.
 func tratarPing(req protocolo.Requisicao) protocolo.Resposta {
-	return respostaOK(req.ID, protocolo.PingResposta{ServidorEm: time.Now()})
+	return respostaOK(req.ID, protocolo.PingResposta{ServidorEm: time.Now().In(dominio.FusoDasCidades())})
 }
 
 // respostaOK monta uma Resposta de sucesso serializando dados no campo

@@ -90,7 +90,7 @@ func tratarPublicarCarona(req protocolo.Requisicao, estado *dominio.Estado, s *s
 		rota, horarios,
 		*pedido.Assentos,
 		*pedido.PrecosCentavos,
-		time.Now(),
+		time.Now().In(dominio.FusoDasCidades()),
 	)
 	if err != nil {
 		return respostaDeErroDeDominio(req.ID, err)
@@ -206,7 +206,7 @@ func tratarCancelarCarona(req protocolo.Requisicao, estado *dominio.Estado, s *s
 		return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "Informe carona_id.")
 	}
 
-	canceladas, err := estado.CancelarCarona(pedido.CaronaID, s.usuario.Usuario, time.Now())
+	canceladas, err := estado.CancelarCarona(pedido.CaronaID, s.usuario.Usuario, time.Now().In(dominio.FusoDasCidades()))
 	if err != nil {
 		return respostaDeErroDeDominio(req.ID, err)
 	}

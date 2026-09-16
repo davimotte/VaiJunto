@@ -124,7 +124,8 @@ cliente                              servidor
 Regras:
 
 - Enquanto a conexão não estiver autenticada, apenas `LOGIN` e `PING` são
-  aceitos. Qualquer outro tipo responde `NAO_AUTENTICADO`.
+  aceitos. Qualquer outro tipo da seção 5 responde `NAO_AUTENTICADO`, e um tipo
+  inexistente responde `TIPO_DESCONHECIDO`.
 - `LOGIN` em conexão já autenticada responde `JA_AUTENTICADO`.
 - Fechamento abrupto (EOF, RST, queda de rede) é tratado como desconexão normal:
   a goroutine encerra, a sessão desaparece e nenhum estado de domínio é alterado.
@@ -243,6 +244,8 @@ Requisição: `{"incluir_canceladas": false}`
 }]}}
 ```
 
+Erros: `PERFIL_INCORRETO`, `CAMPO_INVALIDO`.
+
 ### 5.6 `DETALHAR_CARONA`
 
 Atende RF04: passageiros confirmados por trecho.
@@ -257,7 +260,7 @@ Requisição: `{"carona_id":"car-3f2a"}`
 ]}}
 ```
 
-Erros: `CARONA_NAO_ENCONTRADA`, `NAO_E_DONO`, `PERFIL_INCORRETO`.
+Erros: `CARONA_NAO_ENCONTRADA`, `NAO_E_DONO`, `PERFIL_INCORRETO`, `CAMPO_INVALIDO`.
 
 ### 5.7 `CANCELAR_CARONA`
 
@@ -278,7 +281,7 @@ prazo protege o motorista, não o contrário.
 ```
 
 Erros: `CARONA_NAO_ENCONTRADA`, `NAO_E_DONO`, `CARONA_CANCELADA`,
-`PRAZO_CANCELAMENTO_EXPIRADO`.
+`PRAZO_CANCELAMENTO_EXPIRADO`, `PERFIL_INCORRETO`, `CAMPO_INVALIDO`.
 
 ### 5.8 `BUSCAR_ITINERARIOS`
 
@@ -334,7 +337,7 @@ o instante da consulta e podem estar desatualizados quando o passageiro
 confirmar. É essa escolha que garante que nenhum assento fique permanentemente
 bloqueado por uma reserva nunca concluída.
 
-Erros: `PERFIL_INCORRETO`, `CIDADE_DESCONHECIDA`, `CAMPO_INVALIDO`.
+Erros: `PERFIL_INCORRETO`, `CIDADE_DESCONHECIDA`, `ROTA_INVALIDA`, `CAMPO_INVALIDO`.
 
 ### 5.9 `RESERVAR`
 
@@ -349,14 +352,14 @@ O cliente devolve os trechos do itinerário escolhido, na ordem:
 
 Algoritmo do servidor, integralmente dentro de uma seção crítica:
 
-1. Validar formato: lista não vazia, `de < ate`, índices dentro da rota, sem
-   carona repetida.
+1. Validar formato: lista não vazia, toda carona existe e não está cancelada,
+   `de < ate`, índices dentro da rota, sem carona repetida.
 2. Validar encadeamento: a cidade de chegada de cada perna é a de partida da
    seguinte, a partida da seguinte ocorre no mínimo **30 minutos** e no máximo
    **12 horas** após a chegada da anterior, e nenhuma cidade se repete no
    itinerário, contando as cidades intermediárias de cada perna.
 3. Validar disponibilidade: para todo trecho `t` em `[de, ate)` de cada carona,
-   `livres[t] >= 1`. Caronas canceladas reprovam.
+   `livres[t] >= 1`.
 4. Validar sobreposição: o intervalo `[partida, chegada]` do novo itinerário não
    intersecta o de nenhuma reserva ativa do mesmo passageiro.
 5. Se qualquer passo falhar, responder erro **sem alterar nada**.
@@ -414,6 +417,8 @@ Requisição: `{"incluir_canceladas": false}`
 }]}}
 ```
 
+Erros: `PERFIL_INCORRETO`, `CAMPO_INVALIDO`.
+
 ### 5.11 `CANCELAR_RESERVA`
 
 Requisição: `{"reserva_id":"res-91c"}`
@@ -433,7 +438,8 @@ consumia, em seção crítica única.
  "dados":{"partida":"2026-10-01T06:00:00-03:00"}}
 ```
 
-Outros erros: `RESERVA_NAO_ENCONTRADA`, `NAO_E_DONO`, `RESERVA_JA_CANCELADA`.
+Outros erros: `RESERVA_NAO_ENCONTRADA`, `NAO_E_DONO`, `RESERVA_JA_CANCELADA`,
+`PERFIL_INCORRETO`, `CAMPO_INVALIDO`.
 
 ---
 
