@@ -907,8 +907,11 @@ func TestClienteDerrubadoNaoAfetaOsDemais(t *testing.T) {
 //
 // Rodado com -race, é o que prova que a camada de estado serializa de fato as
 // escritas. As duas afirmações no fim cobrem os dois modos de falha: id
-// repetido significa geração fora da seção crítica, e total menor que o
-// esperado significa escrita perdida.
+// repetido significa geração fora da seção crítica, e carona que o servidor
+// confirmou mas não encontra significa escrita perdida.
+//
+// A escrita perdida é conferida detalhando cada id, e não contando a listagem:
+// as cem caronas passam do limite de LISTAR_MINHAS_CARONAS (D16).
 func TestPublicacoesSimultaneas(t *testing.T) {
 	endereco := subirServidor(t)
 
@@ -950,10 +953,11 @@ func TestPublicacoesSimultaneas(t *testing.T) {
 
 	conferente := conectar(t, endereco)
 	conferente.entrar("joao", "1234")
-	var lista protocolo.ListarMinhasCaronasResposta
-	conferente.exigirOK(protocolo.TipoListarMinhasCaronas, protocolo.ListarMinhasCaronasRequisicao{}, &lista)
-	if len(lista.Caronas) != caronasDeJoaoNaCarga+conexoes*porConexao {
-		t.Fatalf("estado final com %d caronas, want %d: houve escrita perdida",
-			len(lista.Caronas), caronasDeJoaoNaCarga+conexoes*porConexao)
+	for id := range vistos {
+		resp := conferente.enviar(protocolo.TipoDetalharCarona, protocolo.DetalharCaronaRequisicao{CaronaID: id})
+		if resp.Status != protocolo.StatusOK {
+			t.Fatalf("carona %s confirmada na publicação, mas DETALHAR_CARONA respondeu %s: houve escrita perdida",
+				id, resp.Codigo)
+		}
 	}
 }

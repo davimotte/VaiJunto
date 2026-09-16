@@ -195,6 +195,10 @@ func publicarCarona(e *Estado, motoristaID string, rota []string, horarios []tim
 // A ordenação é explícita porque a iteração de um mapa em Go é aleatória por
 // construção: sem ela, o mesmo estado geraria listas em ordens diferentes a
 // cada chamada, o que confunde na demonstração e torna o teste instável.
+//
+// As caronas de pé vêm antes das canceladas, e só depois de ordenar a lista é
+// cortada em MAXIMO_ITENS_LISTAGEM (D16): o limite descarta primeiro o
+// histórico, e nunca uma carona que ainda vai sair.
 func caronasDoMotorista(e *Estado, motoristaID string, incluirCanceladas bool) []Carona {
 	lista := make([]Carona, 0, len(e.caronas))
 	for _, c := range e.caronas {
@@ -208,11 +212,17 @@ func caronasDoMotorista(e *Estado, motoristaID string, incluirCanceladas bool) [
 	}
 
 	sort.Slice(lista, func(i, j int) bool {
+		if lista[i].Cancelada != lista[j].Cancelada {
+			return !lista[i].Cancelada
+		}
 		if !lista[i].Horarios[0].Equal(lista[j].Horarios[0]) {
 			return lista[i].Horarios[0].Before(lista[j].Horarios[0])
 		}
 		return lista[i].ID < lista[j].ID
 	})
+	if len(lista) > MAXIMO_ITENS_LISTAGEM {
+		lista = lista[:MAXIMO_ITENS_LISTAGEM]
+	}
 	return lista
 }
 
@@ -298,6 +308,14 @@ const (
 	// derrubaria a conexão do passageiro. Dez cabem com folga mesmo com três
 	// pernas cada. O corte só é seguro porque vem depois da ordenação.
 	MAXIMO_ITINERARIOS = 10
+
+	// MAXIMO_ITENS_LISTAGEM limita LISTAR_MINHAS_CARONAS e
+	// LISTAR_MINHAS_RESERVAS pelo mesmo motivo de MAXIMO_ITINERARIOS (D16): a
+	// resposta é uma linha só, com teto de 64 KB. Uma reserva de dois trechos
+	// ocupa cerca de 600 bytes, e sem limite pouco mais de cem já estourariam a
+	// linha, derrubando a sessão de quem só queria ver o próprio histórico.
+	// Cinquenta cabem com folga mesmo com três trechos cada.
+	MAXIMO_ITENS_LISTAGEM = 50
 )
 
 // pernaCandidata é uma perna gerada no passo 2 da busca, antes de entrar em

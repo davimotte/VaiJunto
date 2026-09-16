@@ -503,6 +503,50 @@ func TestCaronasDoMotorista_FiltraPorDonoEOrdena(t *testing.T) {
 	}
 }
 
+// TestCaronasDoMotorista_LimiteCortaDepoisDeOrdenar confere o limite das
+// listagens (D16): no máximo MAXIMO_ITENS_LISTAGEM caronas, as de pé antes das
+// canceladas, e o corte depois da ordenação.
+//
+// As canceladas são as de partida mais cedo, de propósito. Ordenadas só por
+// partida, viriam primeiro, e o corte descartaria caronas que ainda estão de
+// pé — as que o motorista mais precisa ver.
+func TestCaronasDoMotorista_LimiteCortaDepoisDeOrdenar(t *testing.T) {
+	e := estadoDeTeste()
+	const total, canceladas = MAXIMO_ITENS_LISTAGEM + 5, 10
+
+	ids := make([]string, total)
+	for i := range ids {
+		partida := as(6, 0).AddDate(0, 0, i)
+		c, err := e.PublicarCarona("joao", []string{"Salvador", "Feira de Santana"},
+			[]time.Time{partida, partida.Add(2 * time.Hour)}, 2, []int{3000}, agoraDaPublicacao())
+		if err != nil {
+			t.Fatalf("PublicarCarona %d: %v", i, err)
+		}
+		ids[i] = c.ID
+	}
+	for _, id := range ids[:canceladas] {
+		if _, err := e.CancelarCarona(id, "joao", agoraDaPublicacao()); err != nil {
+			t.Fatalf("CancelarCarona(%s): %v", id, err)
+		}
+	}
+
+	lista := e.CaronasDoMotorista("joao", true)
+	if len(lista) != MAXIMO_ITENS_LISTAGEM {
+		t.Fatalf("len = %d, want %d", len(lista), MAXIMO_ITENS_LISTAGEM)
+	}
+	dePe := total - canceladas
+	for i, c := range lista {
+		if querCancelada := i >= dePe; c.Cancelada != querCancelada {
+			t.Fatalf("posição %d: cancelada = %v, want %v — as caronas de pé vêm antes das canceladas",
+				i, c.Cancelada, querCancelada)
+		}
+	}
+
+	if n := len(e.CaronasDoMotorista("joao", false)); n != dePe {
+		t.Fatalf("sem as canceladas: len = %d, want %d", n, dePe)
+	}
+}
+
 // TestDetalharCarona_DonoEInexistente confere a seção 5.6: carona de outro
 // motorista e carona inexistente têm erros distintos.
 func TestDetalharCarona_DonoEInexistente(t *testing.T) {

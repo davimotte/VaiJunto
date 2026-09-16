@@ -281,6 +281,15 @@ itinerário com menos trocas enquanto mantém um com mais. Limitação conhecida
 registrada como tal: numa busca com mais de 10 possibilidades, o passageiro não
 vê todas.
 
+O mesmo teto de linha vale para as listagens. `LISTAR_MINHAS_CARONAS` e
+`LISTAR_MINHAS_RESERVAS` devolvem **no máximo 50 itens**: uma reserva de dois
+trechos ocupa cerca de 600 bytes, e pouco mais de cem estourariam a linha. O T4
+expôs o caso: cada passageiro acumula centenas de reservas canceladas, e a
+listagem com `incluir_canceladas` derrubava a sessão. A ordenação põe as
+caronas de pé e as reservas ativas antes das canceladas, e o corte vem depois
+dela, então o limite descarta primeiro o histórico. Limitação conhecida: quem
+tem mais de 50 itens não vê os mais antigos do histórico.
+
 ### D17 — Prazos só no transporte, nunca no estado
 
 | Prazo | Valor | Onde se aplica | Ao estourar |
@@ -618,6 +627,13 @@ valida o sistema pela mesma interface que os usuários reais usam.
 
 T2 é o teste central da atomicidade. T8 existe por causa de D14.
 
+O T4 roda por 2 s na suíte padrão, e por 30 s com `VAIJUNTO_T4_DURACAO=30s`. A
+suíte de concorrência roda com `-count=20`, e vinte execuções de 30 s passariam
+do timeout padrão de 10 min do `go test`.
+
+Todo cenário termina conferindo as seis invariantes da seção 8.1 pelo
+protocolo.
+
 Todos os testes de unidade e integração devem rodar com `go test -race`. O
 detector de corrida do Go encontra acesso concorrente não sincronizado ao estado
 mesmo quando o teste passa por sorte de escalonamento.
@@ -847,8 +863,9 @@ Itens deliberadamente fora do escopo, úteis para a seção final do relatório:
 - Cadastro de usuários e hash de senha.
 - Cadastro dinâmico de cidades atendidas e verificação de plausibilidade dos
   horários informados pelo motorista, a partir de distâncias reais.
-- Paginação da busca, para mostrar mais de 10 itinerários sem estourar o limite
-  de linha do protocolo (D16).
+- Paginação da busca e das listagens, para mostrar mais de 10 itinerários e
+  mais de 50 caronas ou reservas sem estourar o limite de linha do protocolo
+  (D16).
 - `RWMutex` ou granularidade fina de lock, com medição comparativa.
 - Persistência do estado e recuperação após reinício.
 - Réplicas do servidor, o que traria o problema de consenso distribuído.

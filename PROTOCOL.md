@@ -246,6 +246,9 @@ Requisição: `{"incluir_canceladas": false}`
 }]}}
 ```
 
+Ordenação: caronas não canceladas primeiro, depois por partida. Máximo de **50**
+caronas, cortadas depois da ordenação.
+
 Erros: `PERFIL_INCORRETO`, `CAMPO_INVALIDO`.
 
 ### 5.6 `DETALHAR_CARONA`
@@ -418,6 +421,9 @@ Requisição: `{"incluir_canceladas": false}`
   ]
 }]}}
 ```
+
+Ordenação: reservas ativas primeiro, depois por partida. Máximo de **50**
+reservas, cortadas depois da ordenação.
 
 Erros: `PERFIL_INCORRETO`, `CAMPO_INVALIDO`.
 

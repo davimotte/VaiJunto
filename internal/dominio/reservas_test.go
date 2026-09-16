@@ -524,3 +524,53 @@ func TestReservar_CaronaCanceladaReprova(t *testing.T) {
 		t.Fatalf("erro = %v, want ErrCaronaCancelada", err)
 	}
 }
+
+// TestReservasDoPassageiro_LimiteCortaDepoisDeOrdenar confere o limite das
+// listagens (D16) nas reservas: no máximo MAXIMO_ITENS_LISTAGEM, as ativas
+// antes das canceladas, e o corte depois da ordenação.
+//
+// Foi o T4 que expôs a falta deste limite: um passageiro com centenas de
+// reservas canceladas recebia uma linha acima de 64 KB. Como no teste das
+// caronas, as canceladas são as de partida mais cedo, para que uma ordenação
+// só por partida as pusesse na frente das ativas.
+func TestReservasDoPassageiro_LimiteCortaDepoisDeOrdenar(t *testing.T) {
+	e := estadoDeTeste()
+	const total, canceladas = MAXIMO_ITENS_LISTAGEM + 5, 10
+
+	// Uma carona por dia: as reservas nunca se sobrepõem no tempo (D14).
+	ids := make([]string, total)
+	for i := range ids {
+		partida := as(6, 0).AddDate(0, 0, i)
+		c, err := e.PublicarCarona("joao", []string{"Salvador", "Feira de Santana"},
+			[]time.Time{partida, partida.Add(2 * time.Hour)}, 2, []int{3000}, agoraDaPublicacao())
+		if err != nil {
+			t.Fatalf("PublicarCarona %d: %v", i, err)
+		}
+		r, _, err := e.Reservar("maria", []ItemReserva{item(c.ID, 0, 1)}, agoraDaPublicacao())
+		if err != nil {
+			t.Fatalf("Reservar %d: %v", i, err)
+		}
+		ids[i] = r.ID
+	}
+	for _, id := range ids[:canceladas] {
+		if err := e.CancelarReserva(id, "maria", agoraDaPublicacao()); err != nil {
+			t.Fatalf("CancelarReserva(%s): %v", id, err)
+		}
+	}
+
+	lista := e.ReservasDoPassageiro("maria", true)
+	if len(lista) != MAXIMO_ITENS_LISTAGEM {
+		t.Fatalf("len = %d, want %d", len(lista), MAXIMO_ITENS_LISTAGEM)
+	}
+	ativas := total - canceladas
+	for i, r := range lista {
+		if querAtiva := i < ativas; r.Ativa != querAtiva {
+			t.Fatalf("posição %d: ativa = %v, want %v — as reservas ativas vêm antes das canceladas",
+				i, r.Ativa, querAtiva)
+		}
+	}
+
+	if n := len(e.ReservasDoPassageiro("maria", false)); n != ativas {
+		t.Fatalf("sem as canceladas: len = %d, want %d", n, ativas)
+	}
+}

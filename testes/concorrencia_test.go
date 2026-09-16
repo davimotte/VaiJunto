@@ -3,11 +3,15 @@ package testes
 // Cenários de concorrência da seção 8.2 do PROJETO.md, exercitados pelo
 // protocolo real por socket, exatamente como um cliente faria.
 //
-// Os quatro testes deste arquivo atacam propriedades diferentes:
+// Os oito testes deste arquivo atacam propriedades diferentes:
 //
 //	T1 — nunca vender o mesmo assento duas vezes (RNF05);
 //	T2 — a confirmação de itinerário é tudo-ou-nada (RNF06);
+//	T3 — a disponibilidade é controlada por trecho (RF11);
+//	T4 — nenhum assento fica permanentemente bloqueado (RNF07);
 //	T5 — o cancelamento em cascata não deixa assento órfão (I1 e I4);
+//	T6 — conexão que cai no meio de uma linha não executa nada (RNF04);
+//	T7 — lixo no protocolo é recusado sem derrubar ninguém (RNF02);
 //	T8 — reservas sobrepostas do mesmo passageiro se excluem (D14).
 //
 // Todos usam a mesma estrutura: N conexões já autenticadas esperando em uma
@@ -19,11 +23,16 @@ package testes
 // manifestar em uma execução isolada.
 
 import (
+	"encoding/json"
 	"fmt"
+	"net"
+	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"vaijunto/internal/dominio"
 	"vaijunto/internal/protocolo"
 )
 
@@ -49,6 +58,8 @@ type credencial struct{ usuario, senha string }
 // caronaObservada é o que o verificador de invariantes consegue enxergar de
 // uma carona usando só a interface pública do protocolo.
 type caronaObservada struct {
+	rota        []string
+	horarios    []time.Time
 	assentos    int
 	cancelada   bool
 	livres      []int
@@ -78,13 +89,24 @@ func observarCaronas(t *testing.T, endereco string) map[string]caronaObservada {
 		var lista protocolo.ListarMinhasCaronasResposta
 		c.exigirOK(protocolo.TipoListarMinhasCaronas,
 			protocolo.ListarMinhasCaronasRequisicao{IncluirCanceladas: true}, &lista)
+		// Uma listagem no limite pode ter sido cortada (D16), e verificar só
+		// parte das caronas passaria sem ter verificado tudo.
+		if len(lista.Caronas) >= dominio.MAXIMO_ITENS_LISTAGEM {
+			t.Fatalf("%s tem %d caronas listadas, o limite da listagem: o verificador não enxergaria as demais",
+				m.usuario, len(lista.Caronas))
+		}
 
 		for _, resumo := range lista.Caronas {
 			var detalhe protocolo.DetalharCaronaResposta
 			c.exigirOK(protocolo.TipoDetalharCarona,
 				protocolo.DetalharCaronaRequisicao{CaronaID: resumo.CaronaID}, &detalhe)
 
-			carona := caronaObservada{assentos: resumo.Assentos, cancelada: resumo.Cancelada}
+			carona := caronaObservada{
+				rota:      resumo.Rota,
+				horarios:  resumo.Horarios,
+				assentos:  resumo.Assentos,
+				cancelada: resumo.Cancelada,
+			}
 			for _, trecho := range detalhe.Trechos {
 				carona.livres = append(carona.livres, trecho.Livres)
 				carona.passageiros = append(carona.passageiros, len(trecho.Passageiros))
@@ -97,8 +119,8 @@ func observarCaronas(t *testing.T, endereco string) map[string]caronaObservada {
 	return observado
 }
 
-// verificarInvariantes confere I1, I2 e I4 da seção 8.1 do PROJETO.md sobre o
-// estado final do servidor.
+// verificarInvariantes confere as seis invariantes da seção 8.1 do PROJETO.md
+// sobre o estado final do servidor.
 //
 // I1 é a invariante mestra e cobre sozinha dois requisitos não funcionais: o
 // lado esquerdo nunca excede Assentos (nenhum assento vendido duas vezes,
@@ -111,6 +133,8 @@ func verificarInvariantes(t *testing.T, endereco string) {
 	caronas := observarCaronas(t, endereco)
 
 	for id, c := range caronas {
+		verificarRotaDaCarona(t, id, c)
+
 		for trecho := range c.livres {
 			if soma := c.livres[trecho] + c.passageiros[trecho]; soma != c.assentos {
 				t.Errorf("I1 violada em %s trecho %d: livres=%d + confirmados=%d = %d, want %d",
@@ -137,24 +161,135 @@ func verificarInvariantes(t *testing.T, endereco string) {
 	for _, p := range passageirosDaCarga() {
 		c.entrar(p.usuario, p.senha)
 
+		// Só as ativas: são as únicas de que I3, I4 e I5 falam, e um passageiro
+		// com longo histórico de canceladas (o T4 produz centenas) não pode
+		// empurrar as ativas para fora do limite da listagem.
 		var reservas protocolo.ListarMinhasReservasResposta
 		c.exigirOK(protocolo.TipoListarMinhasReservas,
-			protocolo.ListarMinhasReservasRequisicao{IncluirCanceladas: true}, &reservas)
+			protocolo.ListarMinhasReservasRequisicao{IncluirCanceladas: false}, &reservas)
+		if len(reservas.Reservas) >= dominio.MAXIMO_ITENS_LISTAGEM {
+			t.Fatalf("%s tem %d reservas ativas listadas, o limite da listagem: o verificador não enxergaria as demais",
+				p.usuario, len(reservas.Reservas))
+		}
 
+		var ativas []protocolo.ReservaResumo
 		for _, r := range reservas.Reservas {
 			if !r.Ativa {
 				continue
 			}
+			ativas = append(ativas, r)
 			for _, trecho := range r.Trechos {
 				if caronas[trecho.CaronaID].cancelada {
 					t.Errorf("I4 violada: reserva ativa %s de %s usa a carona cancelada %s",
 						r.ReservaID, p.usuario, trecho.CaronaID)
 				}
 			}
+			verificarCaminhoDaReserva(t, r, caronas)
+		}
+
+		// I5: intervalos fechados, como na D14 — encostar no mesmo instante já
+		// é sobreposição.
+		for i := range ativas {
+			for j := i + 1; j < len(ativas); j++ {
+				a, b := ativas[i], ativas[j]
+				if !a.Chegada.Before(b.Partida) && !b.Chegada.Before(a.Partida) {
+					t.Errorf("I5 violada: as reservas ativas %s e %s de %s se sobrepõem no tempo",
+						a.ReservaID, b.ReservaID, p.usuario)
+				}
+			}
 		}
 
 		c.exigirOK(protocolo.TipoLogout, vazio, nil)
 	}
+}
+
+// verificarRotaDaCarona confere I6: ao menos duas paradas, nenhuma cidade
+// repetida e horários estritamente crescentes. Busca e reserva contam com isso
+// para que a chegada de um trecho venha sempre depois da partida (D09).
+func verificarRotaDaCarona(t *testing.T, id string, c caronaObservada) {
+	t.Helper()
+
+	if len(c.rota) < 2 || len(c.horarios) != len(c.rota) {
+		t.Errorf("I6 violada em %s: %d parada(s) e %d horário(s)", id, len(c.rota), len(c.horarios))
+		return
+	}
+	vistas := make(map[string]bool, len(c.rota))
+	for i, cidade := range c.rota {
+		if vistas[cidade] {
+			t.Errorf("I6 violada em %s: %q aparece mais de uma vez na rota %v", id, cidade, c.rota)
+		}
+		vistas[cidade] = true
+		if i > 0 && !c.horarios[i].After(c.horarios[i-1]) {
+			t.Errorf("I6 violada em %s: horário de %q (%s) não é posterior ao de %q (%s)",
+				id, cidade, c.horarios[i], c.rota[i-1], c.horarios[i-1])
+		}
+	}
+}
+
+// verificarCaminhoDaReserva confere I3 sobre uma reserva ativa: cada trecho é
+// um segmento da rota da sua carona, com os horários dela; trechos
+// consecutivos se encontram na mesma cidade; o tempo não volta; e nenhuma
+// cidade se repete, contando as intermediárias por onde o passageiro passa
+// dentro do veículo.
+//
+// A listagem não traz os índices de e ate, então eles são reconstruídos pela
+// posição da origem e do destino na rota da carona. Isso só é possível porque
+// a rota não repete cidade (I6).
+func verificarCaminhoDaReserva(t *testing.T, r protocolo.ReservaResumo, caronas map[string]caronaObservada) {
+	t.Helper()
+
+	if len(r.Trechos) == 0 {
+		t.Errorf("I3 violada: a reserva ativa %s não tem trechos", r.ReservaID)
+		return
+	}
+
+	visitadas := map[string]bool{r.Trechos[0].Origem: true}
+	for i, trecho := range r.Trechos {
+		carona, conhecida := caronas[trecho.CaronaID]
+		if !conhecida {
+			t.Errorf("I3 violada: a reserva %s usa a carona desconhecida %s", r.ReservaID, trecho.CaronaID)
+			return
+		}
+		de, ate := indiceNaRota(carona.rota, trecho.Origem), indiceNaRota(carona.rota, trecho.Destino)
+		if de < 0 || ate <= de {
+			t.Errorf("I3 violada: o trecho %d da reserva %s (%s → %s) não é segmento da rota %v de %s",
+				i, r.ReservaID, trecho.Origem, trecho.Destino, carona.rota, trecho.CaronaID)
+			return
+		}
+		if !trecho.Partida.Equal(carona.horarios[de]) || !trecho.Chegada.Equal(carona.horarios[ate]) {
+			t.Errorf("I3 violada: o trecho %d da reserva %s tem horários diferentes dos da carona %s",
+				i, r.ReservaID, trecho.CaronaID)
+		}
+
+		if i > 0 {
+			anterior := r.Trechos[i-1]
+			if anterior.Destino != trecho.Origem {
+				t.Errorf("I3 violada: na reserva %s, o trecho %d desembarca em %q e o seguinte embarca em %q",
+					r.ReservaID, i-1, anterior.Destino, trecho.Origem)
+			}
+			if trecho.Partida.Before(anterior.Chegada) {
+				t.Errorf("I3 violada: na reserva %s, o trecho %d parte antes de o anterior chegar",
+					r.ReservaID, i)
+			}
+		}
+
+		for _, cidade := range carona.rota[de+1 : ate+1] {
+			if visitadas[cidade] {
+				t.Errorf("I3 violada: a reserva %s passa duas vezes por %q", r.ReservaID, cidade)
+			}
+			visitadas[cidade] = true
+		}
+	}
+}
+
+// indiceNaRota devolve a posição da cidade na rota, ou -1.
+func indiceNaRota(rota []string, cidade string) int {
+	for i, c := range rota {
+		if c == cidade {
+			return i
+		}
+	}
+	return -1
 }
 
 // disputa autentica um passageiro por conexão, prende todos em uma barreira e
@@ -320,6 +455,177 @@ func TestT2ItinerarioAtomicoNaoDeixaReservaParcial(t *testing.T) {
 	verificarInvariantes(t, endereco)
 }
 
+// --- T3 — reservas simultâneas em trechos disjuntos da mesma carona ---
+
+// TestT3ReservasEmTrechosDisjuntosDaMesmaCarona é o cenário T3 da seção 8.2, e
+// o teste de RF11: a disponibilidade é controlada por trecho, e não pela
+// carona inteira.
+//
+// A carona tem três trechos e quinze assentos. Antes da largada, o primeiro
+// trecho é esgotado com quinze reservas feitas em sequência; depois, trinta
+// passageiros disputam ao mesmo tempo os outros dois trechos, quinze em cada.
+//
+// Com controle por trecho, as trinta cabem, mas só cabem se cada confirmação
+// conferir e decrementar o seu próprio trecho e nenhum outro. O trecho
+// esgotado antes da largada é o que torna a detecção independente da ordem de
+// chegada: uma implementação que controlasse a carona inteira enxergaria a
+// carona lotada e recusaria todas as trinta, e não só as que chegassem por
+// último.
+func TestT3ReservasEmTrechosDisjuntosDaMesmaCarona(t *testing.T) {
+	endereco := subirServidor(t)
+
+	const porTrecho = 15
+
+	partida := futuro(24)
+	carona := publicarComo(t, endereco, credencial{"joao", "1234"}, porTrecho, []int{3000, 4500, 4000},
+		parada("Salvador", partida),
+		parada("Feira de Santana", partida.Add(2*time.Hour)),
+		parada("Jequié", partida.Add(5*time.Hour)),
+		parada("Vitória da Conquista", partida.Add(7*time.Hour)))
+
+	passageiros := passageirosDaCarga()[3 : 3+3*porTrecho]
+
+	for _, p := range passageiros[:porTrecho] {
+		c := conectar(t, endereco)
+		c.entrar(p.usuario, p.senha)
+		c.exigirOK(protocolo.TipoReservar, reserva(trecho(carona, 0, 1)), nil)
+	}
+
+	participantes := passageiros[porTrecho:]
+	respostas := disputa(t, endereco, participantes, func(n int) protocolo.ReservarRequisicao {
+		indice := 1 + n%2
+		return reserva(trecho(carona, indice, indice+1))
+	})
+
+	oks, porCodigo := contar(respostas)
+	if oks != len(participantes) {
+		t.Errorf("confirmações = %d, want %d — trechos disjuntos não deveriam disputar assento (códigos: %v)",
+			oks, len(participantes), porCodigo)
+	}
+
+	observada := observarCaronas(t, endereco)[carona]
+	for indice, livres := range observada.livres {
+		if livres != 0 {
+			t.Errorf("trecho %d: livres = %d, want 0", indice, livres)
+		}
+		if confirmados := observada.passageiros[indice]; confirmados != porTrecho {
+			t.Errorf("trecho %d: %d passageiros confirmados, want %d", indice, confirmados, porTrecho)
+		}
+	}
+	verificarInvariantes(t, endereco)
+}
+
+// --- T4 — reservar e cancelar em laço ---
+
+// duracaoT4 é a duração do laço do T4.
+//
+// A seção 8.2 fala em 30 s, mas a suíte roda com -count=20, e vinte vezes 30 s
+// passaria do timeout padrão de 10 min do go test. Por isso o padrão é curto, e
+// o cenário completo é pedido explicitamente com VAIJUNTO_T4_DURACAO=30s.
+func duracaoT4(t *testing.T) time.Duration {
+	t.Helper()
+
+	valor := os.Getenv("VAIJUNTO_T4_DURACAO")
+	if valor == "" {
+		return 2 * time.Second
+	}
+	duracao, err := time.ParseDuration(valor)
+	if err != nil || duracao <= 0 {
+		t.Fatalf("VAIJUNTO_T4_DURACAO = %q: informe uma duração positiva, como 30s", valor)
+	}
+	return duracao
+}
+
+// TestT4ReservarECancelarEmLacoDevolveTudo é o cenário T4 da seção 8.2, o teste
+// de RNF07: nenhum assento fica permanentemente bloqueado.
+//
+// Dez passageiros disputam três assentos de um itinerário de duas caronas e,
+// a cada confirmação, cancelam em seguida. Terminado o laço, sem nenhuma
+// reserva ativa, as duas caronas precisam ter voltado à capacidade cheia. Um
+// assento que o cancelamento esquecesse de devolver — em especial o da segunda
+// carona — apareceria como Livres abaixo de três, e um devolvido duas vezes,
+// como Livres acima.
+//
+// Haver mais passageiros que assentos é o que dá valor ao teste: as recusas
+// por SEM_ASSENTO se intercalam com os cancelamentos, e é nessa intercalação
+// que um contador mal sincronizado se perderia.
+func TestT4ReservarECancelarEmLacoDevolveTudo(t *testing.T) {
+	endereco := subirServidor(t)
+	duracao := duracaoT4(t)
+
+	const clientes, assentos = 10, 3
+
+	// Partida com um dia de folga: o prazo do passageiro vence 1 h antes dela
+	// (D13), e não pode vencer no meio do laço.
+	partidaA := futuro(24)
+	partidaB := partidaA.Add(3 * time.Hour)
+	primeira := publicarComo(t, endereco, credencial{"joao", "1234"}, assentos, []int{3000},
+		parada("Salvador", partidaA), parada("Feira de Santana", partidaA.Add(2*time.Hour)))
+	segunda := publicarComo(t, endereco, credencial{"carlos", "1234"}, assentos, []int{4500},
+		parada("Feira de Santana", partidaB), parada("Jequié", partidaB.Add(3*time.Hour)))
+	pedido := reserva(trecho(primeira, 0, 1), trecho(segunda, 0, 1))
+
+	conexoes := make([]*cliente, clientes)
+	for i, p := range passageirosDaCarga()[3 : 3+clientes] {
+		conexoes[i] = conectar(t, endereco)
+		conexoes[i].entrar(p.usuario, p.senha)
+	}
+
+	var ciclos, recusas atomic.Int64
+	largada := make(chan struct{})
+	var espera sync.WaitGroup
+
+	fim := time.Now().Add(duracao)
+	for _, c := range conexoes {
+		espera.Add(1)
+		go func(c *cliente) {
+			defer espera.Done()
+			<-largada
+			for time.Now().Before(fim) {
+				resp := c.enviar(protocolo.TipoReservar, pedido)
+				if resp.Status != protocolo.StatusOK {
+					if resp.Codigo != protocolo.CodigoSemAssento {
+						t.Errorf("RESERVAR: codigo = %q, want OK ou SEM_ASSENTO (mensagem: %q)", resp.Codigo, resp.Mensagem)
+						return
+					}
+					recusas.Add(1)
+					continue
+				}
+
+				var confirmada protocolo.ReservarResposta
+				if err := json.Unmarshal(resp.Dados, &confirmada); err != nil {
+					t.Errorf("decodificar confirmação %s: %v", resp.Dados, err)
+					return
+				}
+				cancelada := c.enviar(protocolo.TipoCancelarReserva,
+					protocolo.CancelarReservaRequisicao{ReservaID: confirmada.ReservaID})
+				if cancelada.Status != protocolo.StatusOK {
+					t.Errorf("CANCELAR_RESERVA %s: codigo = %q (mensagem: %q)",
+						confirmada.ReservaID, cancelada.Codigo, cancelada.Mensagem)
+					return
+				}
+				ciclos.Add(1)
+			}
+		}(c)
+	}
+	close(largada)
+	espera.Wait()
+
+	t.Logf("%d ciclos de reservar e cancelar e %d SEM_ASSENTO em %s", ciclos.Load(), recusas.Load(), duracao)
+	if ciclos.Load() == 0 {
+		t.Fatalf("nenhum ciclo completo: o laço não exercitou nada")
+	}
+
+	caronas := observarCaronas(t, endereco)
+	for _, id := range []string{primeira, segunda} {
+		if livres := caronas[id].livres[0]; livres != assentos {
+			t.Errorf("%s: livres = %d, want %d — o laço deixou %d assento(s) bloqueado(s)",
+				id, livres, assentos, assentos-livres)
+		}
+	}
+	verificarInvariantes(t, endereco)
+}
+
 // --- T5 — cancelamento de carona em cascata sob concorrência ---
 
 // TestT5CancelamentoEmCascataSobConcorrencia é o cenário T5 da seção 8.2.
@@ -436,6 +742,216 @@ func TestT5CancelamentoEmCascataSobConcorrencia(t *testing.T) {
 	if livres := caronas[segunda].livres[0]; livres != assentos {
 		t.Errorf("carona vizinha: livres = %d, want %d — a cascata deixou %d assento(s) órfão(s)",
 			livres, assentos, assentos-livres)
+	}
+	verificarInvariantes(t, endereco)
+}
+
+// --- T6 — conexão derrubada no meio de uma linha ---
+
+// TestT6ConexaoDerrubadaNoMeioDeUmaLinha é o cenário T6 da seção 8.2.
+//
+// Dez passageiros reservam de verdade enquanto outros dez, já autenticados,
+// começam a enviar o mesmo RESERVAR e caem antes do '\n'. Metade dos que caem
+// manda o JSON inteiro sem o terminador, e metade corta a linha no meio; parte
+// fecha a conexão normalmente, e parte com RST. O JSON inteiro sem '\n' é o
+// caso que importa: ele é sintaticamente válido, e processá-lo seria executar
+// uma reserva que o cliente não terminou de pedir (PROTOCOL.md, seção 1).
+//
+// A carona tem assento para todos, dos que ficam e dos que caem. Assim a
+// detecção não depende de quem chega primeiro: um fragmento executado
+// indevidamente viraria uma reserva de quem caiu, e não uma recusa
+// silenciosa por falta de lugar.
+func TestT6ConexaoDerrubadaNoMeioDeUmaLinha(t *testing.T) {
+	endereco := subirServidor(t)
+
+	const saudaveis, derrubados = 10, 10
+
+	partida := futuro(24)
+	carona := publicarComo(t, endereco, credencial{"joao", "1234"}, saudaveis+derrubados, []int{3000},
+		parada("Salvador", partida), parada("Feira de Santana", partida.Add(2*time.Hour)))
+	pedido := reserva(trecho(carona, 0, 1))
+
+	dados, err := json.Marshal(pedido)
+	if err != nil {
+		t.Fatalf("montar dados: %v", err)
+	}
+	linhaSemTerminador, err := json.Marshal(protocolo.Requisicao{ID: "fragmento", Tipo: protocolo.TipoReservar, Dados: dados})
+	if err != nil {
+		t.Fatalf("montar envelope: %v", err)
+	}
+
+	passageiros := passageirosDaCarga()[3 : 3+saudaveis+derrubados]
+	conexoes := make([]*cliente, len(passageiros))
+	for i, p := range passageiros {
+		conexoes[i] = conectar(t, endereco)
+		conexoes[i].entrar(p.usuario, p.senha)
+	}
+
+	respostas := make([]protocolo.Resposta, saudaveis)
+	largada := make(chan struct{})
+	var espera sync.WaitGroup
+
+	for i, c := range conexoes {
+		espera.Add(1)
+		go func(n int, c *cliente) {
+			defer espera.Done()
+			<-largada
+
+			if n < saudaveis {
+				respostas[n] = c.enviar(protocolo.TipoReservar, pedido)
+				return
+			}
+
+			fragmento := linhaSemTerminador
+			if n%2 == 0 {
+				fragmento = linhaSemTerminador[:len(linhaSemTerminador)/2]
+			}
+			// Linger zero faz o Close mandar RST em vez do fechamento
+			// ordenado: é a queda abrupta, e não a despedida educada.
+			if n%4 < 2 {
+				if err := c.conn.(*net.TCPConn).SetLinger(0); err != nil {
+					t.Errorf("linger: %v", err)
+				}
+			}
+			if _, err := c.conn.Write(fragmento); err != nil {
+				t.Errorf("escrever fragmento: %v", err)
+			}
+			_ = c.conn.Close()
+		}(i, c)
+	}
+	close(largada)
+	espera.Wait()
+
+	oks, porCodigo := contar(respostas)
+	if oks != saudaveis {
+		t.Errorf("confirmações dos saudáveis = %d, want %d (códigos: %v)", oks, saudaveis, porCodigo)
+	}
+
+	// O servidor continua atendendo, e nenhum dos que caíram ficou com reserva.
+	conferente := conectar(t, endereco)
+	conferente.exigirOK(protocolo.TipoPing, vazio, nil)
+	for _, p := range passageiros[saudaveis:] {
+		conferente.entrar(p.usuario, p.senha)
+		var reservas protocolo.ListarMinhasReservasResposta
+		conferente.exigirOK(protocolo.TipoListarMinhasReservas,
+			protocolo.ListarMinhasReservasRequisicao{IncluirCanceladas: true}, &reservas)
+		if len(reservas.Reservas) != 0 {
+			t.Errorf("%s caiu no meio da linha e ainda assim tem %d reserva(s)", p.usuario, len(reservas.Reservas))
+		}
+		conferente.exigirOK(protocolo.TipoLogout, vazio, nil)
+	}
+
+	if livres := observarCaronas(t, endereco)[carona].livres[0]; livres != derrubados {
+		t.Errorf("livres = %d, want %d — só os saudáveis podiam ter reservado", livres, derrubados)
+	}
+	verificarInvariantes(t, endereco)
+}
+
+// --- T7 — rajada de mensagens malformadas ---
+
+// respostaEsperada é o id e o código que uma linha da rajada do T7 precisa
+// receber de volta.
+type respostaEsperada struct{ id, codigo string }
+
+// rajadaMalformada monta, para uma conexão, as linhas inválidas do T7 e a
+// resposta que cada uma precisa receber, na ordem.
+//
+// Cobre cada recusa que a seção 6 do PROTOCOL.md distingue antes de qualquer
+// regra de negócio: linha que não é JSON, JSON cortado, JSON que não é
+// envelope, envelope sem tipo, dados nulo, id que não é string, tipo
+// inexistente, tipo em minúsculas e operação sem autenticação. A linha vazia
+// não tem resposta nenhuma (seção 1).
+func rajadaMalformada(conexao, rodadas int) ([]byte, []respostaEsperada) {
+	var rajada []byte
+	var esperadas []respostaEsperada
+
+	linha := func(texto string, resposta respostaEsperada) {
+		rajada = append(rajada, texto...)
+		rajada = append(rajada, '\n')
+		esperadas = append(esperadas, resposta)
+	}
+
+	for r := 0; r < rodadas; r++ {
+		id := fmt.Sprintf("c%d-r%d", conexao, r)
+		linha(`isso não é json`, respostaEsperada{"", protocolo.CodigoJSONInvalido})
+		linha(`{"id":"`+id+`","tipo":"PING"`, respostaEsperada{"", protocolo.CodigoJSONInvalido})
+		linha(`[1,2,3]`, respostaEsperada{"", protocolo.CodigoEnvelopeInvalido})
+		linha(`{"id":7,"tipo":"PING","dados":{}}`, respostaEsperada{"", protocolo.CodigoEnvelopeInvalido})
+		linha(`{"id":"`+id+`","dados":{}}`, respostaEsperada{id, protocolo.CodigoEnvelopeInvalido})
+		linha(`{"id":"`+id+`","tipo":"PING","dados":null}`, respostaEsperada{id, protocolo.CodigoEnvelopeInvalido})
+		linha(`{"id":"`+id+`","tipo":"INVENTADO","dados":{}}`, respostaEsperada{id, protocolo.CodigoTipoDesconhecido})
+		linha(`{"id":"`+id+`","tipo":"ping","dados":{}}`, respostaEsperada{id, protocolo.CodigoTipoDesconhecido})
+		linha(`{"id":"`+id+`","tipo":"RESERVAR","dados":{"trechos":[{"carona_id":"car-4","de":0,"ate":1}]}}`,
+			respostaEsperada{id, protocolo.CodigoNaoAutenticado})
+		rajada = append(rajada, '\n')
+	}
+	return rajada, esperadas
+}
+
+// TestT7RajadaDeMensagensMalformadas é o cenário T7 da seção 8.2.
+//
+// Dez conexões despejam ao mesmo tempo, cada uma num único write, centenas de
+// linhas inválidas. Cada linha precisa receber o erro com o código certo e,
+// quando legível, o id ecoado, na ordem, porque o modelo é estritamente
+// requisição/resposta. Terminada a rajada, a mesma conexão ainda responde PING:
+// "permanece disponível" vale para quem mandou o lixo, e não só para os outros.
+//
+// Uma das linhas é um RESERVAR sem autenticação sobre o assento único de car-4.
+// No fim, o assento continua livre: nenhuma linha recusada alterou o estado.
+func TestT7RajadaDeMensagensMalformadas(t *testing.T) {
+	endereco := subirServidor(t)
+
+	const conexoes, rodadas = 10, 20
+
+	largada := make(chan struct{})
+	var espera sync.WaitGroup
+
+	for n := 0; n < conexoes; n++ {
+		c := conectar(t, endereco)
+		rajada, esperadas := rajadaMalformada(n, rodadas)
+
+		espera.Add(1)
+		go func() {
+			defer espera.Done()
+			<-largada
+
+			if err := c.conn.SetDeadline(time.Now().Add(prazoLeitura)); err != nil {
+				t.Errorf("conexão %d: prazo: %v", n, err)
+				return
+			}
+			if _, err := c.conn.Write(rajada); err != nil {
+				t.Errorf("conexão %d: escrever rajada: %v", n, err)
+				return
+			}
+
+			for i, quero := range esperadas {
+				bruta, err := c.leitor.LerLinha()
+				if err != nil {
+					t.Errorf("conexão %d, resposta %d: %v", n, i, err)
+					return
+				}
+				resp, err := protocolo.DecodificarResposta(bruta)
+				if err != nil {
+					t.Errorf("conexão %d, resposta %d: decodificar %q: %v", n, i, bruta, err)
+					return
+				}
+				if resp.Status != protocolo.StatusErro || resp.Codigo != quero.codigo || resp.ID != quero.id {
+					t.Errorf("conexão %d, resposta %d: got id=%q %s/%s, want id=%q ERRO/%s",
+						n, i, resp.ID, resp.Status, resp.Codigo, quero.id, quero.codigo)
+					return
+				}
+			}
+
+			if resp := c.enviar(protocolo.TipoPing, vazio); resp.Status != protocolo.StatusOK {
+				t.Errorf("conexão %d: PING depois da rajada = %s/%s", n, resp.Status, resp.Codigo)
+			}
+		}()
+	}
+	close(largada)
+	espera.Wait()
+
+	if livres := observarCaronas(t, endereco)["car-4"].livres[0]; livres != 1 {
+		t.Errorf("car-4: livres = %d, want 1 — uma linha recusada alterou o estado", livres)
 	}
 	verificarInvariantes(t, endereco)
 }

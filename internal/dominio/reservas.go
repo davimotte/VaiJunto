@@ -288,6 +288,10 @@ func reservar(e *Estado, passageiroID string, itens []ItemReserva, agora time.Ti
 // de mapa em Go é aleatória, e sem ela a mesma consulta devolveria a lista em
 // ordem diferente a cada chamada. Ordenar pela partida é o que o passageiro
 // espera — a próxima viagem primeiro.
+//
+// As ativas vêm antes das canceladas, e só depois de ordenar a lista é cortada
+// em MAXIMO_ITENS_LISTAGEM (D16): o limite descarta primeiro o histórico, e
+// nunca uma viagem que o passageiro ainda vai fazer.
 func reservasDoPassageiro(e *Estado, passageiroID string, incluirCanceladas bool) []ReservaDetalhada {
 	lista := make([]ReservaDetalhada, 0, len(e.reservas))
 	for _, r := range e.reservas {
@@ -306,11 +310,17 @@ func reservasDoPassageiro(e *Estado, passageiroID string, incluirCanceladas bool
 	}
 
 	sort.Slice(lista, func(i, j int) bool {
+		if lista[i].Ativa != lista[j].Ativa {
+			return lista[i].Ativa
+		}
 		if !lista[i].Itinerario.Partida.Equal(lista[j].Itinerario.Partida) {
 			return lista[i].Itinerario.Partida.Before(lista[j].Itinerario.Partida)
 		}
 		return lista[i].ID < lista[j].ID
 	})
+	if len(lista) > MAXIMO_ITENS_LISTAGEM {
+		lista = lista[:MAXIMO_ITENS_LISTAGEM]
+	}
 	return lista
 }
 
