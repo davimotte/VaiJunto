@@ -42,16 +42,16 @@ impossível um delimitador falso vindo do conteúdo de um campo.
 
 | Campo | Tipo | Obrigatório | Descrição |
 |---|---|---|---|
-| `id` | string | sim | Identificador da requisição, gerado pelo cliente. Ecoado na resposta. |
-| `tipo` | string | sim | Nome da operação, em maiúsculas. |
+| `id` | string não vazia | sim | Identificador da requisição, gerado pelo cliente. Ecoado na resposta. |
+| `tipo` | string não vazia | sim | Nome da operação, em maiúsculas. |
 | `dados` | objeto | sim | Payload específico da operação. Objeto vazio quando não há campos. |
 
-Validação estrita do envelope: `id` e `tipo` precisam ser **strings** e `dados`
-precisa ser um **objeto JSON**. Campo ausente, `null`, ou de outro tipo (número,
-array, booleano) responde `ENVELOPE_INVALIDO`.
+Validação estrita do envelope: `id` e `tipo` precisam ser **strings não vazias**
+e `dados` precisa ser um **objeto JSON**. Campo ausente, `null`, string vazia
+(`""`), ou de outro tipo (número, array, booleano) responde `ENVELOPE_INVALIDO`.
 
 O receptor decodifica o envelope em dois estágios. Primeiro extrai o `id`, se ele
-for uma string legível; só depois valida `tipo` e `dados`. Isso garante que uma
+for uma string não vazia; só depois valida `tipo` e `dados`. Isso garante que uma
 resposta de erro por envelope malformado ainda ecoe o `id` correto, o que é
 necessário para que o cliente e o teste de carga consigam parear resposta e
 requisição mesmo em rajada de mensagens inválidas.
@@ -68,7 +68,7 @@ requisição mesmo em rajada de mensagens inválidas.
 
 | Campo | Tipo | Presente | Descrição |
 |---|---|---|---|
-| `id` | string | sempre | Mesmo `id` da requisição. `""` apenas quando a linha não decodifica como JSON ou o `id` não é uma string. |
+| `id` | string | sempre | Mesmo `id` da requisição. `""` apenas quando a linha não decodifica como JSON ou o `id` não é uma string não vazia. |
 | `status` | string | sempre | `OK` ou `ERRO`. |
 | `codigo` | string | só em erro | Código da tabela da seção 6. |
 | `mensagem` | string | só em erro | Texto legível, para exibição no CLI. |
@@ -456,7 +456,7 @@ Outros erros: `RESERVA_NAO_ENCONTRADA`, `NAO_E_DONO`, `RESERVA_JA_CANCELADA`,
 | Código | Significado |
 |---|---|
 | `JSON_INVALIDO` | Linha não decodifica como JSON |
-| `ENVELOPE_INVALIDO` | Falta `id`, `tipo` ou `dados` |
+| `ENVELOPE_INVALIDO` | `id` ou `tipo` ausente, vazio ou que não é string, ou `dados` que não é objeto |
 | `TIPO_DESCONHECIDO` | Operação não existe |
 | `CAMPO_INVALIDO` | Campo ausente, com tipo errado ou fora de faixa |
 | `NAO_AUTENTICADO` | Operação exige login |
