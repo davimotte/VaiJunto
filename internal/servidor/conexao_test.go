@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"regexp"
 	"strings"
 	"syscall"
 	"testing"
@@ -24,7 +25,8 @@ import (
 // (PROTOCOL.md, seções 1 e 2), que é validado antes de qualquer regra de
 // acesso, e o resultado não pode depender de quem está logado.
 func processar(linha string) protocolo.Resposta {
-	return processarLinha([]byte(linha), dominio.NovoEstado(), &sessao{})
+	_, resp := processarLinha([]byte(linha), dominio.NovoEstado(), &sessao{})
+	return resp
 }
 
 // TestProcessarLinha_PingValido garante que o caminho feliz continua intacto:
@@ -179,7 +181,7 @@ func (c *conexaoFalsa) SetWriteDeadline(time.Time) error { return nil }
 func TestAtenderConexao_EOFLimpo(t *testing.T) {
 	conn := &conexaoFalsa{entrada: strings.NewReader(`{"id":"1","tipo":"PING","dados":{}}` + "\n")}
 
-	if err := atenderConexao(conn, dominio.NovoEstado(), prazoEscrita); err != nil {
+	if err := atenderConexao(conn, dominio.NovoEstado(), prazoEscrita, nil); err != nil {
 		t.Fatalf("EOF limpo não deveria produzir erro: %v", err)
 	}
 	if !conn.fechada {
@@ -198,7 +200,7 @@ func TestAtenderConexao_LinhaIncompletaNaoResponde(t *testing.T) {
 	// JSON sintaticamente completo, mas sem o '\n': não é uma mensagem.
 	conn := &conexaoFalsa{entrada: strings.NewReader(`{"id":"1","tipo":"PING","dados":{}}`)}
 
-	err := atenderConexao(conn, dominio.NovoEstado(), prazoEscrita)
+	err := atenderConexao(conn, dominio.NovoEstado(), prazoEscrita, nil)
 	if !errors.Is(err, protocolo.ErrLinhaIncompleta) {
 		t.Fatalf("err = %v, want protocolo.ErrLinhaIncompleta", err)
 	}
@@ -217,7 +219,7 @@ func TestAtenderConexao_RespondeAntesDeDescartarFragmento(t *testing.T) {
 	entrada := `{"id":"1","tipo":"PING","dados":{}}` + "\n" + `{"id":"2","tipo":"PIN`
 	conn := &conexaoFalsa{entrada: strings.NewReader(entrada)}
 
-	if err := atenderConexao(conn, dominio.NovoEstado(), prazoEscrita); !errors.Is(err, protocolo.ErrLinhaIncompleta) {
+	if err := atenderConexao(conn, dominio.NovoEstado(), prazoEscrita, nil); !errors.Is(err, protocolo.ErrLinhaIncompleta) {
 		t.Fatalf("err = %v, want protocolo.ErrLinhaIncompleta", err)
 	}
 
@@ -243,7 +245,7 @@ func TestAtenderConexao_ClienteQueNaoLeEncerraNoPrazo(t *testing.T) {
 
 	resultado := make(chan error, 1)
 	go func() {
-		resultado <- atenderConexao(ladoServidor, dominio.NovoEstado(), 50*time.Millisecond)
+		resultado <- atenderConexao(ladoServidor, dominio.NovoEstado(), 50*time.Millisecond, nil)
 	}()
 
 	if _, err := ladoCliente.Write([]byte(`{"id":"1","tipo":"PING","dados":{}}` + "\n")); err != nil {
@@ -269,7 +271,7 @@ func TestAtenderConexao_ClienteQueNaoLeEncerraNoPrazo(t *testing.T) {
 func TestAtenderConexao_PanicoEncerraSoAConexao(t *testing.T) {
 	conn := &conexaoFalsa{entrada: strings.NewReader(`{"id":"1","tipo":"LOGIN","dados":{"usuario":"joao","senha":"1234"}}` + "\n")}
 
-	err := atenderConexao(conn, nil, prazoEscrita)
+	err := atenderConexao(conn, nil, prazoEscrita, nil)
 	if err == nil || !strings.Contains(err.Error(), "pânico") {
 		t.Fatalf("err = %v, want erro de pânico recuperado", err)
 	}
@@ -333,4 +335,152 @@ func TestAceitar_RetornaQuandoOListenerFecha(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Aceitar continuou tentando depois de o listener fechar")
 	}
+}
+
+// atenderComRegistro atende uma conexão roteirizada sobre a carga de
+// demonstração, com o registro de operações ligado, e devolve as linhas que
+// foram registradas.
+//
+// A carga vem de dados/, e não de NovoEstado, porque o LOGIN precisa de um
+// usuário que exista: sem ele não há como conferir que o registro mostra quem
+// executou cada operação.
+func atenderComRegistro(t *testing.T, mensagens ...string) []string {
+	t.Helper()
+
+	estado, err := dominio.CarregarEstado("../../dados/usuarios.json", "../../dados/caronas.json")
+	if err != nil {
+		t.Fatalf("carga inicial: %v", err)
+	}
+	conn := &conexaoFalsa{entrada: strings.NewReader(strings.Join(mensagens, "\n") + "\n")}
+
+	var saida bytes.Buffer
+	if err := atenderConexao(conn, estado, prazoEscrita, novoRegistro(&saida)); err != nil {
+		t.Fatalf("atender conexão: %v", err)
+	}
+	if saida.Len() == 0 {
+		return nil
+	}
+	return strings.Split(strings.TrimSuffix(saida.String(), "\n"), "\n")
+}
+
+// linhaDeOperacao é o que um teste espera de uma linha do registro. Os campos
+// são comparados um a um, e não por substring, para que "maria" aparecer na
+// linha errada, ou "-" aparecer só dentro do horário, não passe por acerto.
+type linhaDeOperacao struct {
+	usuario   string
+	tipo      string
+	id        string
+	resultado string // "OK" ou "ERRO <CÓDIGO>"
+}
+
+// formatoDoInstante é o começo de toda linha do registro: data, hora com
+// milissegundos e o endereço remoto entre colchetes.
+var formatoDoInstante = regexp.MustCompile(`^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}\.\d{3} \[[^\]]*\] `)
+
+// conferirOperacao compara uma linha do registro com o esperado, no formato
+// "<data> <hora> [<endereço>] <usuário> <tipo> id=<id> → <resultado> (<duração> ms)".
+func conferirOperacao(t *testing.T, linha string, esperado linhaDeOperacao) {
+	t.Helper()
+
+	if !formatoDoInstante.MatchString(linha) {
+		t.Errorf("linha sem instante e endereço no início: %q", linha)
+		return
+	}
+	campos := strings.Fields(formatoDoInstante.ReplaceAllString(linha, ""))
+	if len(campos) < 6 {
+		t.Errorf("linha com campos a menos: %q", linha)
+		return
+	}
+	if campos[0] != esperado.usuario {
+		t.Errorf("usuário = %q, want %q na linha %q", campos[0], esperado.usuario, linha)
+	}
+	if campos[1] != esperado.tipo {
+		t.Errorf("tipo = %q, want %q na linha %q", campos[1], esperado.tipo, linha)
+	}
+	if campos[2] != "id="+esperado.id {
+		t.Errorf("id = %q, want %q na linha %q", campos[2], "id="+esperado.id, linha)
+	}
+	if !strings.Contains(linha, "→ "+esperado.resultado+" (") || !strings.HasSuffix(linha, " ms)") {
+		t.Errorf("resultado diferente de %q, ou sem duração, na linha %q", esperado.resultado, linha)
+	}
+}
+
+// TestRegistro_UmaLinhaPorOperacao confere que toda operação atendida aparece
+// no registro, com sucesso ou erro, entre a abertura e o encerramento da
+// conexão.
+//
+// O usuário mostrado é o de quem executou a operação: o LOGIN aceito já sai
+// com o nome, o recusado sai com "-", e o LOGOUT sai com quem acabou de sair,
+// e não com a sessão já vazia.
+func TestRegistro_UmaLinhaPorOperacao(t *testing.T) {
+	linhas := atenderComRegistro(t,
+		`{"id":"1","tipo":"PING","dados":{}}`,
+		`{"id":"2","tipo":"LOGIN","dados":{"usuario":"maria","senha":"errada"}}`,
+		`{"id":"3","tipo":"LOGIN","dados":{"usuario":"maria","senha":"abcd"}}`,
+		`{"id":"4","tipo":"CANCELAR_RESERVA","dados":{"reserva_id":"res-inexistente"}}`,
+		`{"id":"5","tipo":"LOGOUT","dados":{}}`,
+	)
+
+	if len(linhas) != 7 {
+		t.Fatalf("esperava 7 linhas (abertura, 5 operações, encerramento), got %d:\n%s", len(linhas), strings.Join(linhas, "\n"))
+	}
+	if !strings.HasSuffix(linhas[0], "conexão aberta") {
+		t.Errorf("primeira linha deveria registrar a abertura: %q", linhas[0])
+	}
+	conferirOperacao(t, linhas[1], linhaDeOperacao{"-", "PING", `"1"`, "OK"})
+	conferirOperacao(t, linhas[2], linhaDeOperacao{"-", "LOGIN", `"2"`, "ERRO CREDENCIAIS_INVALIDAS"})
+	conferirOperacao(t, linhas[3], linhaDeOperacao{"maria", "LOGIN", `"3"`, "OK"})
+	conferirOperacao(t, linhas[4], linhaDeOperacao{"maria", "CANCELAR_RESERVA", `"4"`, "ERRO RESERVA_NAO_ENCONTRADA"})
+	conferirOperacao(t, linhas[5], linhaDeOperacao{"maria", "LOGOUT", `"5"`, "OK"})
+	if !strings.HasSuffix(linhas[6], "conexão encerrada") {
+		t.Errorf("última linha deveria registrar o encerramento: %q", linhas[6])
+	}
+}
+
+// TestRegistro_NaoExpoeSenha garante que o conteúdo de "dados" não vai para o
+// registro. As senhas ficam em texto claro (D12), e o terminal do servidor é
+// visível para quem estiver na frente da máquina.
+func TestRegistro_NaoExpoeSenha(t *testing.T) {
+	linhas := atenderComRegistro(t,
+		`{"id":"1","tipo":"LOGIN","dados":{"usuario":"maria","senha":"senha-que-nao-pode-vazar"}}`,
+	)
+
+	// Sem esta checagem, um registro que não escreve nada passaria no teste.
+	if len(linhas) != 3 {
+		t.Fatalf("esperava 3 linhas, got %d:\n%s", len(linhas), strings.Join(linhas, "\n"))
+	}
+	registro := strings.Join(linhas, "\n")
+	if strings.Contains(registro, "senha-que-nao-pode-vazar") || strings.Contains(registro, `"senha"`) {
+		t.Fatalf("o registro expôs a senha:\n%s", registro)
+	}
+}
+
+// TestRegistro_EnvelopeInvalido confere que a linha que nem chega a ser
+// operação também é registrada, com "?" no lugar do tipo que não foi possível
+// ler e o código de erro que o cliente recebeu.
+func TestRegistro_EnvelopeInvalido(t *testing.T) {
+	linhas := atenderComRegistro(t,
+		`isso não é json`,
+		`{"id":"8","tipo":"PING"}`,
+	)
+
+	if len(linhas) != 4 {
+		t.Fatalf("esperava 4 linhas, got %d:\n%s", len(linhas), strings.Join(linhas, "\n"))
+	}
+	conferirOperacao(t, linhas[1], linhaDeOperacao{"-", "?", `""`, "ERRO JSON_INVALIDO"})
+	conferirOperacao(t, linhas[2], linhaDeOperacao{"-", "PING", `"8"`, "ERRO ENVELOPE_INVALIDO"})
+}
+
+// TestRegistro_CampoDoClienteNaoQuebraLinha confere que id e tipo, que vêm do
+// cliente, não conseguem forjar linhas no registro: um "\n" dentro deles sai
+// escapado, e a operação continua ocupando uma linha só.
+func TestRegistro_CampoDoClienteNaoQuebraLinha(t *testing.T) {
+	linhas := atenderComRegistro(t,
+		`{"id":"a\nfalsa","tipo":"X\nY","dados":{}}`,
+	)
+
+	if len(linhas) != 3 {
+		t.Fatalf("esperava 3 linhas, got %d:\n%s", len(linhas), strings.Join(linhas, "\n"))
+	}
+	conferirOperacao(t, linhas[1], linhaDeOperacao{"-", `"X\nY"`, `"a\nfalsa"`, "ERRO TIPO_DESCONHECIDO"})
 }

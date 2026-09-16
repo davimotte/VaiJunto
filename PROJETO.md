@@ -334,6 +334,44 @@ some quando conexões fecham. O erro é registrado e o laço de aceitação tent
 novo após 100 ms, pausa que evita um laço ocupado enquanto o recurso não volta.
 Só o fechamento do próprio listener encerra o laço.
 
+### D19 — Registro de operações no terminal do servidor
+
+O servidor escreve no stderr uma linha por conexão aberta, por operação atendida
+e por conexão encerrada normalmente. A linha de operação traz o instante, o
+endereço remoto, o usuário, o tipo, o id e o resultado (`OK` ou `ERRO` com o
+código), além da duração do processamento:
+
+```
+2026/10/01 08:15:02.431 [192.168.0.20:51234] maria    RESERVAR               id="3" → ERRO SEM_ASSENTO (0.312 ms)
+```
+
+O registro fica num único ponto, o laço da conexão, depois de a resposta estar
+montada. Nenhum handler e nada do domínio foi tocado. A escrita acontece depois
+que a seção crítica terminou, então o terminal nunca é escrito com o mutex do
+estado preso (D05). As linhas passam por um `log.Logger`, que é seguro para uso
+concorrente: cada linha sai numa escrita só, e linhas de conexões diferentes não
+se misturam.
+
+Regras:
+
+- **O campo `dados` nunca é registrado.** Ele traz a senha do `LOGIN`, guardada
+  em texto claro (D12).
+- **id e tipo saem escapados.** Eles vêm do cliente, e um `\n` dentro deles
+  forjaria linhas no registro. O tipo de uma operação conhecida sai sem aspas.
+- **O usuário é o de quem executou a operação.** O `LOGIN` aceito já sai com o
+  nome, e o `LOGOUT` sai com quem saiu.
+- **O instante vem no fuso das cidades** (seção 10.1), e não em `time.Local`,
+  que no contêiner é UTC.
+- **O encerramento com erro continua no `log` padrão**, como na D18, com o
+  registro ligado ou não.
+
+A flag `--log-operacoes` liga o registro e vem ligada por padrão, para que a
+demonstração mostre o servidor trabalhando. Nas medições da seção 8.3 ela fica
+desligada. Cada linha é uma escrita síncrona no terminal serializada pelo mutex
+do `Logger`, e com centenas de milhares de requisições isso entraria na latência
+medida como um segundo ponto de disputa, além do mutex do estado (D04). Os
+testes sobem o servidor por `servidor.Escutar`, que não liga o registro.
+
 ---
 
 ## 4. Modelo de domínio
@@ -659,7 +697,8 @@ Regras da medição:
   ele, mede um servidor já no ar, em contêiner ou em outra máquina;
 - nos dois modos, cada rodada usa um servidor recém-iniciado e mede os quatro
   pontos em sequência sobre ele. Um servidor remoto precisa ser reiniciado antes
-  de cada rodada;
+  de cada rodada, e sobe com `--log-operacoes=false` (D19). O servidor do
+  próprio processo já sobe sem o registro;
 - `VAIJUNTO_CARGA_DURACAO` define a duração de cada ponto (5 s por padrão), e
   `VAIJUNTO_CARGA_ROTULO` identifica a rodada;
 - a curva sai em tabela no log e em `resultados/carga-<rotulo>-<instante>.csv`.
@@ -850,6 +889,18 @@ Máquina B, cliente:
 docker run --rm -it \
   -e VAIJUNTO_SERVIDOR=192.168.0.10:9000 \
   vaijunto-cliente /bin/passageiro
+```
+
+O servidor mostra no terminal cada conexão e cada operação (D19). Para acompanhar
+os registros com o contêiner em segundo plano, use `docker logs -f`.
+
+Máquina A, servidor para o teste de carga, sem o registro de operações (D19):
+
+```bash
+docker run --rm -p 9000:9000 \
+  -v $(pwd)/dados:/dados \
+  vaijunto-servidor --usuarios /dados/usuarios.json --caronas /dados/caronas.json \
+  --log-operacoes=false
 ```
 
 Máquina B, teste de carga (seção 8.3), com o servidor recém-iniciado na máquina A:

@@ -66,6 +66,17 @@ Verificando o servidor sem cliente:
 printf '{"id":"1","tipo":"PING","dados":{}}\n' | nc localhost 9000
 ```
 
+O terminal do servidor mostra uma linha por conexão e por operação atendida,
+com usuário, tipo, id, resultado e duração. A senha e o restante do campo `dados`
+nunca aparecem:
+
+```
+2026/10/01 08:15:02.431 [127.0.0.1:51234] maria    RESERVAR               id="3" → ERRO SEM_ASSENTO (0.312 ms)
+```
+
+Para desligar esse registro, por exemplo ao medir carga, use
+`--log-operacoes=false` (`PROJETO.md`, D19).
+
 ## Interface dos clientes
 
 Os clientes são navegados por menu numérico. Uma execução mantém **uma única**
@@ -136,6 +147,7 @@ docker build -f Dockerfile.cliente -t vaijunto-cliente .
 docker run --rm -it -e VAIJUNTO_SERVIDOR=192.168.0.10:9000 vaijunto-cliente /bin/passageiro
 
 # Máquina B — teste de carga pela rede, com o servidor recém-iniciado na máquina A
+# e subido com --log-operacoes=false
 docker run --rm --user "$(id -u):$(id -g)" \
   -e VAIJUNTO_CARGA=1 -e VAIJUNTO_CARGA_ENDERECO=192.168.0.10:9000 \
   -v $(pwd)/resultados:/carga/resultados -w /carga/testes \
