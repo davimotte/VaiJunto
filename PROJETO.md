@@ -649,6 +649,37 @@ concorrentes para gerar a curva do relatório e a base de comparação entre
 Medir duas vezes: com o teste na mesma máquina do servidor (sem latência de rede)
 e na segunda máquina do laboratório (com rede real).
 
+O teste é `TestCarga`, em `testes/carga_test.go`. A carga é mista: cada cliente
+repete a sessão de um passageiro do menu (D15), com busca, reserva do itinerário
+encontrado, listagem das reservas e cancelamento. Cada cliente reserva a própria
+carona, num dia só dela, para que a disputa medida seja a do mutex (D04), e não a
+do assento, que é a do T1.
+
+Regras da medição:
+
+- roda **sem** `-race`, porque o detector de corrida multiplica o custo de cada
+  acesso à memória e o número medido seria o dele;
+- fica fora da suíte normal e só executa com `VAIJUNTO_CARGA=1`;
+- sem `VAIJUNTO_CARGA_ENDERECO`, sobe um servidor novo no próprio processo; com
+  ele, mede um servidor já no ar, em contêiner ou em outra máquina;
+- nos dois modos, cada rodada usa um servidor recém-iniciado e mede os quatro
+  pontos em sequência sobre ele. Um servidor remoto precisa ser reiniciado antes
+  de cada rodada;
+- `VAIJUNTO_CARGA_DURACAO` define a duração de cada ponto (5 s por padrão), e
+  `VAIJUNTO_CARGA_ROTULO` identifica a rodada;
+- a curva sai em tabela no log e em `resultados/carga-<rotulo>-<instante>.csv`.
+
+**Limitação conhecida: a latência cresce com o histórico de reservas.** A
+verificação de sobreposição da reserva (seção 7, passo 4) e a listagem de
+reservas percorrem todas as reservas do estado, de todos os passageiros, e
+reservas canceladas continuam no estado. No perfil de CPU da carga, a listagem
+respondeu por 22,6% do tempo do processo e a reserva por 9%. Medindo cada ponto
+por 20 s em vez de 5 s, a vazão caiu à metade e a latência dobrou. A otimização,
+um índice das reservas ativas de cada passageiro, foi deliberadamente deixada de
+fora (seção 12). A consequência para a medição é que **só são comparáveis
+rodadas com a mesma duração e começando com servidor novo**: é o que vale para
+as curvas com e sem rede e para a comparação entre `Mutex` e `RWMutex`.
+
 ---
 
 ## 9. Dados de carga inicial
@@ -863,6 +894,8 @@ Itens deliberadamente fora do escopo, úteis para a seção final do relatório:
 - Cadastro de usuários e hash de senha.
 - Cadastro dinâmico de cidades atendidas e verificação de plausibilidade dos
   horários informados pelo motorista, a partir de distâncias reais.
+- Índice das reservas ativas de cada passageiro, para que a verificação de
+  sobreposição e a listagem não percorram o histórico inteiro (seção 8.3).
 - Paginação da busca e das listagens, para mostrar mais de 10 itinerários e
   mais de 50 caronas ou reservas sem estourar o limite de linha do protocolo
   (D16).

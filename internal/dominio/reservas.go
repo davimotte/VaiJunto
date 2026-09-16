@@ -293,7 +293,10 @@ func reservar(e *Estado, passageiroID string, itens []ItemReserva, agora time.Ti
 // em MAXIMO_ITENS_LISTAGEM (D16): o limite descarta primeiro o histórico, e
 // nunca uma viagem que o passageiro ainda vai fazer.
 func reservasDoPassageiro(e *Estado, passageiroID string, incluirCanceladas bool) []ReservaDetalhada {
-	lista := make([]ReservaDetalhada, 0, len(e.reservas))
+	// Sem capacidade prévia: len(e.reservas) é o histórico de todos os
+	// passageiros, e reservá-lo a cada listagem custava uma alocação do tamanho
+	// do histórico inteiro (PROJETO.md, seção 8.3).
+	var lista []ReservaDetalhada
 	for _, r := range e.reservas {
 		if r.PassageiroID != passageiroID {
 			continue

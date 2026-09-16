@@ -524,14 +524,21 @@ func TestT3ReservasEmTrechosDisjuntosDaMesmaCarona(t *testing.T) {
 // o cenário completo é pedido explicitamente com VAIJUNTO_T4_DURACAO=30s.
 func duracaoT4(t *testing.T) time.Duration {
 	t.Helper()
+	return duracaoDoAmbiente(t, "VAIJUNTO_T4_DURACAO", 2*time.Second)
+}
 
-	valor := os.Getenv("VAIJUNTO_T4_DURACAO")
+// duracaoDoAmbiente lê uma duração da variável de ambiente, ou devolve o
+// padrão quando ela não está definida.
+func duracaoDoAmbiente(t *testing.T, variavel string, padrao time.Duration) time.Duration {
+	t.Helper()
+
+	valor := os.Getenv(variavel)
 	if valor == "" {
-		return 2 * time.Second
+		return padrao
 	}
 	duracao, err := time.ParseDuration(valor)
 	if err != nil || duracao <= 0 {
-		t.Fatalf("VAIJUNTO_T4_DURACAO = %q: informe uma duração positiva, como 30s", valor)
+		t.Fatalf("%s = %q: informe uma duração positiva, como 30s", variavel, valor)
 	}
 	return duracao
 }

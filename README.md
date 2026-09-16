@@ -146,7 +146,12 @@ leem do terminal.
 go test -race ./...                  # unidade e integração
 go test -race -count=20 ./testes -run '^TestT[0-9]' # concorrência
 VAIJUNTO_T4_DURACAO=30s go test -race ./testes -run '^TestT4' # T4 completo, 30 s
+VAIJUNTO_CARGA=1 go test ./testes -run '^TestCarga$' -v       # carga, sem -race
+VAIJUNTO_CARGA=1 VAIJUNTO_CARGA_ENDERECO=192.168.0.10:9000 go test ./testes -run '^TestCarga$' -v
 ```
+
+A curva de carga sai no log e em `resultados/`. O teste de carga roda sem
+`-race`, porque o detector de corrida distorce a latência medida.
 
 O detector de corrida do Go encontra acesso concorrente não sincronizado ao
 estado mesmo quando o teste passa por sorte de escalonamento. Rodar sem `-race`
