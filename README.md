@@ -4,7 +4,7 @@ Sistema de caronas compartilhadas de média e longa distância, com servidor
 central e clientes conectados por sockets TCP.
 
 **Problema 1 de TEC502 — Concorrência e Conectividade.** Entrega individual, com
-apresentação, arguição e relatório no formato SBC.
+apresentação e relatório no formato SBC.
 
 **Autor:** _(preencher)_
 

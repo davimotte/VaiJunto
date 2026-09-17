@@ -61,6 +61,39 @@ Três propriedades definem a dificuldade técnica:
 | RNF10 | Servidor central único, sem réplicas |
 | RNF11 | Servidor e clientes em computadores distintos |
 
+### 2.3 Rastreabilidade
+
+Onde cada requisito é decidido, implementado e verificado. A coluna de
+verificação cita os cenários da seção 8.2 e as invariantes da 8.1.
+
+| ID | Decisão e seção | Operação (`PROTOCOL.md`) | Verificação |
+|---|---|---|---|
+| RF01 | D08, D12 | 5.2 `LOGIN`, 5.3 `LOGOUT` | Testes de login e de identidade por conexão |
+| RF02 | D09, D11 | 5.4 `PUBLICAR_CARONA` | Validações de publicação; I6 |
+| RF03 | D16 (limite de 50) | 5.5 `LISTAR_MINHAS_CARONAS` | Listagem com e sem canceladas |
+| RF04 | D10 | 5.6 `DETALHAR_CARONA` | I1, reconstruída pelo protocolo |
+| RF05 | D13, seção 7 | 5.7 `CANCELAR_CARONA` | T5; I1 e I4 |
+| RF06 | Seção 6, D16 | 5.8 `BUSCAR_ITINERARIOS` | Regressão da seção 9.2 |
+| RF07 | Seção 6, passo 3 | 5.8 `BUSCAR_ITINERARIOS` | Itinerários #2, #3 e #4 da seção 9.2 |
+| RF08 | Seção 7, D07 | 5.9 `RESERVAR` | T1, T2, T8; I1 |
+| RF09 | D16 (limite de 50) | 5.10 `LISTAR_MINHAS_RESERVAS` | T4 |
+| RF10 | D13 | 5.11 `CANCELAR_RESERVA` | T4; I1 |
+| RF11 | D10, seção 4 | 5.6, 5.9 | T3; I1 e I2 |
+| RNF01 | D01, D06 | `PROTOCOL.md` seção 1 | `PING` por `nc` |
+| RNF02 | D06, seção 5.1 camada 2 | `PROTOCOL.md` seção 2 | T7 |
+| RNF03 | D03 | — | T1 a T8, com `-race` |
+| RNF04 | D17, D18 | — | T6, T7 |
+| RNF05 | D04, seção 7 passos 3 e 6 | 5.9 `RESERVAR` | T1; **I1**, lado superior |
+| RNF06 | Seção 7, separação validar/escrever | 5.9 `RESERVAR` | **T2**; I1 |
+| RNF07 | **D07** | — | T4; **I1**, lado inferior |
+| RNF08 | D04, D05 | — | `-race` com `-count=20` |
+| RNF09 | Seção 10 | — | `ROTEIRO.md`, Parte 0 |
+| RNF10 | Seção 1 | — | — |
+| RNF11 | Seção 10.2 | — | `ROTEIRO.md`, Partes 0 e 3 |
+
+Três linhas concentram a dificuldade do problema. RNF05 e RNF07 são os dois
+lados da mesma invariante I1, e RNF06 é o que T2 existe para provar.
+
 ---
 
 ## 3. Decisões de projeto
@@ -141,10 +174,11 @@ que passa por cada uma; o servidor valida e guarda, sem derivar nada.
 Validações de uma carona:
 
 - toda cidade pertence ao conjunto atendido;
-- ao menos duas paradas;
+- ao menos duas paradas, com um horário para cada uma;
 - nenhuma cidade repetida na rota;
 - horários estritamente crescentes (horário igual ao anterior também é recusado);
-- um preço por trecho entre paradas consecutivas;
+- um preço por trecho entre paradas consecutivas, nenhum deles negativo;
+- ao menos um assento;
 - a primeira parada no futuro.
 
 Há **um horário por parada**: o instante em que o carro chega a uma cidade é o
@@ -242,8 +276,8 @@ busca, o cliente devolve ao servidor os campos `carona_id`, `de` e `ate` que ele
 mesmo recebeu, sem que nada disso apareça na tela.
 
 Entrada inválida no menu não encerra o processo nem fecha a conexão: o cliente
-revalida e repete a pergunta. Isso importa na apresentação, que tem 20 minutos e
-arguição no meio.
+revalida e repete a pergunta. Isso importa na demonstração ao vivo, em que um
+dedo errado no teclado não pode custar a sessão inteira.
 
 **Exceção deliberada:** o teste de carga não usa o menu. Ele fala o protocolo
 diretamente por socket, usando `internal/protocolo`, porque precisa controlar
@@ -419,6 +453,29 @@ type Estado struct {
 Uma rota com N cidades tem N−1 trechos, indexados de 0 a N−2. Uma reserva de A
 até C sobre a rota `[A, B, C, D]` consome os índices 0 e 1.
 
+#### Tipos derivados
+
+O que está acima é o estado **guardado**. O domínio também expõe quatro tipos
+que ele calcula e nunca armazena, e que formam a fronteira com a camada de
+protocolo:
+
+| Tipo | O que é |
+|---|---|
+| `PernaItinerario` | Um segmento contíguo de uma única carona, de `De` até `Ate`, com cidades, horários, preço somado e o **nome** do motorista |
+| `Itinerario` | Um caminho completo da origem ao destino, com uma ou mais pernas. O número de baldeações é `len(Pernas)−1` |
+| `ReservaDetalhada` | Uma `Reserva` com os índices já resolvidos contra as caronas, que é o que `LISTAR_MINHAS_RESERVAS` precisa entregar |
+| `PassageiroConfirmado` | Um passageiro de um trecho, para `DETALHAR_CARONA` |
+
+Nenhum deles entra no `Estado`, e isso é deliberado. O preço de um trecho e o
+horário de uma cidade pertencem à carona; copiá-los para dentro da reserva
+criaria duas cópias do mesmo dado, que podem divergir. `Itinerario`, em
+particular, é recalculado a cada busca justamente porque a busca não reserva
+nada (D07) — guardar um resultado de busca seria o primeiro passo em direção à
+reserva em duas fases.
+
+Pelo mesmo motivo, o número de baldeações não é campo de `Itinerario`: dado
+derivável guardado em paralelo é dado que pode divergir da lista de pernas.
+
 ---
 
 ## 5. Arquitetura
@@ -462,14 +519,16 @@ vaijunto/
 │   ├── dominio/      # cidades atendidas, Carona, Reserva, Usuario, Estado, regras, mutex
 │   ├── servidor/     # listener, sessão, roteador
 │   └── cliente/      # conexão reaproveitada pelos dois CLIs
-├── testes/           # teste de concorrência e carga
+├── testes/           # integração, concorrência (T1 a T8) e carga
 ├── dados/            # usuarios.json, caronas.json
-├── docs/             # figuras do relatório
+├── docs/             # apresentacao.html
+├── resultados/       # CSVs das rodadas de carga (seção 8.3)
 ├── Dockerfile.servidor
 ├── Dockerfile.cliente
 ├── docker-compose.yml
 ├── PROTOCOL.md
 ├── PROJETO.md
+├── ROTEIRO.md
 └── README.md
 ```
 
@@ -581,6 +640,39 @@ acrescenta um quarto desempate, determinístico, sobre a sequência de trechos d
 itinerário. Não é regra de negócio: existe para que a mesma consulta devolva
 sempre a mesma lista, na demonstração e no teste de regressão.
 
+#### Determinismo em dois pontos
+
+A não determinação por iteração de mapa é combatida em dois lugares, e não só
+no desempate acima:
+
+| Onde | O quê | Efeito |
+|---|---|---|
+| Passo 2 | As listas de pernas de cada cidade são ordenadas por `(carona, de, ate)` | Fixa a ordem em que os itinerários são **gerados** |
+| Passo 4 | Quarto critério de desempate pela assinatura do itinerário (`car-1:0-1\|car-3:0-2`) | Fixa a ordem em que eles são **devolvidos** |
+
+**A segunda sozinha bastaria.** A assinatura é única por itinerário — dois
+itinerários distintos usam sequências distintas de trechos —, então o quarto
+critério torna a ordenação uma ordem **total**, e o resultado final não depende
+da ordem de geração.
+
+A ordenação do Passo 2 é mantida como defesa em profundidade, por três razões:
+
+1. **Ela protege o passo anterior ao corte.** O limite de 10 itinerários (D16) é
+   aplicado sobre a lista já ordenada, mas basta um critério de desempate futuro
+   deixar de ser total para que *qual* itinerário sobrevive ao corte passe a
+   depender da ordem de geração. A ordenação do Passo 2 remove essa dependência
+   na origem, e não no fim.
+2. **Ela torna a busca depurável.** Com a geração estável, uma execução da busca
+   percorre as pernas sempre na mesma sequência, e um itinerário que aparece ou
+   some entre duas execuções é bug de lógica, nunca de escalonamento de mapa.
+3. **O custo é desprezível.** Ordenar as pernas de cada cidade acontece uma vez
+   por busca, sobre listas de poucas dezenas de elementos, fora de qualquer
+   caminho quente.
+
+O princípio geral: determinismo garantido em um ponto só é determinismo que
+depende de ninguém mexer naquele ponto. As duas ordenações são independentes, e
+qualquer uma delas sozinha já entrega uma lista reproduzível.
+
 A busca lê `Livres` apenas para podar pernas inviáveis. Ela não reserva e não
 promete nada; a reserva refaz toda a verificação sob o lock. A duplicação é
 deliberada: é o que torna a busca barata e a reserva correta ao mesmo tempo.
@@ -607,9 +699,14 @@ Tudo executa dentro de **uma única seção crítica**:
    `[partida, chegada]` do novo itinerário não pode intersectar o intervalo da
    reserva existente.
 5. **Falha.** Se qualquer passo anterior falhar, responder erro **sem alterar
-   nada**.
+   nada**. A última operação que ainda pode falhar é a geração do identificador
+   da reserva, que depende de `crypto/rand`: ela acontece aqui, imediatamente
+   antes do commit, e não dentro dele. Gerar o id depois de decrementar os
+   `Livres` deixaria, no caso de erro, assentos consumidos sem reserva
+   correspondente — exatamente o estado parcial que a separação entre validar e
+   escrever existe para tornar impossível.
 6. **Commit.** Decrementar todos os `Livres` envolvidos, criar a reserva,
-   responder `OK`.
+   responder `OK`. Daqui para baixo nada retorna erro.
 
 A separação entre os passos 1–4 (que apenas verificam) e o passo 6 (que apenas
 escreve) é o que garante RNF06. Nenhuma escrita ocorre antes de toda a validação
@@ -824,19 +921,27 @@ listagem, detalhamento e o T1. Todo teste que cancela reserva ou carona publica
 as próprias caronas pelo protocolo, com partida relativa ao relógio, para não
 expirar quando a data do cenário passar.
 
-Roteiro dos 20 minutos, sem nenhuma carona além das oito:
+#### O que a demonstração precisa exercitar
 
-1. **Publicar.** ana publica uma carona ao vivo, com data de 25/09 ou posterior
-   a 02/10, para que ela não altere a busca do passo seguinte.
-2. **Buscar com baldeação.** maria busca Salvador → Vitória da Conquista em
-   01/10 e recebe os quatro itinerários acima.
-3. **Reservar.** maria reserva o #3. Livres: car-1 [2, 2], car-2 [1].
-4. **Disputar o último assento.** pedro e lucia reservam o #4 ao mesmo tempo.
-   Um confirma; o outro recebe `SEM_ASSENTO` no trecho 0 de car-4. Livres: car-4
-   [0], car-2 [0].
-5. **Cancelar em cascata.** joao cancela car-1. As duas reservas caem, e os
-   assentos voltam nas caronas dos outros motoristas: car-2 volta a [2] e car-4
-   a [1].
+Esta é a **especificação** da demonstração: as cinco propriedades que as oito
+caronas do cenário bastam para mostrar ao vivo, sem publicar nenhuma carona
+além delas. Quem executa — em que máquina, com quais usuários e em que ordem —
+é o `ROTEIRO.md`, Parte 2.
+
+| # | Propriedade | O que precisa ficar visível |
+|---|---|---|
+| 1 | **Publicação** | Uma carona publicada ao vivo, com data fora de 01/10 para não alterar a busca seguinte |
+| 2 | **Busca com baldeação** | Os quatro itinerários acima, na ordem da D16, combinando motoristas diferentes |
+| 3 | **Reserva** | Um itinerário de várias pernas confirmado, com os `Livres` caindo em todas as caronas envolvidas |
+| 4 | **Disputa do último assento** | Dois passageiros pedindo o #4 ao mesmo tempo: um confirma, o outro recebe `SEM_ASSENTO` no trecho 0 de `car-4` — e **não** fica com o assento de `car-1`, que tinha vaga |
+| 5 | **Cancelamento em cascata** | joao cancela `car-1`, e os assentos voltam nas caronas dos **outros** motoristas |
+
+O passo 4 é o núcleo: ele é RNF05 e RNF06 na mesma tela. O passo 5 prova que a
+cascata devolve os assentos de todos os trechos da reserva atingida, inclusive
+os de caronas que não foram canceladas (seção 7).
+
+A `car-4`, com um assento só, é o que torna o passo 4 possível sem preparação: o
+recurso escasso já está no arquivo, e não precisa ser criado na hora.
 
 ---
 
@@ -845,8 +950,8 @@ Roteiro dos 20 minutos, sem nenhuma carona além das oito:
 ### 10.1 Detalhe crítico de fuso horário
 
 O binário precisa do banco de fusos para interpretar `-03:00` e
-`America/Bahia`, e a imagem `alpine` não o inclui. Solução, no `main.go` do
-servidor:
+`America/Bahia`, e as imagens `alpine` do servidor e do cliente não o incluem.
+Solução, no `main.go` dos **três** binários:
 
 ```go
 import _ "time/tzdata"
@@ -854,6 +959,11 @@ import _ "time/tzdata"
 
 Sem isso, tudo funciona na máquina de desenvolvimento e quebra dentro do
 contêiner, com horários deslocando três horas.
+
+O import é dos três porque `dominio.FusoDasCidades` é usada nas duas pontas: o
+servidor lê nela a `data` da busca, e os clientes montam nela os horários que o
+motorista digita. Um cliente sem o import cairia no deslocamento fixo de −03:00
+que a função tem como rede de segurança — correto hoje, mas por acidente.
 
 O import resolve só metade do problema: ele embute o banco de fusos, mas não
 escolhe o fuso. `time.Local` continua vindo da variável `TZ`, que no contêiner
@@ -875,43 +985,25 @@ desenvolvimento.
 
 ### 10.2 Execução no laboratório
 
-Máquina A, servidor:
+Esta seção trata das **decisões** de execução distribuída. O procedimento
+operacional completo — montar as imagens, subir o servidor, abrir os clientes,
+conferir a conectividade e rodar as duas curvas de carga — está no `ROTEIRO.md`,
+Partes 0 e 3.
+
+O comando do servidor é o que dá corpo ao argumento abaixo:
 
 ```bash
-docker run --rm -p 9000:9000 \
-  -v $(pwd)/dados:/dados \
-  vaijunto-servidor --usuarios /dados/usuarios.json --caronas /dados/caronas.json
+docker run --rm --name vaijunto-servidor -p 9000:9000 -e TZ=America/Bahia \
+  -v "$(pwd)/dados:/dados" vaijunto-servidor \
+  --usuarios /dados/usuarios.json --caronas /dados/caronas.json
 ```
 
-Máquina B, cliente:
-
-```bash
-docker run --rm -it \
-  -e VAIJUNTO_SERVIDOR=192.168.0.10:9000 \
-  vaijunto-cliente /bin/passageiro
-```
-
-O servidor mostra no terminal cada conexão e cada operação (D19). Para acompanhar
-os registros com o contêiner em segundo plano, use `docker logs -f`.
-
-Máquina A, servidor para o teste de carga, sem o registro de operações (D19):
-
-```bash
-docker run --rm -p 9000:9000 \
-  -v $(pwd)/dados:/dados \
-  vaijunto-servidor --usuarios /dados/usuarios.json --caronas /dados/caronas.json \
-  --log-operacoes=false
-```
-
-Máquina B, teste de carga (seção 8.3), com o servidor recém-iniciado na máquina A:
-
-```bash
-docker run --rm --user "$(id -u):$(id -g)" \
-  -e VAIJUNTO_CARGA=1 -e VAIJUNTO_CARGA_ENDERECO=192.168.0.10:9000 \
-  -e VAIJUNTO_CARGA_ROTULO=rede-lab \
-  -v $(pwd)/resultados:/carga/resultados -w /carga/testes \
-  vaijunto-cliente /bin/carga -test.run '^TestCarga$' -test.v
-```
+O `--name` permite salvar o registro com `docker logs` antes de um reinício, já
+que `--rm` apaga o contêiner ao sair; para acompanhar com o contêiner em segundo
+plano, `docker logs -f`. O `-e TZ=America/Bahia` alinha o horário das linhas
+sem milissegundos com o das linhas de operação, e não afeta o domínio (seção
+10.1). Nas medições da seção 8.3, o mesmo comando ganha `--log-operacoes=false`
+(D19).
 
 A imagem do cliente traz o teste de carga compilado em `/bin/carga`, então a
 máquina B não precisa de Go instalado. O binário grava em `../resultados`,
@@ -935,26 +1027,27 @@ Três pontos que costumam consumir tempo em laboratório:
 - Os CLIs precisam de `-it`, porque leem do terminal. Sem isso, o cliente morre
   imediatamente ao ler EOF do stdin.
 - O firewall das máquinas pode bloquear a porta 9000. Testar a conectividade com
-  `PING` antes da apresentação e ter o IP anotado, não descoberto na hora.
+  `PING` antes da apresentação e ter o IP anotado, não descoberto na hora
+  (`ROTEIRO.md`, 0.3).
 
 ---
 
 ## 11. Roteiro de implementação
 
-| Fase | Entregável | Critério de pronto |
-|---|---|---|
-| 0 | Requisitos | Este documento, seção 2 |
-| 1 | Modelo de domínio | Este documento, seção 4 |
-| 2 | Arquitetura | Este documento, seção 5 |
-| 3 | Protocolo | `PROTOCOL.md` |
-| 4 | Servidor: esqueleto de rede | `PING` responde por `nc`; cliente derrubado não afeta os demais |
-| 5 | Operações básicas | Publicar, listar, detalhar, cancelar, listar reservas funcionam |
-| 6 | Busca de itinerários | Teste de regressão da seção 9.2 passa |
-| 7 | Reserva atômica | T1, T2 e T8 passam com `-race` |
-| 8 | Clientes CLI com menu interativo | Motorista e passageiro completos; conexão única por sessão |
-| 9 | Teste de carga | T1 a T8 e as curvas de latência |
-| 10 | Docker e execução distribuída | Servidor e cliente em máquinas distintas |
-| 11 | Relatório SBC e README | 8 páginas, formato SBC, referenciado |
+| Fase | Entregável | Critério de pronto | Estado |
+|---|---|---|---|
+| 0 | Requisitos | Este documento, seção 2 | ✅ |
+| 1 | Modelo de domínio | Este documento, seção 4 | ✅ |
+| 2 | Arquitetura | Este documento, seção 5 | ✅ |
+| 3 | Protocolo | `PROTOCOL.md` | ✅ |
+| 4 | Servidor: esqueleto de rede | `PING` responde por `nc`; cliente derrubado não afeta os demais | ✅ |
+| 5 | Operações básicas | Publicar, listar, detalhar, cancelar, listar reservas funcionam | ✅ |
+| 6 | Busca de itinerários | Teste de regressão da seção 9.2 passa | ✅ |
+| 7 | Reserva atômica | T1, T2 e T8 passam com `-race` | ✅ |
+| 8 | Clientes CLI com menu interativo | Motorista e passageiro completos; conexão única por sessão | ✅ |
+| 9 | Teste de carga | T1 a T8 e as curvas de latência | ✅ |
+| 10 | Docker e execução distribuída | Servidor e cliente em máquinas distintas | ✅ |
+| 11 | Relatório SBC e README | 8 páginas, formato SBC, referenciado | README e `ROTEIRO.md` prontos; **relatório pendente** |
 
 ---
 

@@ -17,7 +17,7 @@ func terminalDeTeste(entrada string) (*Terminal, *bytes.Buffer) {
 
 // TestLerInteiro_RepeteAteReceberValorValido é a propriedade que D15 exige do
 // menu: entrada inválida não encerra o processo nem fecha a conexão, apenas
-// repete a pergunta. Importa na apresentação, que tem arguição no meio.
+// repete a pergunta. Importa na demonstração ao vivo.
 func TestLerInteiro_RepeteAteReceberValorValido(t *testing.T) {
 	casos := []struct {
 		nome    string

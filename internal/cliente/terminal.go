@@ -16,8 +16,8 @@ import (
 // A regra que orienta todo o arquivo vem de D15: entrada inválida não encerra
 // o processo nem fecha a conexão. Toda função de leitura repete a pergunta
 // até receber algo válido, e o único erro que qualquer uma delas devolve é
-// ErrEntradaEncerrada. Isso importa numa apresentação de 20 minutos com
-// arguição no meio: um dedo errado no teclado não pode custar a demonstração.
+// ErrEntradaEncerrada. Isso importa na demonstração ao vivo: um dedo errado no
+// teclado não pode custar a sessão inteira.
 type Terminal struct {
 	entrada *bufio.Scanner
 	saida   io.Writer

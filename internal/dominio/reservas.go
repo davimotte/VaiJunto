@@ -386,7 +386,7 @@ func cancelarReserva(e *Estado, reservaID, passageiroID string, agora time.Time)
 // reservas que dependem dela (PROTOCOL.md, seção 5.7). Devolve quantas reservas
 // caíram na cascata.
 //
-// Três pontos que a arguição costuma cobrar:
+// Três pontos que costumam passar despercebidos:
 //
 //   - a cascata devolve os assentos de **todos** os trechos de cada reserva
 //     atingida, inclusive os de caronas que não foram canceladas. Uma reserva
