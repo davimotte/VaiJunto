@@ -1,0 +1,1697 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VAIJUNTO</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground: #F3F5F2;
+    --surface: #FFFFFF;
+    --ink: #17211C;
+    --muted: #56645C;
+    --line: #D3DBD5;
+    --line-strong: #9AA8A0;
+    --accent: #0B6B4D;
+    --accent-soft: #DCEEE6;
+    --lock: #9A6200;
+    --lock-soft: #F7EBD2;
+    --bad: #B42318;
+    --bad-soft: #FBE4E1;
+    --code-bg: #E8EDE9;
+    --f-display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", system-ui, sans-serif;
+    --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0F1512;
+      --surface: #16201B;
+      --ink: #E4EBE6;
+      --muted: #9BA9A1;
+      --line: #2B3731;
+      --line-strong: #52625A;
+      --accent: #4CC39A;
+      --accent-soft: #123729;
+      --lock: #E2A63F;
+      --lock-soft: #372A12;
+      --bad: #F17C70;
+      --bad-soft: #3B1C19;
+      --code-bg: #1C2721;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0F1512;
+    --surface: #16201B;
+    --ink: #E4EBE6;
+    --muted: #9BA9A1;
+    --line: #2B3731;
+    --line-strong: #52625A;
+    --accent: #4CC39A;
+    --accent-soft: #123729;
+    --lock: #E2A63F;
+    --lock-soft: #372A12;
+    --bad: #F17C70;
+    --bad-soft: #3B1C19;
+    --code-bg: #1C2721;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--f-body);
+    font-size: clamp(14px, 0.5vw + 8.5px, 18px);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .deck {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    height: 100dvh;
+    height: 100%;
+  }
+
+  /* ---------- barra superior ---------- */
+  .topo {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    padding: calc(8px + env(safe-area-inset-top, 0px)) clamp(16px, 3vw, 44px) 8px;
+    border-bottom: 1px solid var(--line);
+    font-size: 0.82em;
+  }
+  .marca {
+    font-family: var(--f-display);
+    font-weight: 700;
+    font-size: 1.35em;
+    letter-spacing: 0.06em;
+  }
+  .marca span { color: var(--accent); }
+  #rotulo { color: var(--muted); flex: 1; }
+  .teclas { color: var(--muted); font-family: var(--f-mono); font-size: 0.9em; white-space: nowrap; }
+  kbd {
+    font-family: var(--f-mono);
+    border: 1px solid var(--line-strong);
+    border-bottom-width: 2px;
+    border-radius: 3px;
+    padding: 0 0.35em;
+    font-size: 0.9em;
+  }
+
+  /* ---------- telas ---------- */
+  main { position: relative; overflow: hidden; }
+  .tela {
+    position: absolute;
+    inset: 0;
+    overflow: auto;
+    padding-block: clamp(16px, 3vh, 36px);
+    padding-inline: clamp(16px, 3vw, 44px);
+  }
+  .quadro {
+    max-width: 1300px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(14px, 2.4vh, 26px);
+  }
+  .cab { display: flex; flex-direction: column; gap: 2px; }
+  .sobre {
+    font-family: var(--f-mono);
+    font-size: 0.74em;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0;
+  }
+  h1, h2, h3 { font-family: var(--f-display); margin: 0; text-wrap: balance; }
+  h2 {
+    font-size: 2.5em;
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: 0.01em;
+  }
+  h3 {
+    font-size: 1.2em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+    margin-bottom: 0.35em;
+  }
+  .tese {
+    margin: 6px 0 0;
+    font-size: 1.18em;
+    font-weight: 500;
+    max-width: 80ch;
+  }
+  p { margin: 0; }
+  p + p { margin-top: 0.5em; }
+
+  .duas {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: clamp(16px, 2.6vw, 40px);
+    align-items: start;
+  }
+  .duas.larga-esq { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+  .duas.larga-dir { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); }
+  .quatro {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+  }
+  .tres {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+  @media (max-width: 1000px) {
+    .quatro { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 860px) {
+    .duas, .duas.larga-esq, .duas.larga-dir, .tres { grid-template-columns: 1fr; }
+    h2 { font-size: 2em; }
+  }
+  @media (max-width: 520px) {
+    .quatro { grid-template-columns: 1fr; }
+    .teclas { display: none; }
+  }
+
+  .painel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 14px 16px;
+  }
+  .coluna { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+  ul.lista { margin: 0; padding-left: 1.1em; }
+  ul.lista li + li { margin-top: 0.32em; }
+  ul.lista li::marker { color: var(--accent); }
+  ul.lista ul { margin: 0.2em 0 0; padding-left: 1.1em; }
+
+  code {
+    font-family: var(--f-mono);
+    font-size: 0.86em;
+    background: var(--code-bg);
+    padding: 0.04em 0.32em;
+    border-radius: 3px;
+  }
+  pre.codigo {
+    margin: 0;
+    background: var(--code-bg);
+    padding: 12px 14px;
+    border-radius: 6px;
+    font-family: var(--f-mono);
+    font-size: 0.78em;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  pre.codigo code { background: none; padding: 0; font-size: 1em; }
+  .env { color: var(--accent); font-weight: 600; }
+  .rec { color: var(--lock); font-weight: 600; }
+
+  .tabela { overflow-x: auto; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.9em;
+    font-variant-numeric: tabular-nums;
+  }
+  th {
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.78em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    border-bottom: 1.5px solid var(--ink);
+    padding: 4px 8px;
+  }
+  td {
+    border-bottom: 1px solid var(--line);
+    padding: 6px 8px;
+    vertical-align: top;
+  }
+  td:first-child, th:first-child { padding-left: 0; }
+
+  .ok { color: var(--accent); font-weight: 600; }
+  .nao { color: var(--bad); font-weight: 600; }
+  .trava { color: var(--lock); font-weight: 600; }
+
+  .fichas { display: flex; flex-wrap: wrap; gap: 5px; }
+  .ficha {
+    font-family: var(--f-mono);
+    font-size: 0.72em;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+  .grupo-fichas { display: grid; grid-template-columns: 7.5em 1fr; gap: 6px 12px; align-items: baseline; }
+  .grupo-fichas > span { font-size: 0.8em; color: var(--muted); }
+
+  .passo {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .passo b { font-family: var(--f-display); font-size: 1.2em; font-weight: 600; }
+  .passo .n {
+    font-family: var(--f-mono);
+    font-size: 0.75em;
+    color: var(--accent);
+  }
+  .passo p, .passo ul { font-size: 0.9em; }
+
+  .destaque {
+    border-left: 3px solid var(--accent);
+    padding: 4px 0 4px 14px;
+  }
+  .destaque.ruim { border-left-color: var(--bad); }
+
+  dl.glossario { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; }
+  dl.glossario dt { font-weight: 600; }
+  dl.glossario dd { margin: 0; }
+
+  /* ---------- figuras ---------- */
+  figure { margin: 0; min-width: 0; }
+  figcaption { font-size: 0.8em; color: var(--muted); margin-top: 6px; max-width: 70ch; }
+  svg.dg { display: block; width: 100%; height: auto; color: var(--ink); overflow: visible; }
+  svg.dg text { fill: var(--ink); font-family: var(--f-body); font-size: 13px; }
+  svg.dg .tm { font-family: var(--f-mono); font-size: 12px; }
+  svg.dg .tp { font-size: 11px; fill: var(--muted); }
+  svg.dg .tpm { font-family: var(--f-mono); font-size: 10.5px; fill: var(--muted); }
+  svg.dg .tn { font-weight: 600; }
+  svg.dg .t-ac { fill: var(--accent); }
+  svg.dg .t-rui { fill: var(--bad); }
+  svg.dg .t-tra { fill: var(--lock); }
+  .c-cx { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.2; }
+  .c-moldura { fill: none; stroke: var(--ink); stroke-width: 1.5; }
+  .c-ac { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.4; }
+  .c-tra { fill: var(--lock-soft); stroke: var(--lock); stroke-width: 1.4; }
+  .c-rui { fill: var(--bad-soft); stroke: var(--bad); stroke-width: 1.4; }
+  .c-trac { fill: none; stroke: var(--line-strong); stroke-width: 1.2; stroke-dasharray: 5 4; }
+  .c-sombra { fill: var(--ground); stroke: var(--line-strong); stroke-width: 1; }
+  .l { fill: none; stroke: var(--ink); stroke-width: 1.4; }
+  .l-fina { fill: none; stroke: var(--line-strong); stroke-width: 1; }
+  .l-ac { fill: none; stroke: var(--accent); stroke-width: 2; }
+  .l-rui { fill: none; stroke: var(--bad); stroke-width: 1.6; stroke-dasharray: 6 4; }
+  .l-trac { fill: none; stroke: var(--ink); stroke-width: 1.3; stroke-dasharray: 5 4; }
+  .l-estrada { fill: none; stroke: var(--ink); stroke-width: 3; }
+  .l-gargalo { fill: none; stroke: var(--bad); stroke-width: 4; }
+  .parada { fill: var(--surface); stroke: var(--ink); stroke-width: 2.5; }
+  .m-tinta { fill: var(--ink); }
+  .m-ac { fill: var(--accent); }
+  .m-rui { fill: var(--bad); }
+
+  /* ---------- árvore da DFS ---------- */
+  .arvore, .arvore ul { list-style: none; margin: 0; padding: 0; }
+  .arvore { font-size: 0.88em; }
+  .arvore ul { margin-left: 0.55em; padding-left: 1.1em; border-left: 1.5px solid var(--line-strong); }
+  .arvore li { position: relative; padding: 2px 0; }
+  .arvore ul > li::before {
+    content: "";
+    position: absolute;
+    left: -1.1em;
+    top: 0.85em;
+    width: 0.8em;
+    border-top: 1.5px solid var(--line-strong);
+  }
+  .arvore ul > li:last-child::after {
+    content: "";
+    position: absolute;
+    left: calc(-1.1em - 1.5px);
+    top: calc(0.85em + 1.5px);
+    bottom: 0;
+    border-left: 1.5px solid var(--surface);
+  }
+  .arvore .raiz { font-weight: 600; }
+  .arvore .car { font-family: var(--f-mono); font-size: 0.92em; }
+  .arvore .motivo { font-size: 0.9em; }
+
+  /* ---------- capa ---------- */
+  .capa { justify-content: center; min-height: 100%; }
+  .capa h1 {
+    font-size: clamp(3.4em, 9vw, 7em);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    line-height: 0.95;
+  }
+  .capa h1 span { color: var(--accent); }
+  .capa .sub { font-size: 1.25em; max-width: 52ch; }
+  .capa .autor { color: var(--muted); margin-top: 0; }
+  .capa .autor b { color: var(--ink); font-weight: 600; }
+  .indice {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 8px;
+  }
+  @media (max-width: 900px) { .indice { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 520px) { .indice { grid-template-columns: 1fr; } }
+  .indice button {
+    all: unset;
+    cursor: pointer;
+    display: grid;
+    grid-template-columns: 2.1em 1fr;
+    gap: 2px 8px;
+    padding: 10px 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+  .indice button:hover { border-color: var(--accent); }
+  .indice button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .indice .num {
+    grid-row: span 2;
+    font-family: var(--f-display);
+    font-size: 1.7em;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1;
+  }
+  .indice .tit { font-weight: 600; }
+  .indice .dsc { font-size: 0.82em; color: var(--muted); }
+
+  /* ---------- barra de navegação em forma de rota ---------- */
+  .rota {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px clamp(16px, 3vw, 44px) calc(10px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--line);
+  }
+  .seta {
+    all: unset;
+    cursor: pointer;
+    font-family: var(--f-mono);
+    font-size: 1.1em;
+    padding: 2px 10px;
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+  }
+  .seta:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .seta:disabled { opacity: 0.35; cursor: default; }
+  .paradas {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    flex: 1;
+    display: flex;
+    justify-content: space-between;
+    position: relative;
+    min-width: 0;
+  }
+  .paradas::before, .paradas::after {
+    content: "";
+    position: absolute;
+    left: 13px;
+    top: 50%;
+    height: 3px;
+    transform: translateY(-50%);
+  }
+  .paradas::before { right: 13px; background: var(--line); }
+  .paradas::after { width: var(--progresso, 0%); max-width: calc(100% - 26px); background: var(--accent); transition: width 0.25s ease; }
+  .paradas li { position: relative; z-index: 1; }
+  .paradas button {
+    all: unset;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--ground);
+    border: 2px solid var(--line-strong);
+    font-family: var(--f-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+  }
+  .paradas button.passou { border-color: var(--accent); color: var(--accent); }
+  .paradas button[aria-current="step"] { background: var(--accent); border-color: var(--accent); color: var(--ground); }
+  .paradas button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (max-width: 520px) {
+    .paradas button { width: 20px; height: 20px; font-size: 9px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .paradas::after { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Marcadores de seta compartilhados por todos os diagramas. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <marker id="seta" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" class="m-tinta"/>
+    </marker>
+    <marker id="seta-ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" class="m-ac"/>
+    </marker>
+    <marker id="seta-rui" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" class="m-rui"/>
+    </marker>
+  </defs>
+</svg>
+
+<div class="deck">
+  <header class="topo">
+    <span class="marca">VAI<span>JUNTO</span></span>
+    <span id="rotulo">Capa</span>
+    <span class="teclas"><kbd>←</kbd> <kbd>→</kbd> navegar · <kbd>Home</kbd> índice · <kbd>T</kbd> tema</span>
+  </header>
+
+  <main>
+
+<!-- ============================ CAPA ============================ -->
+<section class="tela" data-rotulo="Capa">
+  <div class="quadro capa">
+    <p class="sobre">TEC502 · Concorrência e Conectividade · Problema 1</p>
+    <h1>VAI<span>JUNTO</span></h1>
+    <p class="sub">Sistema de caronas compartilhadas com servidor central e clientes motorista e passageiro conectados por socket TCP.</p>
+    <p class="autor">Solução desenvolvida por <b>Davi Zardo Motté</b></p>
+    <nav class="indice" aria-label="Índice dos itens do barema">
+      <button data-ir="1"><span class="num">1</span><span class="tit">Arquitetura</span><span class="dsc">Componentes, camadas e modelo de dados</span></button>
+      <button data-ir="2"><span class="num">2</span><span class="tit">Comunicação</span><span class="dsc">Sockets TCP e ciclo de vida da conexão</span></button>
+      <button data-ir="3"><span class="num">3</span><span class="tit">Protocolo</span><span class="dsc">Mensagens, fluxo e operações</span></button>
+      <button data-ir="4"><span class="num">4</span><span class="tit">Encapsulamento</span><span class="dsc">Formato, parsing e validação</span></button>
+      <button data-ir="5"><span class="num">5</span><span class="tit">Busca de itinerários</span><span class="dsc">Pernas, DFS e ordenação</span></button>
+      <button data-ir="6"><span class="num">6</span><span class="tit">Concorrência</span><span class="dsc">Goroutines e mutex único</span></button>
+      <button data-ir="7"><span class="num">7</span><span class="tit">Atomicidade da reserva</span><span class="dsc">Validar tudo, depois escrever</span></button>
+      <button data-ir="8"><span class="num">8</span><span class="tit">Interação</span><span class="dsc">Menus do motorista e do passageiro</span></button>
+      <button data-ir="9"><span class="num">9</span><span class="tit">Confiabilidade</span><span class="dsc">Falhas, timeouts e exceções</span></button>
+      <button data-ir="10"><span class="num">10</span><span class="tit">Testes</span><span class="dsc">Concorrência e invariantes</span></button>
+      <button data-ir="11"><span class="num">11</span><span class="tit">Emulação</span><span class="dsc">Docker em dois computadores</span></button>
+    </nav>
+  </div>
+</section>
+
+<!-- ============================ 1. ARQUITETURA ============================ -->
+<section class="tela" data-rotulo="1 · Arquitetura" hidden>
+  <div class="quadro">
+    <div class="cab">
+      <p class="sobre">Item 1 de 11</p>
+      <h2>Arquitetura</h2>
+      <p class="tese">Um servidor com todo o estado em memória, dois clientes de terminal e nenhum banco de dados.</p>
+    </div>
+
+    <div class="duas larga-dir">
+      <figure>
+        <svg class="dg" viewBox="0 0 560 400" role="img" aria-label="Os clientes motorista e passageiro falam com o servidor por TCP na porta 9000; o servidor é organizado em seis camadas, da conexão até o estado protegido pelo mutex.">
+          <rect x="0" y="100" width="150" height="52" rx="5" class="c-cx"/>
+          <text x="75" y="122" text-anchor="middle" class="tn">CLI motorista</text>
+          <text x="75" y="140" text-anchor="middle" class="tpm">cmd/motorista</text>
+          <rect x="0" y="240" width="150" height="52" rx="5" class="c-cx"/>
+          <text x="75" y="262" text-anchor="middle" class="tn">CLI passageiro</text>
+          <text x="75" y="280" text-anchor="middle" class="tpm">cmd/passageiro</text>
+
+          <path d="M150 126 L230 66" class="l" marker-start="url(#seta)" marker-end="url(#seta)"/>
+          <path d="M150 266 L230 66" class="l" marker-start="url(#seta)" marker-end="url(#seta)"/>
+          <text x="190" y="148" text-anchor="middle" class="tp">TCP</text>
+          <text x="190" y="162" text-anchor="middle" class="tp">:9000</text>
+
+          <rect x="210" y="4" width="346" height="392" rx="8" class="c-moldura"/>
+          <text x="383" y="27" text-anchor="middle" class="tn">servidor central</text>
+
+          <rect x="232" y="40" width="302" height="50" rx="4" class="c-cx"/>
+          <text x="248" y="62" class="tn">1 · Conexão</text>
+          <text x="248" y="80" class="tp">net.Listener · uma goroutine por cliente</text>
+          <rect x="232" y="98" width="302" height="50" rx="4" class="c-cx"/>
+          <text x="248" y="120" class="tn">2 · Enquadramento</text>
+          <text x="248" y="138" class="tp">linha terminada em \n · 64 KB · JSON ⇄ struct</text>
+          <rect x="232" y="156" width="302" height="50" rx="4" class="c-cx"/>
+          <text x="248" y="178" class="tn">3 · Sessão</text>
+          <text x="248" y="196" class="tp">quem está logado nesta conexão</text>
+          <rect x="232" y="214" width="302" height="50" rx="4" class="c-cx"/>
+          <text x="248" y="236" class="tn">4 · Roteamento</text>
+          <text x="248" y="254" class="tp">escolhe o tratador pelo tipo · erro → código</text>
+          <rect x="232" y="272" width="302" height="50" rx="4" class="c-cx"/>
+          <text x="248" y="294" class="tn">5 · Domínio</text>
+          <text x="248" y="312" class="tp">regras de negócio · não conhece a rede</text>
+          <rect x="232" y="330" width="302" height="50" rx="4" class="c-tra"/>
+          <text x="248" y="352" class="tn">6 · Estado</text>
+          <text x="248" y="370" class="tp">mapas em memória + sync.Mutex</text>
+        </svg>
+        <figcaption>A requisição desce pelas camadas até o estado; a resposta sobe pelo mesmo caminho. Os clientes não guardam estado de domínio: enviam requisições e mostram respostas.</figcaption>
+      </figure>
+
+      <div class="tabela">
+        <table>
+          <thead><tr><th>#</th><th>Camada</th><th>Função</th><th>Onde</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td><b>Conexão</b></td><td>Aceita conexões TCP e dá a cada cliente sua própria goroutine</td><td><code>servidor.go</code></td></tr>
+            <tr><td>2</td><td><b>Enquadramento</b></td><td>Separa o fluxo de bytes em mensagens por <code>\n</code>, aplica o limite de 64 KB e converte JSON ⇄ struct</td><td><code>protocolo/</code></td></tr>
+            <tr><td>3</td><td><b>Sessão</b></td><td>Guarda quem está logado <em>nesta</em> conexão e verifica autenticação e perfil</td><td><code>sessao.go</code></td></tr>
+            <tr><td>4</td><td><b>Roteamento</b></td><td>Escolhe o tratador pelo campo <code>tipo</code> e traduz erro de domínio em código do protocolo</td><td><code>roteador.go</code>, <code>erros.go</code></td></tr>
+            <tr><td>5</td><td><b>Domínio</b></td><td>Regras de negócio: validar carona, buscar, reservar, cancelar. Não conhece a rede</td><td><code>caronas.go</code>, <code>reservas.go</code></td></tr>
+            <tr><td>6</td><td><b>Estado</b></td><td>Guarda usuários, caronas e reservas; é o <b>único</b> lugar que trava o mutex</td><td><code>estado.go</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="duas larga-esq">
+      <figure class="painel">
+        <h3>Modelo de dados</h3>
+        <svg class="dg" viewBox="0 0 620 175" role="img" aria-label="A carona car-1 passa por Salvador, Feira de Santana e Jequié; tem dois trechos, cada um com seu preço e seu contador de assentos livres.">
+          <text x="0" y="18" class="tpm">car-1 · joao · Assentos = 3</text>
+          <line x1="60" y1="70" x2="560" y2="70" class="l-estrada"/>
+          <circle cx="60" cy="70" r="8" class="parada"/>
+          <circle cx="310" cy="70" r="8" class="parada"/>
+          <circle cx="560" cy="70" r="8" class="parada"/>
+          <text x="60" y="48" text-anchor="middle" class="tn">Salvador</text>
+          <text x="310" y="48" text-anchor="middle" class="tn">Feira de Santana</text>
+          <text x="560" y="48" text-anchor="middle" class="tn">Jequié</text>
+          <text x="60" y="98" text-anchor="middle" class="tm">06:00</text>
+          <text x="310" y="98" text-anchor="middle" class="tm">07:45</text>
+          <text x="560" y="98" text-anchor="middle" class="tm">10:45</text>
+          <text x="185" y="62" text-anchor="middle" class="tp">trecho t0</text>
+          <text x="435" y="62" text-anchor="middle" class="tp">trecho t1</text>
+          <text x="0" y="136" class="tp">PrecoTrecho[t]</text>
+          <text x="185" y="136" text-anchor="middle" class="tm">R$ 25,00</text>
+          <text x="435" y="136" text-anchor="middle" class="tm">R$ 35,00</text>
+          <text x="0" y="166" class="tp">Livres[t]</text>
+          <rect x="165" y="149" width="40" height="24" rx="3" class="c-ac"/>
+          <text x="185" y="166" text-anchor="middle" class="tn">2</text>
+          <rect x="415" y="149" width="40" height="24" rx="3" class="c-ac"/>
+          <text x="435" y="166" text-anchor="middle" class="tn">3</text>
+        </svg>
+      </figure>
+      <ul class="lista">
+        <li><b>Carona:</b> motorista, rota, horários, assentos, preço por trecho, livres por trecho, cancelada.</li>
+        <li><b>Rota:</b> sequência de cidades escolhida pelo motorista, com um horário por parada. As cidades vêm de um conjunto fixo de 4.</li>
+        <li><b>Trecho:</b> índice <code>t</code> entre <code>Rota[t]</code> e <code>Rota[t+1]</code>. N cidades → N−1 trechos.</li>
+        <li><b>Assento:</b> contador <code>Livres[t]</code> por trecho, sem numeração individual (D10).</li>
+        <li><b>Reserva:</b> lista de itens <code>{carona, de, ate}</code>; consome os trechos <code>[de, ate)</code>.</li>
+        <li><b>Estado:</b> 3 mapas em memória (usuários, caronas, reservas), carregados de <code>dados/*.json</code> no boot.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 2. COMUNICAÇÃO ============================ -->
+<section class="tela" data-rotulo="2 · Comunicação" hidden>
+  <div class="quadro">
+    <div class="cab">
+      <p class="sobre">Item 2 de 11</p>
+      <h2>Comunicação</h2>
+      <p class="tese">Socket TCP nativo da biblioteca padrão (<code>net</code>), com uma goroutine por cliente.</p>
+    </div>
+
+    <div class="duas larga-esq">
+      <figure>
+        <svg class="dg" viewBox="0 0 660 300" role="img" aria-label="O servidor escuta na porta 9000, aceita conexões em laço e cria uma goroutine por cliente; a goroutine guarda a sessão, lê, processa e responde em laço, e termina quando a conexão fecha.">
+          <rect x="30" y="16" width="240" height="44" rx="5" class="c-cx"/>
+          <text x="150" y="35" text-anchor="middle" class="tm">net.Listen("tcp",</text>
+          <text x="150" y="51" text-anchor="middle" class="tm">"0.0.0.0:9000")</text>
+          <path d="M150 60 V94" class="l" marker-end="url(#seta)"/>
+
+          <rect x="30" y="96" width="240" height="44" rx="5" class="c-cx"/>
+          <text x="150" y="123" text-anchor="middle" class="tn">laço Accept()</text>
+          <path d="M30 110 C 8 110, 8 128, 28 128" class="l" marker-end="url(#seta)"/>
+          <text x="150" y="158" text-anchor="middle" class="tp">volta a esperar o próximo cliente</text>
+
+          <path d="M150 168 V208" class="l-trac" marker-end="url(#seta)"/>
+          <text x="158" y="192" class="tp">erro</text>
+          <rect x="30" y="210" width="240" height="56" rx="5" class="c-tra"/>
+          <text x="150" y="233" text-anchor="middle" class="tn">falha no Accept</text>
+          <text x="150" y="252" text-anchor="middle" class="tp">log + nova tentativa em 100 ms</text>
+
+          <path d="M270 118 H336" class="l-ac" marker-end="url(#seta-ac)"/>
+          <text x="303" y="109" text-anchor="middle" class="tm t-ac">go</text>
+
+          <rect x="354" y="8" width="300" height="274" rx="6" class="c-sombra"/>
+          <rect x="347" y="12" width="300" height="274" rx="6" class="c-sombra"/>
+          <rect x="340" y="16" width="300" height="274" rx="6" class="c-cx"/>
+          <text x="490" y="40" text-anchor="middle" class="tm tn">atenderConexao(conn)</text>
+
+          <rect x="358" y="54" width="264" height="34" rx="4" class="c-ac"/>
+          <text x="490" y="76" text-anchor="middle">sessão = variável local</text>
+
+          <rect x="358" y="104" width="264" height="100" rx="4" class="c-trac"/>
+          <text x="612" y="120" text-anchor="end" class="tp">laço</text>
+          <text x="372" y="138">1. ler linha até \n</text>
+          <text x="372" y="162">2. sessão → roteador → domínio</text>
+          <text x="372" y="186">3. escrever resposta</text>
+
+          <path d="M490 204 V224" class="l" marker-end="url(#seta)"/>
+          <rect x="358" y="226" width="264" height="50" rx="4" class="c-rui"/>
+          <text x="490" y="247" text-anchor="middle" class="tn">EOF / RST → return</text>
+          <text x="490" y="265" text-anchor="middle" class="tp">conn.Close() · a sessão some junto</text>
+        </svg>
+        <figcaption>As caixas empilhadas representam várias goroutines simultâneas, uma por cliente conectado.</figcaption>
+      </figure>
+
+      <div class="coluna">
+        <div>
+          <h3>Chegada de um cliente</h3>
+          <p><code>Accept()</code> devolve a conexão e <code>go atenderConexao(conn)</code> cria a goroutine dedicada a ela. O terminal do servidor registra “conexão aberta”.</p>
+        </div>
+        <div>
+          <h3>Saída de um cliente</h3>
+          <p><code>LOGOUT</code> (opcional) e fechamento, ou queda abrupta (EOF/RST). Nos dois casos o laço termina, <code>defer conn.Close()</code> roda e a sessão, que era variável local, desaparece. Não há tabela para limpar; caronas e reservas permanecem.</p>
+        </div>
+        <div>
+          <h3>Por que TCP</h3>
+          <ul class="lista">
+            <li>Entrega confiável, em ordem e sem duplicação.</li>
+            <li>Conexão persistente: a conexão <b>é</b> a identidade do usuário (D08), então não existe token de sessão.</li>
+            <li>Com UDP seria preciso reimplementar retransmissão, ordenação e proteção contra um <code>RESERVAR</code> perdido ou duplicado.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Biblioteca de sockets</h3>
+          <p>Servidor: <code>net.Listen</code>, <code>Accept</code>, leitura por <code>bufio.Reader</code>, <code>conn.Write</code>, <code>SetWriteDeadline</code>. Cliente: <code>net.DialTimeout</code> e <code>SetDeadline</code>.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 3. PROTOCOLO ============================ -->
+<section class="tela" data-rotulo="3 · Protocolo" hidden>
+  <div class="quadro">
+    <div class="cab">
+      <p class="sobre">Item 3 de 11</p>
+      <h2>Protocolo (API remota)</h2>
+      <p class="tese">JSON, uma mensagem por linha, sempre requisição → resposta.</p>
+    </div>
+
+    <div class="duas">
+      <div class="coluna">
+        <div>
+          <h3>Formato</h3>
+          <p>Objeto JSON em UTF-8, em <b>uma única linha</b> terminada por <code>\n</code>, com no máximo <b>64 KB</b>. Porta padrão 9000.</p>
+        </div>
+        <div class="duas">
+          <div>
+            <pre class="codigo"><code><span class="env">requisição</span>
+{"id":"req-7",
+ "tipo":"LOGIN",
+ "dados":{...}}</code></pre>
+            <ul class="lista" style="font-size:.86em;margin-top:6px">
+              <li><code>id</code>: string não vazia, gerada pelo cliente, ecoada</li>
+              <li><code>tipo</code>: nome da operação</li>
+              <li><code>dados</code>: objeto (vazio se não há campos)</li>
+            </ul>
+          </div>
+          <div>
+            <pre class="codigo"><code><span class="rec">resposta</span>
+{"id":"req-7",
+ "status":"ERRO",
+ "codigo":"SEM_ASSENTO",
+ "mensagem":"...",
+ "dados":{...}}</code></pre>
+            <ul class="lista" style="font-size:.86em;margin-top:6px">
+              <li><code>status</code>: <code>OK</code> ou <code>ERRO</code></li>
+              <li><code>codigo</code> e <code>mensagem</code>: só em erro</li>
+              <li><code>dados</code>: sempre presente</li>
+            </ul>
+          </div>
+        </div>
+
+        <figure>
+          <svg class="dg" viewBox="0 0 480 340" role="img" aria-label="Fluxo da conexão: connect, LOGIN e resposta com o perfil, laço de operações com o id ecoado, LOGOUT opcional e fechamento.">
+            <rect x="20" y="4" width="110" height="30" rx="4" class="c-cx"/>
+            <text x="75" y="24" text-anchor="middle" class="tn">cliente</text>
+            <rect x="350" y="4" width="110" height="30" rx="4" class="c-cx"/>
+            <text x="405" y="24" text-anchor="middle" class="tn">servidor</text>
+            <line x1="75" y1="34" x2="75" y2="336" class="l-fina" stroke-dasharray="4 4"/>
+            <line x1="405" y1="34" x2="405" y2="336" class="l-fina" stroke-dasharray="4 4"/>
+
+            <path d="M75 62 H403" class="l" marker-end="url(#seta)"/>
+            <text x="240" y="56" text-anchor="middle" class="tp">TCP connect</text>
+            <path d="M75 98 H403" class="l-ac" marker-end="url(#seta-ac)"/>
+            <text x="240" y="92" text-anchor="middle" class="tm">LOGIN {usuario, senha}</text>
+            <path d="M405 128 H77" class="l-ac" marker-end="url(#seta-ac)"/>
+            <text x="240" y="122" text-anchor="middle" class="tm">OK {nome, perfil}</text>
+
+            <rect x="48" y="148" width="384" height="72" rx="4" class="c-trac"/>
+            <text x="424" y="162" text-anchor="end" class="tp">laço</text>
+            <path d="M75 178 H403" class="l" marker-end="url(#seta)"/>
+            <text x="240" y="172" text-anchor="middle" class="tm">operação {id:"n"}</text>
+            <path d="M405 208 H77" class="l" marker-end="url(#seta)"/>
+            <text x="240" y="202" text-anchor="middle" class="tm">resposta {id:"n"}</text>
+
+            <path d="M75 252 H403" class="l" marker-end="url(#seta)"/>
+            <text x="240" y="246" text-anchor="middle" class="tm">LOGOUT (opcional)</text>
+            <path d="M405 282 H77" class="l" marker-end="url(#seta)"/>
+            <text x="240" y="276" text-anchor="middle" class="tm">OK</text>
+            <path d="M75 318 H403" class="l" marker-end="url(#seta)"/>
+            <text x="240" y="312" text-anchor="middle" class="tp">TCP close</text>
+          </svg>
+        </figure>
+      </div>
+
+      <div class="coluna">
+        <div class="tabela">
+          <table>
+            <thead><tr><th>Operação</th><th>Perfil exigido</th></tr></thead>
+            <tbody>
+              <tr><td><code>PING</code> · <code>LOGIN</code></td><td>nenhum</td></tr>
+              <tr><td><code>LOGOUT</code></td><td>autenticado</td></tr>
+              <tr><td><code>PUBLICAR_CARONA</code> · <code>LISTAR_MINHAS_CARONAS</code></td><td>MOTORISTA</td></tr>
+              <tr><td><code>DETALHAR_CARONA</code> · <code>CANCELAR_CARONA</code></td><td>MOTORISTA, dono</td></tr>
+              <tr><td><code>BUSCAR_ITINERARIOS</code> · <code>RESERVAR</code> · <code>LISTAR_MINHAS_RESERVAS</code></td><td>PASSAGEIRO</td></tr>
+              <tr><td><code>CANCELAR_RESERVA</code></td><td>PASSAGEIRO, dono</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div>
+          <h3>Regras de sincronização</h3>
+          <ul class="lista">
+            <li>Uma requisição por vez: o cliente só envia a próxima depois de ler a resposta.</li>
+            <li>O servidor nunca envia mensagem sem ter sido solicitado.</li>
+            <li>O <code>id</code> volta ecoado e o cliente confere se bate.</li>
+            <li>Antes do <code>LOGIN</code>, só <code>LOGIN</code> e <code>PING</code>; o resto responde <code>NAO_AUTENTICADO</code>.</li>
+            <li><code>LOGIN</code> repetido responde <code>JA_AUTENTICADO</code>.</li>
+          </ul>
+        </div>
+
+        <div>
+          <h3>Exemplo: sessão da maria</h3>
+          <pre class="codigo"><code><span class="env">→</span> {"id":"1","tipo":"LOGIN","dados":{"usuario":"maria","senha":"abcd"}}
+<span class="rec">←</span> {"id":"1","status":"OK","dados":{"usuario":"maria","nome":"Maria Souza","perfil":"PASSAGEIRO"}}
+<span class="env">→</span> {"id":"2","tipo":"BUSCAR_ITINERARIOS","dados":{"origem":"Salvador","destino":"Vitória da Conquista","data":"2026-10-01"}}
+<span class="rec">←</span> {"id":"2","status":"OK","dados":{"itinerarios":[ … 4 opções … ]}}
+<span class="env">→</span> {"id":"3","tipo":"RESERVAR","dados":{"trechos":[{"carona_id":"car-1","de":0,"ate":1},{"carona_id":"car-4","de":0,"ate":1},{"carona_id":"car-2","de":0,"ate":1}]}}
+<span class="rec">←</span> {"id":"3","status":"ERRO","codigo":"SEM_ASSENTO","mensagem":"…","dados":{"carona_id":"car-4","indice_trecho":0}}
+<span class="env">→</span> {"id":"4","tipo":"RESERVAR","dados":{"trechos":[{"carona_id":"car-1","de":0,"ate":2},{"carona_id":"car-2","de":0,"ate":1}]}}
+<span class="rec">←</span> {"id":"4","status":"OK","dados":{"reserva_id":"res-91c","preco_total_centavos":10000}}
+<span class="env">→</span> {"id":"5","tipo":"LOGOUT","dados":{}}
+<span class="rec">←</span> {"id":"5","status":"OK","dados":{}}</code></pre>
+        </div>
+
+        <div>
+          <h3>Códigos de erro</h3>
+          <div class="grupo-fichas">
+            <span>Formato</span><div class="fichas"><span class="ficha">JSON_INVALIDO</span><span class="ficha">ENVELOPE_INVALIDO</span><span class="ficha">TIPO_DESCONHECIDO</span><span class="ficha">CAMPO_INVALIDO</span></div>
+            <span>Acesso</span><div class="fichas"><span class="ficha">NAO_AUTENTICADO</span><span class="ficha">JA_AUTENTICADO</span><span class="ficha">CREDENCIAIS_INVALIDAS</span><span class="ficha">PERFIL_INCORRETO</span><span class="ficha">NAO_E_DONO</span></div>
+            <span>Carona</span><div class="fichas"><span class="ficha">CIDADE_DESCONHECIDA</span><span class="ficha">ROTA_INVALIDA</span><span class="ficha">PARTIDA_INVALIDA</span><span class="ficha">CARONA_NAO_ENCONTRADA</span><span class="ficha">CARONA_CANCELADA</span></div>
+            <span>Reserva</span><div class="fichas"><span class="ficha">ITINERARIO_INVALIDO</span><span class="ficha">SEM_ASSENTO</span><span class="ficha">CONFLITO_HORARIO</span><span class="ficha">RESERVA_NAO_ENCONTRADA</span><span class="ficha">RESERVA_JA_CANCELADA</span><span class="ficha">PRAZO_CANCELAMENTO_EXPIRADO</span></div>
+            <span>Geral</span><div class="fichas"><span class="ficha">ERRO_INTERNO</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 4. ENCAPSULAMENTO ============================ -->
+<section class="tela" data-rotulo="4 · Encapsulamento" hidden>
+  <div class="quadro">
+    <div class="cab">
+      <p class="sobre">Item 4 de 11</p>
+      <h2>Encapsulamento</h2>
+      <p class="tese">Um contrato textual e independente de linguagem, validado em camadas.</p>
+    </div>
+
+    <figure>
+      <div class="tabela">
+        <svg class="dg" viewBox="0 0 890 190" role="img" aria-label="No envio, a struct vira JSON UTF-8, ganha o terminador de linha e vai para o socket. Na chegada, a linha é lida com limite de 64 KB, copiada, o envelope é decodificado em dois estágios, os dados viram struct, os campos são validados e só então o domínio é chamado." style="min-width:700px">
+          <text x="0" y="12" class="tpm">ENVIO</text>
+          <rect x="0" y="20" width="135" height="54" rx="4" class="c-cx"/>
+          <text x="67" y="43" text-anchor="middle" class="tn">struct Go</text>
+          <text x="67" y="61" text-anchor="middle" class="tpm">Requisicao{…}</text>
+          <path d="M135 47 H148" class="l" marker-end="url(#seta)"/>
+          <rect x="150" y="20" width="135" height="54" rx="4" class="c-cx"/>
+          <text x="217" y="43" text-anchor="middle" class="tn tm">json.Marshal</text>
+          <text x="217" y="61" text-anchor="middle" class="tp">texto UTF-8</text>
+          <path d="M285 47 H298" class="l" marker-end="url(#seta)"/>
+          <rect x="300" y="20" width="135" height="54" rx="4" class="c-cx"/>
+          <text x="367" y="43" text-anchor="middle" class="tn tm">+ '\n'</text>
+          <text x="367" y="61" text-anchor="middle" class="tp">1 mensagem = 1 linha</text>
+          <path d="M435 47 H448" class="l" marker-end="url(#seta)"/>
+          <rect x="450" y="20" width="135" height="54" rx="4" class="c-cx"/>
+          <text x="517" y="43" text-anchor="middle" class="tn tm">conn.Write</text>
+          <text x="517" y="61" text-anchor="middle" class="tp">socket TCP</text>
+
+          <path d="M517 74 V95 H67 V114" class="l-ac" marker-end="url(#seta-ac)"/>
+          <text x="292" y="89" text-anchor="middle" class="tp t-ac">rede</text>
+
+          <text x="890" y="108" text-anchor="end" class="tpm">CHEGADA</text>
+          <rect x="0" y="116" width="135" height="62" rx="4" class="c-cx"/>
+          <text x="67" y="142" text-anchor="middle" class="tn tm">ReadSlice('\n')</text>
+          <text x="67" y="161" text-anchor="middle" class="tp">buffer 64 KB + 1</text>
+          <path d="M135 147 H148" class="l" marker-end="url(#seta)"/>
+          <rect x="150" y="116" width="135" height="62" rx="4" class="c-cx"/>
+          <text x="217" y="142" text-anchor="middle" class="tn">cópia da fatia</text>
+          <text x="217" y="161" text-anchor="middle" class="tp">o buffer é reusado</text>
+          <path d="M285 147 H298" class="l" marker-end="url(#seta)"/>
+          <rect x="300" y="116" width="135" height="62" rx="4" class="c-ac"/>
+          <text x="367" y="142" text-anchor="middle" class="tn">envelope bruto</text>
+          <text x="367" y="161" text-anchor="middle" class="tp">id → tipo → dados</text>
+          <path d="M435 147 H448" class="l" marker-end="url(#seta)"/>
+          <rect x="450" y="116" width="135" height="62" rx="4" class="c-cx"/>
+          <text x="517" y="142" text-anchor="middle" class="tn">dados → struct</text>
+          <text x="517" y="161" text-anchor="middle" class="tpm">json.Unmarshal</text>
+          <path d="M585 147 H598" class="l" marker-end="url(#seta)"/>
+          <rect x="600" y="116" width="135" height="62" rx="4" class="c-cx"/>
+          <text x="667" y="142" text-anchor="middle" class="tn">valida campos</text>
+          <text x="667" y="161" text-anchor="middle" class="tp">tipo, faixa, presença</text>
+          <path d="M735 147 H748" class="l" marker-end="url(#seta)"/>
+          <rect x="750" y="116" width="135" height="62" rx="4" class="c-tra"/>
+          <text x="817" y="142" text-anchor="middle" class="tn">domínio</text>
+          <text x="817" y="161" text-anchor="middle" class="tpm">estado.Reservar…</text>
+        </svg>
+      </div>
+      <figcaption>O mesmo pacote <code>internal/protocolo</code> faz o envio e a chegada nos dois lados; o contrato real é o JSON documentado, então um cliente em outra linguagem interopera.</figcaption>
+    </figure>
+
+    <div class="duas">
+      <div class="coluna">
+        <div class="tabela">
+          <table>
+            <thead><tr><th>Conceito</th><th>Representação</th><th>Exemplo</th></tr></thead>
+            <tbody>
+              <tr><td>Instante</td><td>RFC 3339 com fuso</td><td><code>2026-10-01T06:00:00-03:00</code></td></tr>
+              <tr><td>Data da busca</td><td><code>AAAA-MM-DD</code></td><td><code>2026-10-01</code></td></tr>
+              <tr><td>Dinheiro</td><td>inteiro em centavos</td><td><code>10000</code> = R$ 100,00</td></tr>
+              <tr><td>Cidade</td><td>grafia canônica</td><td><code>Vitória da Conquista</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul class="lista">
+          <li>Nada de <code>float</code> (arredondamento) nem de fuso implícito (máquinas em fusos diferentes).</li>
+          <li><b><code>\n</code> é um delimitador seguro:</b> o JSON escapa quebras de linha dentro de strings como <code>\</code> + <code>n</code>.</li>
+          <li><b>64 KB + 1:</b> o estouro é detectado por <code>bufio.ErrBufferFull</code> sem consumir memória; a fatia é copiada porque aponta para o buffer interno.</li>
+          <li><b>Dois estágios:</b> o <code>id</code> é lido antes de validar o resto, para ecoá-lo mesmo na resposta de erro.</li>
+        </ul>
+      </div>
+      <div class="coluna">
+        <div class="tabela">
+          <table>
+            <thead><tr><th>Entrada ruim</th><th>Resposta</th><th>Conexão</th></tr></thead>
+            <tbody>
+              <tr><td>Linha vazia</td><td>ignorada</td><td class="ok">segue</td></tr>
+              <tr><td>Não é JSON</td><td><code>JSON_INVALIDO</code></td><td class="ok">segue</td></tr>
+              <tr><td>Envelope inválido</td><td><code>ENVELOPE_INVALIDO</code> com o <code>id</code> ecoado</td><td class="ok">segue</td></tr>
+              <tr><td>Campo ausente, de tipo errado ou fora de faixa</td><td><code>CAMPO_INVALIDO</code></td><td class="ok">segue</td></tr>
+              <tr><td>Tipo inexistente</td><td><code>TIPO_DESCONHECIDO</code></td><td class="ok">segue</td></tr>
+              <tr><td>Linha &gt; 64 KB</td><td>nenhuma</td><td class="nao">encerrada</td></tr>
+              <tr><td>EOF no meio da linha</td><td>fragmento descartado</td><td class="nao">encerrada</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="destaque">Erros de domínio são <b>sentinelas</b> (<code>dominio.ErrSemAssento</code>) sem texto de protocolo. <b>Uma única tabela</b> em <code>internal/servidor</code> os traduz para <code>SEM_ASSENTO</code>; sentinela sem entrada vira <code>ERRO_INTERNO</code>, e um teste confere que todos têm entrada.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 5. BUSCA ============================ -->
+<section class="tela" data-rotulo="5 · Busca de itinerários" hidden>
+  <div class="quadro">
+    <div class="cab">
+      <p class="sobre">Item 5 de 11</p>
+      <h2>Busca de itinerários</h2>
+      <p class="tese">Gerar pernas, buscar em profundidade com regras de encadeamento, ordenar e cortar em 10.</p>
+    </div>
+
+    <div class="duas">
+      <dl class="glossario">
+        <dt>Trecho</dt><dd>Entre duas paradas consecutivas de uma carona. É onde se contam os assentos.</dd>
+        <dt>Perna</dt><dd>Parte da viagem feita num <b>mesmo carro</b>: embarca numa parada e desce numa mais à frente, usando todos os trechos entre elas, sem pular nenhum (segmento contíguo).</dd>
+        <dt>Baldeação</dt><dd>Troca de carro: <code>pernas − 1</code>.</dd>
+        <dt>DFS</dt><dd><em>Depth-First Search</em>, busca em profundidade: segue um caminho até o fim, depois volta um passo e tenta a próxima alternativa.</dd>
+      </dl>
+      <figure>
+        <svg class="dg" viewBox="0 0 560 160" role="img" aria-label="A carona car-1 com três paradas gera três pernas possíveis: Salvador a Feira, Feira a Jequié e Salvador a Jequié.">
+          <path d="M40 98 Q280 -26 520 98" class="l-ac"/>
+          <text x="280" y="26" text-anchor="middle" class="tp t-ac">perna Salvador → Jequié (t0 + t1)</text>
+          <path d="M40 102 Q160 58 280 102" class="l-ac"/>
+          <text x="160" y="98" text-anchor="middle" class="tp t-ac">Salvador → Feira</text>
+          <path d="M280 102 Q400 58 520 102" class="l-ac"/>
+          <text x="400" y="98" text-anchor="middle" class="tp t-ac">Feira → Jequié</text>
+          <line x1="40" y1="110" x2="520" y2="110" class="l-estrada"/>
+          <circle cx="40" cy="110" r="7" class="parada"/>
+          <circle cx="280" cy="110" r="7" class="parada"/>
+          <circle cx="520" cy="110" r="7" class="parada"/>
+          <text x="160" y="127" text-anchor="middle" class="tp">t0</text>
+          <text x="400" y="127" text-anchor="middle" class="tp">t1</text>
+          <text x="40" y="146" text-anchor="middle" class="tn">Salvador</text>
+          <text x="280" y="146" text-anchor="middle" class="tn">Feira de Santana</text>
+          <text x="520" y="146" text-anchor="middle" class="tn">Jequié</text>
+        </svg>
+        <figcaption>car-1 gera 3 pernas. Com k paradas, no máximo k(k−1)/2. Perna que atravessa trecho sem assento não é gerada.</figcaption>
+      </figure>
+    </div>
+
+    <div class="quatro">
+      <div class="passo">
+        <span class="n">passo 1</span><b>Validar</b>
+        <p>Origem e destino pertencem às 4 cidades atendidas, e são diferentes.</p>
+      </div>
+      <div class="passo">
+        <span class="n">passo 2</span><b>Gerar pernas</b>
+        <p>Para cada carona ativa, todo par (embarque, desembarque) cujos trechos tenham assento livre.</p>
+      </div>
+      <div class="passo">
+        <span class="n">passo 3</span><b>Busca em profundidade</b>
+        <p>Uma perna só encaixa se:</p>
+        <ul class="lista">
+          <li>1ª perna: sai na data pedida;</li>
+          <li>baldeação entre <b>30 min</b> e <b>12 h</b>;</li>
+          <li>a carona ainda não está no itinerário;</li>
+          <li>não passa por cidade já visitada.</li>
+        </ul>
+      </div>
+      <div class="passo">
+        <span class="n">passo 4</span><b>Ordenar e limitar</b>
+        <p>Menos trocas → menor preço → chegada mais cedo → desempate fixo. Máximo de <b>10</b>, cortados depois de ordenar.</p>
+      </div>
+    </div>
+
+    <div class="duas">
+      <div class="painel">
+        <h3>Árvore da DFS · Salvador → V. Conquista · 01/10</h3>
+        <ul class="arvore">
+          <li><span class="raiz">Salvador</span>
+            <ul>
+              <li><span class="car">car-1</span> → Feira de Santana (chega 07:45)
+                <ul>
+                  <li><span class="car">car-3</span> → V. Conquista (sai 09:30) <span class="ok">✔ #2</span></li>
+                  <li><span class="car">car-4</span> → Jequié (08:15 → 11:15)
+                    <ul>
+                      <li><span class="car">car-2</span> → V. Conquista (sai 12:15) <span class="ok">✔ #4</span></li>
+                    </ul>
+                  </li>
+                  <li><span class="car">car-8</span> → Salvador <span class="nao">✘</span> <span class="motivo">cidade já visitada</span></li>
+                  <li><span class="car">car-7</span> → … (02/10 07:45) <span class="nao">✘</span> <span class="motivo">espera de 24 h</span></li>
+                </ul>
+              </li>
+              <li><span class="car">car-1</span> → Jequié (chega 10:45)
+                <ul>
+                  <li><span class="car">car-2</span> → V. Conquista (sai 12:15) <span class="ok">✔ #3</span></li>
+                  <li><span class="car">car-6</span> → V. Conquista (sai 11:00) <span class="nao">✘</span> <span class="motivo">folga de 15 min</span></li>
+                </ul>
+              </li>
+              <li><span class="car">car-5</span> → V. Conquista (10:30 → 17:30) <span class="ok">✔ #1</span></li>
+              <li><span class="car">car-7</span> → … (02/10) <span class="nao">✘</span> <span class="motivo">1ª perna fora da data</span></li>
+            </ul>
+          </li>
+        </ul>
+      </div>
+      <div class="coluna">
+        <div class="tabela">
+          <table>
+            <thead><tr><th>#</th><th>Itinerário</th><th>Trocas</th><th>Preço</th><th>Horário</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td>car-5</td><td>0</td><td>R$ 110,00</td><td>10:30 → 17:30</td></tr>
+              <tr><td>2</td><td>car-1 + car-3</td><td>1</td><td>R$ 80,00</td><td>06:00 → 16:45</td></tr>
+              <tr><td>3</td><td>car-1 + car-2</td><td>1</td><td>R$ 100,00</td><td>06:00 → 14:30</td></tr>
+              <tr><td>4</td><td>car-1 + car-4 + car-2</td><td>2</td><td>R$ 95,00</td><td>06:00 → 14:30</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul class="lista">
+          <li><b>#1 antes de todos</b>, mesmo sendo o mais caro: menos trocas vem antes de preço.</li>
+          <li><b>#2 antes de #3</b>, mesmo chegando mais tarde: preço vem antes de chegada.</li>
+          <li><b>#4 por último</b>, mesmo mais barato que #1 e #3: tem duas trocas.</li>
+        </ul>
+        <p class="destaque">A busca <b>não reserva nada</b>: só lê <code>Livres</code> para podar. A reserva refaz toda a validação, com as <b>mesmas constantes</b> de margem.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 6. CONCORRÊNCIA ============================ -->
+<section class="tela" data-rotulo="6 · Concorrência" hidden>
+  <div class="quadro">
+    <div class="cab">
+      <p class="sobre">Item 6 de 11</p>
+      <h2>Concorrência</h2>
+      <p class="tese">Muitas goroutines e um único mutex protegendo o estado.</p>
+    </div>
+
+    <div class="duas larga-esq">
+      <figure>
+        <svg class="dg" viewBox="0 0 600 290" role="img" aria-label="Goroutines de vários clientes passam por um único sync.Mutex para chegar ao estado; ler e escrever no socket acontece fora do lock.">
+          <rect x="0" y="6" width="170" height="250" rx="6" class="c-trac"/>
+          <rect x="16" y="22" width="138" height="34" rx="4" class="c-ac"/>
+          <text x="85" y="44" text-anchor="middle">goroutine · maria</text>
+          <rect x="16" y="70" width="138" height="34" rx="4" class="c-ac"/>
+          <text x="85" y="92" text-anchor="middle">goroutine · pedro</text>
+          <rect x="16" y="118" width="138" height="34" rx="4" class="c-ac"/>
+          <text x="85" y="140" text-anchor="middle">goroutine · lucia</text>
+          <rect x="16" y="166" width="138" height="34" rx="4" class="c-ac"/>
+          <text x="85" y="188" text-anchor="middle">goroutine · joao</text>
+          <text x="85" y="228" text-anchor="middle" class="tn">…</text>
+          <text x="85" y="278" text-anchor="middle" class="tp">socket: fora do lock</text>
+
+          <path d="M154 39 L268 116" class="l" marker-end="url(#seta)"/>
+          <path d="M154 87 L268 124" class="l" marker-end="url(#seta)"/>
+          <path d="M154 135 L268 134" class="l" marker-end="url(#seta)"/>
+          <path d="M154 183 L268 144" class="l" marker-end="url(#seta)"/>
+
+          <rect x="270" y="100" width="120" height="60" rx="5" class="c-tra"/>
+          <text x="330" y="126" text-anchor="middle" class="tm tn">sync.Mutex</text>
+          <text x="330" y="146" text-anchor="middle" class="tp">uma por vez</text>
+          <text x="330" y="184" text-anchor="middle" class="tp">só estado.go trava</text>
+
+          <path d="M390 130 H436" class="l" marker-end="url(#seta)"/>
+          <text x="413" y="121" text-anchor="middle" class="tpm">Lock()</text>
+
+          <rect x="438" y="70" width="160" height="120" rx="5" class="c-cx"/>
+          <text x="518" y="98" text-anchor="middle" class="tn">Estado</text>
+          <text x="518" y="124" text-anchor="middle" class="tp">usuários</text>
+          <text x="518" y="144" text-anchor="middle" class="tp">caronas</text>
+          <text x="518" y="164" text-anchor="middle" class="tp">reservas</text>
+        </svg>
+      </figure>
+      <div class="coluna">
+        <h3>Proteção do estado</h3>
+        <ul class="lista">
+          <li><b>Um mutex global (D04):</b> a solução correta mais simples para nunca vender o mesmo assento duas vezes.</li>
+          <li><b>Só <code>estado.go</code> chama <code>Lock()</code> (D05):</b> cada método trava, chama a regra e libera com <code>defer</code>. As regras de domínio nunca travam, então não há reentrância.</li>
+          <li><b>Os métodos devolvem cópias:</b> nada sai da seção crítica apontando para dentro do estado.</li>
+          <li><b>A sessão é local da goroutine:</b> ninguém mais a alcança, então não precisa de sincronização.</li>
+          <li><b>I/O fora do lock:</b> ler e escrever no socket não segura o mutex; um cliente lento não trava os demais.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="duas larga-esq">
+      <figure>
+        <svg class="dg" viewBox="0 0 640 280" role="img" aria-label="Escalonador M:N do Go: muitas goroutines são distribuídas entre poucos processadores lógicos e threads do sistema; goroutines esperando dado no socket ficam estacionadas no netpoller e acordam quando o dado chega.">
+          <text x="10" y="16" class="tp">G · goroutines (uma por conexão)</text>
+          <line x1="24" y1="55" x2="53" y2="110" class="l-fina"/>
+          <line x1="64" y1="55" x2="53" y2="110" class="l-fina"/>
+          <line x1="104" y1="55" x2="155" y2="110" class="l-fina"/>
+          <line x1="144" y1="55" x2="155" y2="110" class="l-fina"/>
+          <line x1="184" y1="55" x2="155" y2="110" class="l-fina"/>
+          <line x1="224" y1="55" x2="257" y2="110" class="l-fina"/>
+          <line x1="264" y1="55" x2="257" y2="110" class="l-fina"/>
+          <line x1="304" y1="55" x2="359" y2="110" class="l-fina"/>
+          <line x1="344" y1="55" x2="359" y2="110" class="l-fina"/>
+          <line x1="384" y1="55" x2="359" y2="110" class="l-fina"/>
+          <circle cx="24" cy="44" r="11" class="c-ac"/>
+          <circle cx="64" cy="44" r="11" class="c-ac"/>
+          <circle cx="104" cy="44" r="11" class="c-ac"/>
+          <circle cx="144" cy="44" r="11" class="c-ac"/>
+          <circle cx="184" cy="44" r="11" class="c-ac"/>
+          <circle cx="224" cy="44" r="11" class="c-ac"/>
+          <circle cx="264" cy="44" r="11" class="c-ac"/>
+          <circle cx="304" cy="44" r="11" class="c-ac"/>
+          <circle cx="344" cy="44" r="11" class="c-ac"/>
+          <circle cx="384" cy="44" r="11" class="c-ac"/>
+
+          <rect x="10" y="110" width="86" height="38" rx="4" class="c-cx"/>
+          <text x="53" y="134" text-anchor="middle" class="tm">P0</text>
+          <rect x="112" y="110" width="86" height="38" rx="4" class="c-cx"/>
+          <text x="155" y="134" text-anchor="middle" class="tm">P1</text>
+          <rect x="214" y="110" width="86" height="38" rx="4" class="c-cx"/>
+          <text x="257" y="134" text-anchor="middle" class="tm">P2</text>
+          <rect x="316" y="110" width="86" height="38" rx="4" class="c-cx"/>
+          <text x="359" y="134" text-anchor="middle" class="tm">P3</text>
+
+          <line x1="53" y1="148" x2="53" y2="190" class="l"/>
+          <line x1="155" y1="148" x2="155" y2="190" class="l"/>
+          <line x1="257" y1="148" x2="257" y2="190" class="l"/>
+          <line x1="359" y1="148" x2="359" y2="190" class="l"/>
+
+          <rect x="10" y="190" width="86" height="38" rx="4" class="c-tra"/>
+          <text x="53" y="214" text-anchor="middle" class="tp">thread SO</text>
+          <rect x="112" y="190" width="86" height="38" rx="4" class="c-tra"/>
+          <text x="155" y="214" text-anchor="middle" class="tp">thread SO</text>
+          <rect x="214" y="190" width="86" height="38" rx="4" class="c-tra"/>
+          <text x="257" y="214" text-anchor="middle" class="tp">thread SO</text>
+          <rect x="316" y="190" width="86" height="38" rx="4" class="c-tra"/>
+          <text x="359" y="214" text-anchor="middle" class="tp">thread SO</text>
+          <text x="206" y="254" text-anchor="middle" class="tp">P · processador lógico (1 por núcleo) · M · threads do SO (poucas)</text>
+
+          <path d="M400 36 H466" class="l" marker-end="url(#seta)"/>
+          <text x="433" y="28" text-anchor="middle" class="tp">estaciona</text>
+          <path d="M466 56 H400" class="l-ac" marker-end="url(#seta-ac)"/>
+          <text x="433" y="72" text-anchor="middle" class="tp t-ac">acorda</text>
+
+          <rect x="468" y="16" width="168" height="214" rx="6" class="c-cx"/>
+          <text x="552" y="42" text-anchor="middle" class="tn">netpoller</text>
+          <text x="552" y="60" text-anchor="middle" class="tpm">(epoll no Linux)</text>
+          <circle cx="514" cy="100" r="11" class="c-trac"/>
+          <circle cx="552" cy="100" r="11" class="c-trac"/>
+          <circle cx="590" cy="100" r="11" class="c-trac"/>
+          <text x="552" y="140" text-anchor="middle" class="tp">goroutines esperando</text>
+          <text x="552" y="158" text-anchor="middle" class="tp">dado no socket,</text>
+          <text x="552" y="176" text-anchor="middle" class="tp">sem ocupar thread</text>
+        </svg>
+        <figcaption>Um <code>conn.Read</code> sem dado estaciona a goroutine e libera a thread; quando o dado chega, o epoll avisa e ela volta para a fila.</figcaption>
+      </figure>
+      <div class="coluna">
+        <h3>Mecanismos de desempenho</h3>
+        <ul class="lista">
+          <li><b>Problema clássico:</b> thread do SO é cara (pilha de MB, troca pelo kernel). Por isso existem <em>thread pool</em> e multiplexação de I/O (<code>select</code>/<code>epoll</code>).</li>
+          <li><b>Goroutine:</b> pilha começa com cerca de 2 KB e a troca entre goroutines acontece em espaço de usuário, sem passar pelo kernel.</li>
+          <li><b>Escalonador M:N:</b> muitas goroutines rodam sobre poucas threads do SO; o runtime já funciona como um thread pool embutido.</li>
+          <li><b>Netpoller (epoll):</b> um <code>Read</code> sem dado estaciona a goroutine e libera a thread. O código tem cara de bloqueante, e por baixo é I/O multiplexado.</li>
+        </ul>
+        <p class="destaque">Resultado: a simplicidade de “uma thread por conexão” com a eficiência de <em>pool + epoll</em>. Um pool próprio só duplicaria o runtime. Quem espera o mutex também é estacionado, sem prender thread.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 7. ATOMICIDADE ============================ -->
+<section class="tela" data-rotulo="7 · Atomicidade da reserva" hidden>
+  <div class="quadro">
+    <div class="cab">
+      <p class="sobre">Item 7 de 11</p>
+      <h2>Atomicidade da reserva</h2>
+      <p class="tese">Validar tudo primeiro e escrever depois, dentro de uma única seção crítica.</p>
+    </div>
+
+    <div class="duas larga-dir">
+      <figure>
+        <svg class="dg" viewBox="0 0 520 420" role="img" aria-label="Fluxo da reserva: Lock, quatro passos que só verificam, e qualquer falha responde erro sem escrever nada; se tudo passa, o commit decrementa os assentos e cria a reserva; Unlock por defer no final.">
+          <rect x="110" y="0" width="230" height="36" rx="5" class="c-tra"/>
+          <text x="225" y="23" text-anchor="middle" class="tm tn">Lock()</text>
+          <path d="M225 36 V54" class="l" marker-end="url(#seta)"/>
+
+          <rect x="110" y="56" width="230" height="44" rx="4" class="c-cx"/>
+          <text x="225" y="75" text-anchor="middle" class="tn">1 · formato</text>
+          <text x="225" y="92" text-anchor="middle" class="tp">caronas existem e ativas, índices válidos</text>
+          <path d="M225 100 V114" class="l" marker-end="url(#seta)"/>
+          <rect x="110" y="116" width="230" height="44" rx="4" class="c-cx"/>
+          <text x="225" y="135" text-anchor="middle" class="tn">2 · encadeamento</text>
+          <text x="225" y="152" text-anchor="middle" class="tp">mesma cidade, 30 min–12 h, sem repetir</text>
+          <path d="M225 160 V174" class="l" marker-end="url(#seta)"/>
+          <rect x="110" y="176" width="230" height="44" rx="4" class="c-cx"/>
+          <text x="225" y="195" text-anchor="middle" class="tn">3 · assentos</text>
+          <text x="225" y="212" text-anchor="middle" class="tp">Livres[t] ≥ 1 em todo trecho</text>
+          <path d="M225 220 V234" class="l" marker-end="url(#seta)"/>
+          <rect x="110" y="236" width="230" height="44" rx="4" class="c-cx"/>
+          <text x="225" y="255" text-anchor="middle" class="tn">4 · conflito de horário</text>
+          <text x="225" y="272" text-anchor="middle" class="tp">sem sobrepor outra reserva ativa</text>
+
+          <text x="100" y="172" text-anchor="end" class="tp">só verificam</text>
+          <line x1="104" y1="60" x2="104" y2="276" class="l-fina"/>
+
+          <path d="M340 78 H378" class="l-rui" marker-end="url(#seta-rui)"/>
+          <path d="M340 138 H378" class="l-rui" marker-end="url(#seta-rui)"/>
+          <path d="M340 198 H378" class="l-rui" marker-end="url(#seta-rui)"/>
+          <path d="M340 258 H378" class="l-rui" marker-end="url(#seta-rui)"/>
+          <text x="359" y="72" text-anchor="middle" class="tp t-rui">falha</text>
+          <rect x="380" y="56" width="136" height="224" rx="5" class="c-rui"/>
+          <text x="448" y="150" text-anchor="middle" class="tn">5 · recusa</text>
+          <text x="448" y="170" text-anchor="middle" class="tp">resposta de erro</text>
+          <text x="448" y="188" text-anchor="middle" class="tp t-rui tn">nada foi escrito</text>
+
+          <path d="M225 280 V298" class="l-ac" marker-end="url(#seta-ac)"/>
+          <text x="233" y="293" class="tp t-ac">tudo ok</text>
+          <rect x="110" y="300" width="230" height="50" rx="5" class="c-ac"/>
+          <text x="225" y="321" text-anchor="middle" class="tn">6 · commit</text>
+          <text x="225" y="339" text-anchor="middle" class="tp">decrementa Livres + cria a reserva</text>
+          <text x="100" y="330" text-anchor="end" class="tp">só escreve</text>
+
+          <path d="M225 350 V374" class="l" marker-end="url(#seta)"/>
+          <rect x="110" y="376" width="230" height="36" rx="5" class="c-tra"/>
+          <text x="225" y="399" text-anchor="middle" class="tm tn">Unlock() · defer</text>
+          <path d="M448 280 V394 H342" class="l-rui" marker-end="url(#seta-rui)"/>
+        </svg>
+      </figure>
+
+      <div class="coluna">
+        <div>
+          <h3>Último trecho indisponível</h3>
+          <p>Itinerário <code>car-1 → car-4 → car-2</code> com car-4 sem assento: o passo 3 responde <code>SEM_ASSENTO</code> no trecho de car-4, e car-1, que tinha assento, <b>continua intacta</b>.</p>
+          <p>Como nada foi escrito antes da validação terminar, não há rollback (desfazer as escritas já feitas para voltar ao estado anterior) nem compensação.</p>
+        </div>
+        <div>
+          <h3>Aquisição e liberação das travas</h3>
+          <ul class="lista">
+            <li><b>Um único mutex</b>, adquirido uma vez no início de <code>Estado.Reservar</code>.</li>
+            <li>Liberado por <code>defer</code> ao sair, em sucesso, erro ou pânico.</li>
+            <li><b>Não existe trava por trecho</b> nem por carona.</li>
+            <li>O cancelamento de carona segue a mesma regra: marca a carona, cancela as reservas afetadas e devolve os assentos de todos os trechos delas, inclusive de outras caronas, na mesma seção crítica.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <figure class="painel">
+      <h3>Por que não há deadlock</h3>
+      <svg class="dg" viewBox="0 0 660 230" role="img" aria-label="Comparação: com travas por trecho, P1 segura A e espera B enquanto P2 segura B e espera A, formando um ciclo; com o mutex único, P1 segura o mutex e P2 apenas espera na fila, sem ciclo possível." style="max-width:860px">
+          <text x="160" y="18" text-anchor="middle" class="tn">travas por trecho (não adotado)</text>
+          <rect x="20" y="44" width="90" height="36" rx="4" class="c-cx"/>
+          <text x="65" y="67" text-anchor="middle" class="tn">P1</text>
+          <rect x="20" y="150" width="90" height="36" rx="4" class="c-cx"/>
+          <text x="65" y="173" text-anchor="middle" class="tn">P2</text>
+          <rect x="210" y="44" width="90" height="36" rx="4" class="c-tra"/>
+          <text x="255" y="67" text-anchor="middle">trava A</text>
+          <rect x="210" y="150" width="90" height="36" rx="4" class="c-tra"/>
+          <text x="255" y="173" text-anchor="middle">trava B</text>
+          <path d="M210 62 H112" class="l" marker-end="url(#seta)"/>
+          <text x="160" y="55" text-anchor="middle" class="tp">segura</text>
+          <path d="M210 168 H112" class="l" marker-end="url(#seta)"/>
+          <text x="160" y="162" text-anchor="middle" class="tp">segura</text>
+          <path d="M110 82 L210 148" class="l-rui" marker-end="url(#seta-rui)"/>
+          <path d="M110 148 L210 82" class="l-rui" marker-end="url(#seta-rui)"/>
+          <text x="306" y="119" text-anchor="end" class="tp t-rui tn">espera circular</text>
+          <text x="160" y="220" text-anchor="middle" class="tp t-rui">P1 espera P2 e P2 espera P1 → deadlock</text>
+
+          <line x1="330" y1="10" x2="330" y2="222" class="l-fina"/>
+
+          <text x="495" y="18" text-anchor="middle" class="tn">mutex único (VAIJUNTO)</text>
+          <rect x="360" y="44" width="90" height="36" rx="4" class="c-cx"/>
+          <text x="405" y="67" text-anchor="middle" class="tn">P1</text>
+          <rect x="360" y="150" width="90" height="36" rx="4" class="c-cx"/>
+          <text x="405" y="173" text-anchor="middle" class="tn">P2</text>
+          <rect x="540" y="97" width="110" height="40" rx="4" class="c-tra"/>
+          <text x="595" y="122" text-anchor="middle" class="tm">sync.Mutex</text>
+          <path d="M540 106 L452 68" class="l" marker-end="url(#seta)"/>
+          <text x="500" y="72" text-anchor="middle" class="tp">segura</text>
+          <path d="M452 162 L538 128" class="l-trac" marker-end="url(#seta)"/>
+          <text x="505" y="170" text-anchor="middle" class="tp">espera na fila</text>
+          <text x="495" y="220" text-anchor="middle" class="tp t-ac tn">um só recurso → não existe ciclo</text>
+      </svg>
+      <figcaption>Deadlock exige espera circular, e ela só acontece com dois ou mais recursos adquiridos em ordens diferentes. Com um só mutex, o deadlock é impossível por construção, qualquer que seja a ordem dos trechos no itinerário.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================ 8. INTERAÇÃO ============================ -->
+<section class="tela" data-rotulo="8 · Interação" hidden>
+  <div class="quadro">
+    <div class="cab">
+      <p class="sobre">Item 8 de 11</p>
+      <h2>Interação</h2>
+      <p class="tese">Menus numéricos no terminal e uma conexão TCP por sessão: <code>LOGIN</code> ao entrar, <code>LOGOUT</code> ao sair (D15).</p>
+    </div>
+
+    <div class="duas">
+      <div class="painel">
+        <h3>Cliente motorista</h3>
+        <div class="tabela">
+          <table>
+            <tbody>
+              <tr><td><b>1</b></td><td><b>Publicar carona</b></td><td>cidades escolhidas em menu, na ordem de passagem; horário de cada parada; assentos; preço de cada trecho</td></tr>
+              <tr><td><b>2</b></td><td><b>Minhas caronas</b></td><td>rota, horários e livres por trecho</td></tr>
+              <tr><td><b>3</b></td><td><b>Detalhar carona</b></td><td>passageiros confirmados e livres <b>por trecho</b></td></tr>
+              <tr><td><b>4</b></td><td><b>Cancelar carona</b></td><td>reservas afetadas canceladas em cascata</td></tr>
+              <tr><td><b>5</b></td><td><b>Sair</b></td><td></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="painel">
+        <h3>Cliente passageiro</h3>
+        <div class="tabela">
+          <table>
+            <tbody>
+              <tr><td><b>1</b></td><td><b>Buscar itinerários</b></td><td>origem, destino e data → lista numerada → “Reservar qual?”</td></tr>
+              <tr><td><b>2</b></td><td><b>Minhas reservas</b></td><td>opção de incluir as canceladas</td></tr>
+              <tr><td><b>3</b></td><td><b>Cancelar reserva</b></td><td>escolhe da lista e confirma com <code>s/n</code></td></tr>
+              <tr><td><b>4</b></td><td><b>Sair</b></td><td></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="duas">
+      <div>
+        <h3>Decisões</h3>
+        <ul class="lista">
+          <li>O usuário <b>nunca digita IDs</b>: ao escolher um número, o cliente devolve o <code>carona_id</code>, <code>de</code> e <code>ate</code> que recebeu do servidor.</li>
+          <li>Cidades escolhidas em menu enumerado, sempre com a grafia canônica.</li>
+          <li>Entrada inválida faz o menu perguntar de novo, sem fechar a conexão.</li>
+          <li>Recusa do servidor mostra a mensagem do protocolo e o menu continua.</li>
+          <li>Falha de rede encerra a sessão com mensagem clara.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Prazos de cancelamento</h3>
+        <ul class="lista">
+          <li><b>Passageiro:</b> até 1 h antes da partida do primeiro trecho.</li>
+          <li><b>Motorista:</b> até a partida da carona.</li>
+          <li><b>Assimetria:</b> a cascata do motorista ignora o prazo do passageiro. O prazo protege o motorista, não o contrário.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 9. CONFIABILIDADE ============================ -->
+<section class="tela" data-rotulo="9 · Confiabilidade" hidden>
+  <div class="quadro">
+    <div class="cab">
+      <p class="sobre">Item 9 de 11</p>
+      <h2>Confiabilidade</h2>
+      <p class="tese">Nenhum assento pode ficar preso porque não existe “assento em espera” (D07).</p>
+    </div>
+
+    <div class="duas">
+      <div class="coluna">
+        <h3>Cliente encerrado no meio de uma reserva</h3>
+        <div class="tabela">
+          <table>
+            <thead><tr><th>O cliente cai…</th><th>O servidor vê</th><th>Resultado</th></tr></thead>
+            <tbody>
+              <tr><td>depois da busca, antes de confirmar</td><td>EOF; a goroutine termina</td><td class="ok">nada estava bloqueado: a busca não reserva</td></tr>
+              <tr><td>no meio da linha do <code>RESERVAR</code></td><td>fragmento sem <code>\n</code>: descartado, conexão fechada</td><td class="ok">a operação não executa</td></tr>
+              <tr><td>depois que o servidor leu a linha inteira</td><td>a reserva executa inteira; a escrita da resposta falha</td><td class="ok">reserva completa; aparece em “Minhas reservas”</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="destaque">Sem estado intermediário não há nada para expirar, varrer ou compensar. A invariante <b>I1</b> resume a garantia: <code>Livres + reservas ativas = Assentos</code>.</p>
+      </div>
+
+      <div class="coluna">
+        <h3>Timeouts (D17)</h3>
+        <div class="tabela">
+          <table>
+            <thead><tr><th>Prazo</th><th>Valor</th><th>Onde</th><th>Ao estourar</th></tr></thead>
+            <tbody>
+              <tr><td>Conexão</td><td>10 s</td><td>cliente</td><td>o cliente não inicia</td></tr>
+              <tr><td>Resposta</td><td>30 s</td><td>cliente, por requisição</td><td>descarta a conexão, para uma resposta atrasada nunca ser lida como a da próxima</td></tr>
+              <tr><td>Escrita</td><td>10 s</td><td>servidor, por resposta</td><td>fecha a conexão de quem não lê</td></tr>
+              <tr><td>Leitura</td><td>nenhum</td><td>servidor</td><td>cliente interativo pode ficar parado no menu; quem some é detectado pelo <em>keep-alive</em> TCP</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><b>Nenhum timeout toca o estado.</b> Eles só encerram conexões.</p>
+      </div>
+    </div>
+
+    <div>
+      <h3>Tratamento de exceções nos sockets</h3>
+      <div class="tres">
+        <div class="passo">
+          <b>Servidor · conexão</b>
+          <ul class="lista">
+            <li><code>EOF</code>/<code>RST</code>: desconexão normal, sem erro.</li>
+            <li>Linha &gt; 64 KB ou incompleta: descartada; conexão fechada e registrada.</li>
+          </ul>
+        </div>
+        <div class="passo">
+          <b>Servidor · falhas internas</b>
+          <ul class="lista">
+            <li><code>panic</code> num tratador: <code>recover</code> na goroutine; só aquela conexão cai, e o mutex é liberado pelo <code>defer</code>.</li>
+            <li>Falha no <code>Accept</code>: log e nova tentativa em 100 ms.</li>
+          </ul>
+        </div>
+        <div class="passo">
+          <b>Cliente</b>
+          <ul class="lista">
+            <li>Recusa do servidor (<code>status: ERRO</code>): mostra a mensagem, o menu segue.</li>
+            <li>Falha de rede, prazo estourado ou <code>id</code> fora de sincronia: encerra a sessão.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 10. TESTES ============================ -->
+<section class="tela" data-rotulo="10 · Testes" hidden>
+  <div class="quadro">
+    <div class="cab">
+      <p class="sobre">Item 10 de 11</p>
+      <h2>Testes</h2>
+      <p class="tese">Testes automáticos pelo próprio protocolo, sempre com o detector de corrida.</p>
+    </div>
+
+    <div class="tres">
+      <div class="passo"><span class="n">camada</span><b>Unidade</b><p>Domínio, protocolo, servidor e cliente isolados.</p></div>
+      <div class="passo"><span class="n">camada</span><b>Integração</b><p>Servidor real e clientes por socket TCP.</p></div>
+      <div class="passo"><span class="n">camada</span><b>Concorrência</b><p>Cenários T1–T8 com dezenas de clientes simultâneos.</p></div>
+    </div>
+
+    <div class="duas larga-dir">
+      <div class="coluna">
+        <h3>Destaque: T2, atomicidade</h3>
+        <figure>
+          <svg class="dg" viewBox="0 0 640 210" role="img" aria-label="Cinquenta passageiros pedem ao mesmo tempo o itinerário A mais B; A tem 10 assentos e B tem 1. Depois, A precisa ter 9 livres e B zero; menos de 9 em A indica reserva parcial.">
+            <circle cx="18" cy="70" r="8" class="c-ac"/><circle cx="42" cy="70" r="8" class="c-ac"/><circle cx="66" cy="70" r="8" class="c-ac"/><circle cx="90" cy="70" r="8" class="c-ac"/><circle cx="114" cy="70" r="8" class="c-ac"/>
+            <circle cx="18" cy="94" r="8" class="c-ac"/><circle cx="42" cy="94" r="8" class="c-ac"/><circle cx="66" cy="94" r="8" class="c-ac"/><circle cx="90" cy="94" r="8" class="c-ac"/><circle cx="114" cy="94" r="8" class="c-ac"/>
+            <text x="66" y="126" text-anchor="middle" class="tn">50 passageiros</text>
+            <text x="66" y="142" text-anchor="middle" class="tp">ao mesmo tempo</text>
+            <path d="M132 82 H186" class="l" marker-end="url(#seta)"/>
+            <text x="159" y="73" text-anchor="middle" class="tpm">A+B</text>
+
+            <line x1="200" y1="82" x2="400" y2="82" class="l-estrada"/>
+            <line x1="400" y1="82" x2="600" y2="82" class="l-gargalo"/>
+            <circle cx="200" cy="82" r="7" class="parada"/>
+            <circle cx="400" cy="82" r="7" class="parada"/>
+            <circle cx="600" cy="82" r="7" class="parada"/>
+            <text x="200" y="58" text-anchor="middle" class="tn">Salvador</text>
+            <text x="400" y="58" text-anchor="middle" class="tn">Feira</text>
+            <text x="600" y="58" text-anchor="middle" class="tn">Jequié</text>
+            <text x="300" y="108" text-anchor="middle">A · joao · 10 assentos</text>
+            <text x="500" y="108" text-anchor="middle" class="t-rui tn">B · carlos · 1 assento</text>
+
+            <rect x="200" y="140" width="400" height="62" rx="5" class="c-cx"/>
+            <text x="214" y="165" class="tp">depois:</text>
+            <text x="310" y="165" text-anchor="middle" class="tn t-ac">A = 9 livres</text>
+            <text x="500" y="165" text-anchor="middle" class="tn">B = 0 livres</text>
+            <text x="400" y="190" text-anchor="middle" class="tp t-rui">se A &lt; 9: uma recusa escreveu em A → reserva parcial</text>
+          </svg>
+        </figure>
+        <div class="tabela">
+          <table>
+            <thead><tr><th>Esperado</th><th>Por quê</th></tr></thead>
+            <tbody>
+              <tr><td>1 <code>OK</code> e 49 <code>SEM_ASSENTO</code></td><td>B só tem 1 assento</td></tr>
+              <tr><td>A termina com <b>9</b> livres</td><td>Só a reserva confirmada pode ter consumido A</td></tr>
+              <tr><td>A com <b>menos de 9</b></td><td class="nao">Uma reserva recusada decrementou A antes de ver B cheio: a atomicidade quebrou</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="coluna">
+        <div class="tabela">
+          <table>
+            <thead><tr><th>Teste</th><th>Cenário</th><th>Esperado</th><th>O que prova</th></tr></thead>
+            <tbody>
+              <tr><td><b>T1</b></td><td>50 clientes, 1 assento</td><td>1 OK, 49 <code>SEM_ASSENTO</code></td><td>Assento nunca vendido duas vezes</td></tr>
+              <tr><td><b>T2</b></td><td>Itinerário A+B, B com 1 assento</td><td>1 OK, A com 9 livres</td><td>Tudo ou nada</td></tr>
+              <tr><td><b>T3</b></td><td>Reservas simultâneas em trechos diferentes da mesma carona</td><td>Todas passam</td><td>Controle por trecho</td></tr>
+              <tr><td><b>T4</b></td><td>Reservar e cancelar em laço</td><td>Livres volta ao inicial</td><td>Nenhum assento preso</td></tr>
+              <tr><td><b>T5</b></td><td>Motorista cancela durante reservas</td><td>Cascata consistente</td><td>Cancelamento atômico</td></tr>
+              <tr><td><b>T6</b></td><td>Conexão cai no meio da linha</td><td>Servidor segue</td><td>Queda abrupta não afeta os demais</td></tr>
+              <tr><td><b>T7</b></td><td>Rajada de mensagens malformadas</td><td>Erros; servidor disponível</td><td>Validação de entrada</td></tr>
+              <tr><td><b>T8</b></td><td>Mesmo passageiro, reservas sobrepostas em paralelo</td><td>Só uma passa</td><td>Conflito de horário sob concorrência</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div>
+          <h3>Invariantes, conferidas pelo protocolo ao fim de cada cenário</h3>
+          <ul class="lista">
+            <li><b>I1</b> <code>Livres[t] + reservas ativas em t = Assentos</code>: não vende a mais nem prende assento.</li>
+            <li><b>I2</b> <code>0 ≤ Livres[t] ≤ Assentos</code>.</li>
+            <li><b>I3</b> Reserva ativa é caminho contíguo, sem cidade repetida e crescente no tempo.</li>
+            <li><b>I4</b> Nenhuma reserva ativa em carona cancelada.</li>
+            <li><b>I5</b> Reservas ativas do mesmo passageiro não se sobrepõem.</li>
+            <li><b>I6</b> Toda carona tem ≥ 2 paradas, sem cidade repetida e horários crescentes.</li>
+          </ul>
+        </div>
+
+        <p class="destaque"><b>Regressão da busca:</b> fixa a lista exata dos 4 itinerários, na ordem, com os controles negativos ausentes.</p>
+
+        <pre class="codigo"><code>go test -race ./...
+go test -race -count=20 ./testes</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 11. EMULAÇÃO ============================ -->
+<section class="tela" data-rotulo="11 · Emulação" hidden>
+  <div class="quadro">
+    <div class="cab">
+      <p class="sobre">Item 11 de 11</p>
+      <h2>Emulação com Docker</h2>
+      <p class="tese">Duas imagens, dois computadores, conectados por porta publicada.</p>
+    </div>
+
+    <figure>
+      <div class="tabela">
+        <svg class="dg" viewBox="0 0 760 262" role="img" aria-label="Na máquina A, o contêiner do servidor fica na rede bridge do Docker e a porta 9000 é publicada no host. Na máquina B, os contêineres clientes se conectam ao IP da máquina A na porta 9000 pela rede local. As redes bridge das duas máquinas não se enxergam diretamente." style="min-width:620px;max-width:980px">
+          <rect x="2" y="4" width="300" height="250" rx="10" class="c-moldura"/>
+          <text x="152" y="28" text-anchor="middle" class="tn">Máquina A · IP_A</text>
+          <rect x="22" y="44" width="260" height="120" rx="6" class="c-trac"/>
+          <text x="32" y="62" class="tp">rede bridge do Docker</text>
+          <rect x="46" y="80" width="212" height="54" rx="5" class="c-ac"/>
+          <text x="152" y="103" text-anchor="middle" class="tn">contêiner servidor</text>
+          <text x="152" y="121" text-anchor="middle" class="tpm">escuta 0.0.0.0:9000</text>
+          <rect x="196" y="196" width="150" height="40" rx="5" class="c-tra"/>
+          <text x="271" y="214" text-anchor="middle" class="tn">porta 9000 do host</text>
+          <text x="271" y="229" text-anchor="middle" class="tpm">-p 9000:9000</text>
+          <path d="M228 196 L196 137" class="l" marker-end="url(#seta)"/>
+          <text x="204" y="176" text-anchor="end" class="tp">encaminha</text>
+
+          <rect x="458" y="4" width="300" height="250" rx="10" class="c-moldura"/>
+          <text x="608" y="28" text-anchor="middle" class="tn">Máquina B</text>
+          <rect x="478" y="44" width="260" height="196" rx="6" class="c-trac"/>
+          <text x="488" y="62" class="tp">rede bridge do Docker</text>
+          <rect x="500" y="72" width="216" height="44" rx="5" class="c-cx"/>
+          <text x="608" y="90" text-anchor="middle" class="tn">motorista</text>
+          <text x="608" y="106" text-anchor="middle" class="tpm">VAIJUNTO_SERVIDOR=IP_A:9000</text>
+          <rect x="500" y="124" width="216" height="44" rx="5" class="c-cx"/>
+          <text x="608" y="142" text-anchor="middle" class="tn">passageiro</text>
+          <text x="608" y="158" text-anchor="middle" class="tpm">VAIJUNTO_SERVIDOR=IP_A:9000</text>
+          <rect x="500" y="176" width="216" height="44" rx="5" class="c-cx"/>
+          <text x="608" y="194" text-anchor="middle" class="tn">passageiro</text>
+          <text x="608" y="210" text-anchor="middle" class="tpm">VAIJUNTO_SERVIDOR=IP_A:9000</text>
+
+          <path d="M500 198 L348 216" class="l-ac" marker-end="url(#seta-ac)"/>
+          <text x="400" y="240" text-anchor="middle" class="tp t-ac tn">LAN · IP_A:9000</text>
+
+          <path d="M282 96 H478" class="l-rui"/>
+          <text x="380" y="86" text-anchor="middle" class="tp t-rui tn">✘ bridges não se enxergam</text>
+        </svg>
+      </div>
+    </figure>
+
+    <div class="duas">
+      <div class="coluna">
+        <div>
+          <h3>Imagens</h3>
+          <ul class="lista">
+            <li>Build <b>multi-stage</b>: compila em <code>golang:1.23-alpine</code>, roda em <code>alpine:3.20</code>.</li>
+            <li>Binário estático (<code>CGO_ENABLED=0</code>): a imagem final só tem o executável.</li>
+            <li><code>vaijunto-servidor</code> e <code>vaijunto-cliente</code> (motorista e passageiro).</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Conectividade entre máquinas</h3>
+          <p><b>Problema:</b> cada contêiner fica na rede bridge da sua máquina, e bridges de máquinas diferentes não se enxergam.</p>
+          <p><b>Solução:</b> publicar a porta no host (<code>-p 9000:9000</code>). O Docker encaminha ao contêiner o que chega à porta 9000 do IP da máquina A, e o cliente usa esse IP. Com servidor único, dispensa rede overlay ou descoberta de serviço.</p>
+        </div>
+      </div>
+      <div class="coluna">
+        <div>
+          <h3>Detalhes que fazem funcionar</h3>
+          <ul class="lista">
+            <li>Servidor escuta em <code>0.0.0.0</code>, não em <code>127.0.0.1</code>: em loopback, a porta publicada não recebe nada de fora.</li>
+            <li><code>docker run -it</code> nos clientes, porque eles leem do terminal.</li>
+            <li><code>import _ "time/tzdata"</code>: o Alpine não traz os fusos, e os horários sairiam deslocados.</li>
+            <li><code>docker-compose</code> para desenvolver numa máquina só.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Vantagens</h3>
+          <ul class="lista">
+            <li>Mesmo ambiente em qualquer computador do laboratório, sem instalar Go.</li>
+            <li>Várias instâncias de cliente em segundos.</li>
+            <li>Isolamento entre processos e execução reproduzível.</li>
+          </ul>
+        </div>
+        <pre class="codigo"><code><span class="env"># máquina A</span>
+docker run --rm -p 9000:9000 -v "$(pwd)/dados:/dados" vaijunto-servidor \
+  --usuarios /dados/usuarios.json --caronas /dados/caronas.json
+<span class="env"># máquina B</span>
+docker run --rm -it -e VAIJUNTO_SERVIDOR=$IP_A:9000 vaijunto-cliente /bin/passageiro</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+  </main>
+
+  <nav class="rota" aria-label="Navegação entre os itens">
+    <button class="seta" id="anterior" aria-label="Item anterior">←</button>
+    <ol class="paradas" id="paradas"></ol>
+    <button class="seta" id="proximo" aria-label="Próximo item">→</button>
+  </nav>
+</div>
+
+<script>
+(function () {
+  var telas = Array.prototype.slice.call(document.querySelectorAll('.tela'));
+  var rotulo = document.getElementById('rotulo');
+  var paradas = document.getElementById('paradas');
+  var anterior = document.getElementById('anterior');
+  var proximo = document.getElementById('proximo');
+  var atual = 0;
+
+  // A barra inferior é a rota: uma parada por tela, a capa é a primeira.
+  var botoes = telas.map(function (tela, i) {
+    var li = document.createElement('li');
+    var b = document.createElement('button');
+    b.textContent = i === 0 ? '⌂' : String(i);
+    b.title = tela.dataset.rotulo;
+    b.setAttribute('aria-label', tela.dataset.rotulo);
+    b.addEventListener('click', function () { ir(i); });
+    li.appendChild(b);
+    paradas.appendChild(li);
+    return b;
+  });
+
+  function ir(i) {
+    i = Math.max(0, Math.min(telas.length - 1, i));
+    atual = i;
+    telas.forEach(function (t, k) { t.hidden = k !== i; });
+    telas[i].scrollTop = 0;
+    rotulo.textContent = telas[i].dataset.rotulo;
+    botoes.forEach(function (b, k) {
+      b.classList.toggle('passou', k < i);
+      if (k === i) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
+    });
+    paradas.style.setProperty('--progresso', (i / (telas.length - 1) * 100) + '%');
+    anterior.disabled = i === 0;
+    proximo.disabled = i === telas.length - 1;
+    var alvo = '#' + (i === 0 ? 'capa' : i);
+    if (location.hash !== alvo) {
+      try { history.replaceState(null, '', alvo); } catch (e) { /* file:// em alguns navegadores */ }
+    }
+  }
+
+  function daHash() {
+    var h = location.hash.replace('#', '');
+    var n = parseInt(h, 10);
+    return isNaN(n) ? 0 : n;
+  }
+
+  anterior.addEventListener('click', function () { ir(atual - 1); });
+  proximo.addEventListener('click', function () { ir(atual + 1); });
+  document.querySelectorAll('[data-ir]').forEach(function (b) {
+    b.addEventListener('click', function () { ir(parseInt(b.dataset.ir, 10)); });
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    switch (e.key) {
+      case 'ArrowRight': case 'PageDown': ir(atual + 1); e.preventDefault(); break;
+      case 'ArrowLeft': case 'PageUp': ir(atual - 1); e.preventDefault(); break;
+      case 'Home': ir(0); e.preventDefault(); break;
+      case 'End': ir(telas.length - 1); e.preventDefault(); break;
+      case 't': case 'T':
+        var raiz = document.documentElement;
+        var escuro = raiz.dataset.theme
+          ? raiz.dataset.theme === 'dark'
+          : window.matchMedia('(prefers-color-scheme: dark)').matches;
+        raiz.dataset.theme = escuro ? 'light' : 'dark';
+        break;
+    }
+  });
+
+  window.addEventListener('hashchange', function () { ir(daHash()); });
+  ir(daHash());
+})();
+</script>
+</body>
+</html>
