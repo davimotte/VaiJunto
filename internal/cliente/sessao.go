@@ -158,7 +158,7 @@ func ColetarParadas(term *Terminal, fuso *time.Location) ([]protocolo.Parada, er
 
 	for len(paradas) < len(cidades) {
 		numero := len(paradas) + 1
-		titulo := fmt.Sprintf("Cidade da parada %d:", numero)
+		titulo := fmt.Sprintf("Cidade %s:", rotuloDaParada(numero))
 
 		opcoes := make([]string, 0, len(cidades)+1)
 		for _, cidade := range cidades {
@@ -195,6 +195,16 @@ func ColetarParadas(term *Terminal, fuso *time.Location) ([]protocolo.Parada, er
 	return paradas, nil
 }
 
+// rotuloDaParada nomeia a posição na rota como o motorista a enxerga: a
+// primeira é o local de saída, e as paradas contam a partir da seguinte. A
+// numeração interna continua começando em 1; só o texto impresso muda.
+func rotuloDaParada(numero int) string {
+	if numero == 1 {
+		return "do local de saída"
+	}
+	return fmt.Sprintf("da parada %d", numero-1)
+}
+
 // lerHorarioDaParada pede o horário da parada numero e repete a pergunta
 // enquanto ele não for posterior ao da parada anterior.
 //
@@ -210,14 +220,14 @@ func ColetarParadas(term *Terminal, fuso *time.Location) ([]protocolo.Parada, er
 // para o outro. A primeira parada não tem data anterior, e nela a data é
 // obrigatória.
 func lerHorarioDaParada(term *Terminal, numero int, anteriores []protocolo.Parada, fuso *time.Location) (time.Time, error) {
-	rotuloHora := fmt.Sprintf("Hora da parada %d (HH:MM): ", numero)
+	rotuloHora := fmt.Sprintf("Hora %s (HH:MM): ", rotuloDaParada(numero))
 	if len(anteriores) == 0 {
-		return term.LerInstante(fmt.Sprintf("Data da parada %d (AAAA-MM-DD): ", numero), rotuloHora, fuso)
+		return term.LerInstante(fmt.Sprintf("Data %s (AAAA-MM-DD): ", rotuloDaParada(numero)), rotuloHora, fuso)
 	}
 
 	anterior := anteriores[len(anteriores)-1]
-	rotuloData := fmt.Sprintf("Data da parada %d (AAAA-MM-DD, Enter para %s): ",
-		numero, anterior.Horario.In(fuso).Format(formatoData))
+	rotuloData := fmt.Sprintf("Data %s (AAAA-MM-DD, Enter para %s): ",
+		rotuloDaParada(numero), anterior.Horario.In(fuso).Format(formatoData))
 	for {
 		horario, err := term.LerInstanteComDataPadrao(rotuloData, rotuloHora, anterior.Horario, fuso)
 		if err != nil {

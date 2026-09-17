@@ -109,16 +109,16 @@ func TestColetarParadas_EnterRepeteADataDaParadaAnterior(t *testing.T) {
 		[]time.Time{em(20, 0), em(22, 0), time.Date(2026, 9, 21, 1, 0, 0, 0, fusoDasCidadesFixo)})
 
 	// O rótulo diz qual data o Enter repete, para que ninguém a confirme no
-	// escuro. A da terceira parada é a da segunda, e não a da primeira.
+	// escuro. A da parada 2 é a da parada 1, e não a do local de saída.
+	if !strings.Contains(saida.String(), "Data da parada 1 (AAAA-MM-DD, Enter para 20/09/2026): ") {
+		t.Errorf("o rótulo da parada 1 não mostra a data padrão:\n%s", saida.String())
+	}
 	if !strings.Contains(saida.String(), "Data da parada 2 (AAAA-MM-DD, Enter para 20/09/2026): ") {
 		t.Errorf("o rótulo da parada 2 não mostra a data padrão:\n%s", saida.String())
 	}
-	if !strings.Contains(saida.String(), "Data da parada 3 (AAAA-MM-DD, Enter para 20/09/2026): ") {
-		t.Errorf("o rótulo da parada 3 não mostra a data padrão:\n%s", saida.String())
-	}
-	// A primeira parada não tem data anterior: a data continua obrigatória.
-	if !strings.Contains(saida.String(), "Data da parada 1 (AAAA-MM-DD): ") {
-		t.Errorf("o rótulo da parada 1 deveria exigir a data:\n%s", saida.String())
+	// O local de saída não tem data anterior: a data continua obrigatória.
+	if !strings.Contains(saida.String(), "Data do local de saída (AAAA-MM-DD): ") {
+		t.Errorf("o rótulo do local de saída deveria exigir a data:\n%s", saida.String())
 	}
 }
 
