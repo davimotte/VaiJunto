@@ -184,7 +184,7 @@ Data (AAAA-MM-DD): 2026-10-01
 
 Reservar qual? (0 para voltar): 3
 
-Reserva res-05b7 confirmada. Total: R$ 100,00
+Reserva res-91c4e2d8 confirmada. Total: R$ 100,00
 ```
 
 Buscar e reservar são operações independentes: entre uma e outra nada fica
