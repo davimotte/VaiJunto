@@ -18,7 +18,7 @@ coverage.html
 *.swp
 .DS_Store
 
-# Configuração local do Claude Code 
+# Configuração local de ferramentas de desenvolvimento
 CLAUDE.local.md
 .claude/settings.local.json
 .claude/memory/

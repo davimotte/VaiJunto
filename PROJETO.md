@@ -522,7 +522,7 @@ vaijunto/
 ├── testes/           # integração, concorrência (T1 a T8) e carga
 ├── dados/            # usuarios.json, caronas.json
 ├── docs/             # apresentacao.html
-├── resultados/       # CSVs das rodadas de carga (seção 8.3)
+├── resultados/       # CSVs das rodadas de carga (seção 8.3); criado na execução, fora do git
 ├── Dockerfile.servidor
 ├── Dockerfile.cliente
 ├── docker-compose.yml

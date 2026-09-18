@@ -373,9 +373,9 @@ func TestDecodificarRequisicao_IDInvalido(t *testing.T) {
 	}
 }
 
-// TestLerLinha_FatiaNaoAliasaBuffer confere a regra do CLAUDE.md: a fatia
-// devolvida por ReadSlice aponta para o buffer interno do bufio.Reader, então
-// LerLinha precisa devolver uma cópia.
+// TestLerLinha_FatiaNaoAliasaBuffer confere a regra do PROJETO.md, seção 5.1:
+// a fatia devolvida por ReadSlice aponta para o buffer interno do
+// bufio.Reader, então LerLinha precisa devolver uma cópia.
 //
 // O leitor é embrulhado em iotest.OneByteReader de propósito. Com um
 // strings.Reader puro, a entrada inteira entra no buffer num único fill e a

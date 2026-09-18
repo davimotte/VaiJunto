@@ -380,7 +380,7 @@ internal/cliente     conexão e terminal reaproveitados pelos dois CLIs
 testes               integração, concorrência (T1 a T8) e carga
 dados                usuarios.json, caronas.json
 docs                 apresentacao.html
-resultados           CSVs das rodadas de carga
+resultados           CSVs das rodadas de carga (criado na execução, fora do git)
 ```
 
 Nenhum pacote de `internal/` importa `cmd/`. `internal/dominio` não importa
