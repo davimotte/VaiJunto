@@ -5,6 +5,7 @@ import (
 	"flag"
 	"log"
 	"os"
+	"path/filepath"
 
 	_ "time/tzdata" // fusos embutidos no binário: a imagem Alpine não traz tzdata, e sem eles dominio.FusoDasCidades cairia no deslocamento fixo.
 
@@ -15,8 +16,8 @@ import (
 func main() {
 	empresa := flag.String("empresa", "", "identificador desta empresa, obrigatório (ex.: vaijunto); prefixa os IDs de carona e de reserva")
 	endereco := flag.String("endereco", "0.0.0.0:9000", "endereço e porta TCP em que o servidor escuta")
-	caminhoUsuarios := flag.String("usuarios", "dados/vaijunto/usuarios.json", "arquivo de carga dos usuários")
-	caminhoCaronas := flag.String("caronas", "dados/vaijunto/caronas.json", "arquivo de carga das caronas")
+	dirDados := flag.String("dados", "dados/vaijunto", "diretório com usuarios.json e caronas.json desta empresa")
+	listaPares := flag.String("pares", "", "demais empresas do consórcio, no formato empresa=url,empresa=url (D20); só validada nesta fase")
 	logOperacoes := flag.Bool("log-operacoes", true, "registra no terminal cada conexão e cada operação atendida; desligue ao medir carga")
 	flag.Parse()
 
@@ -27,11 +28,23 @@ func main() {
 		log.Fatalf("servidor: --empresa é obrigatória e precisa estar no formato certo: %v", err)
 	}
 
+	// A lista de pares é estática (D20) e só é validada por enquanto: o
+	// cliente HTTP que a consome entra na fase 3A. Validar já aqui faz o erro
+	// de digitação aparecer na subida, e não numa busca federada.
+	pares, err := servidor.ParsearPares(*empresa, *listaPares)
+	if err != nil {
+		log.Fatalf("servidor: --pares: %v", err)
+	}
+
 	// Carga única no boot (D02, D12): daqui em diante o estado vive só em
 	// memória. Falha de leitura aborta a subida em vez de deixar o servidor no
 	// ar sem usuário nenhum, situação em que todo LOGIN falharia sem que a
 	// causa aparecesse.
-	estado, err := dominio.CarregarEstado(*empresa, *caminhoUsuarios, *caminhoCaronas)
+	//
+	// Cada empresa lê o seu próprio diretório: não há dado compartilhado entre
+	// empresas (RD07, RD11).
+	estado, err := dominio.CarregarEstado(*empresa,
+		filepath.Join(*dirDados, "usuarios.json"), filepath.Join(*dirDados, "caronas.json"))
 	if err != nil {
 		log.Fatalf("servidor: carga inicial: %v", err)
 	}
@@ -50,7 +63,7 @@ func main() {
 	if *logOperacoes {
 		s.RegistrarOperacoes(os.Stderr)
 	}
-	log.Printf("servidor: empresa %s escutando em %s (registro de operações: %t)", *empresa, s.Endereco(), *logOperacoes)
+	log.Printf("servidor: empresa %s escutando em %s (pares: %d, registro de operações: %t)", *empresa, s.Endereco(), len(pares), *logOperacoes)
 
 	if err := s.Aceitar(); err != nil {
 		log.Fatalf("servidor: loop de aceitação encerrado: %v", err)
