@@ -35,17 +35,33 @@ var fusoDasCidades = sync.OnceValue(func() *time.Location {
 	return time.FixedZone("-03", -3*60*60)
 })
 
-// cidadesAtendidas é o conjunto fixo de cidades do sistema (D09; PROTOCOL.md,
-// seção 3.1).
+// Cidade é uma entrada do catálogo do consórcio (D33). O Nome é a chave em
+// todo o sistema; a UF serve só à exibição, para separar "Vitória (ES)" de
+// "Vitória da Conquista (BA)" num menu de dez itens.
+type Cidade struct {
+	Nome string
+	UF   string
+}
+
+// catalogo é o conjunto fixo de cidades do consórcio (D33; PROTOCOL.md, seção
+// 3.1). É constante compilada no binário de todas as empresas: um padrão do
+// consórcio, como a lista de siglas de estado, e não armazenamento
+// compartilhado.
 //
 // A ordem da lista não tem significado de rota nem de distância: a sequência
 // de paradas de cada carona e os horários são informados pelo motorista. A
 // ordem só existe para que o menu enumerado dos clientes saia sempre igual.
-var cidadesAtendidas = []string{
-	"Salvador",
-	"Feira de Santana",
-	"Jequié",
-	"Vitória da Conquista",
+var catalogo = []Cidade{
+	{"Salvador", "BA"},
+	{"Feira de Santana", "BA"},
+	{"Jequié", "BA"},
+	{"Vitória da Conquista", "BA"},
+	{"Vitória", "ES"},
+	{"Cachoeiro de Itapemirim", "ES"},
+	{"Marataízes", "ES"},
+	{"Rio de Janeiro", "RJ"},
+	{"Nilópolis", "RJ"},
+	{"Petrópolis", "RJ"},
 }
 
 // CidadesAtendidas devolve as cidades do sistema, na ordem do menu.
@@ -56,12 +72,14 @@ var cidadesAtendidas = []string{
 // é por igualdade exata de string, então a divergência apareceria como
 // CIDADE_DESCONHECIDA em tempo de execução.
 //
-// Devolve uma cópia porque o conjunto é constante do sistema (D09): quem
+// Devolve uma cópia porque o conjunto é constante do consórcio (D33): quem
 // consome não pode reordenar nem renomear a lista de dentro.
 func CidadesAtendidas() []string {
-	copia := make([]string, len(cidadesAtendidas))
-	copy(copia, cidadesAtendidas)
-	return copia
+	nomes := make([]string, len(catalogo))
+	for i, cidade := range catalogo {
+		nomes[i] = cidade.Nome
+	}
+	return nomes
 }
 
 // CidadeConhecida responde se nome é uma das cidades atendidas.
@@ -71,10 +89,20 @@ func CidadesAtendidas() []string {
 // ao servidor é sempre a canônica, e normalizar aqui só esconderia um cliente
 // com defeito.
 func CidadeConhecida(nome string) bool {
-	for _, cidade := range cidadesAtendidas {
-		if cidade == nome {
-			return true
+	_, ok := UFDaCidade(nome)
+	return ok
+}
+
+// UFDaCidade devolve a UF de uma cidade do catálogo, para exibição nos menus
+// dos clientes. O segundo retorno é falso para cidade desconhecida.
+//
+// A UF nunca trafega no protocolo nem entra em comparação: o nome continua
+// sendo a chave (D33).
+func UFDaCidade(nome string) (string, bool) {
+	for _, cidade := range catalogo {
+		if cidade.Nome == nome {
+			return cidade.UF, true
 		}
 	}
-	return false
+	return "", false
 }
