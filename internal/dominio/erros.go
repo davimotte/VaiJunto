@@ -78,6 +78,16 @@ var (
 	// identificador. Só existe para não engolir o erro de crypto/rand em
 	// silêncio; na prática não acontece.
 	ErrGeracaoDeID = errors.New("dominio: falha ao gerar identificador")
+
+	// ErrEmpresaInvalida — identificador de empresa fora do formato (D27):
+	// minúsculas, dígitos e hífen, começando por letra. Barra o boot do
+	// servidor; não nasce de nenhuma requisição.
+	ErrEmpresaInvalida = errors.New("dominio: identificador de empresa inválido")
+
+	// ErrIDSemEmpresa — identificador de carona ou reserva sem o prefixo
+	// "<empresa>:" (D27). Sem prefixo não há como saber quem é o dono, e o
+	// domínio recusa em vez de presumir a empresa local.
+	ErrIDSemEmpresa = errors.New("dominio: identificador sem prefixo de empresa")
 )
 
 // TodosOsErros lista todos os sentinelas exportados do domínio.
@@ -106,6 +116,8 @@ func TodosOsErros() []error {
 		ErrReservaJaCancelada,
 		ErrPrazoCancelamentoExpirado,
 		ErrGeracaoDeID,
+		ErrEmpresaInvalida,
+		ErrIDSemEmpresa,
 	}
 }
 

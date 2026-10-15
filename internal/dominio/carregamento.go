@@ -56,14 +56,15 @@ func CarregarUsuarios(caminho string) (map[string]*Usuario, error) {
 	return usuarios, nil
 }
 
-// CarregarCaronas lê dados/caronas.json, valida cada carona com as mesmas
+// CarregarCaronas lê o arquivo de caronas da empresa, confere que cada ID leva
+// o prefixo dela (D27), valida cada carona com as mesmas
 // regras da publicação (menos a da partida no futuro) e inicializa Livres igual
 // a Assentos em todo trecho.
 //
 // A validação aqui não é zelo a mais: o arquivo é uma porta de entrada do
 // estado tão real quanto o protocolo, e uma carona com horário fora de ordem
 // quebraria a busca e a reserva do mesmo jeito, só que desde o boot.
-func CarregarCaronas(caminho string) (map[string]*Carona, error) {
+func CarregarCaronas(empresa, caminho string) (map[string]*Carona, error) {
 	b, err := os.ReadFile(caminho)
 	if err != nil {
 		return nil, fmt.Errorf("dominio: ler %s: %w", caminho, err)
@@ -76,6 +77,11 @@ func CarregarCaronas(caminho string) (map[string]*Carona, error) {
 
 	caronas := make(map[string]*Carona, len(brutos))
 	for _, c := range brutos {
+		// O prefixo é o que diz quem é o dono do trecho (D27): semente com ID
+		// de outra empresa, ou sem prefixo, faria o roteamento por ID mentir.
+		if dona, err := EmpresaDoID(c.ID); err != nil || dona != empresa {
+			return nil, fmt.Errorf("dominio: carona %q: o ID precisa começar por %q", c.ID, empresa+separadorEmpresa)
+		}
 		if err := validarCarona(c.Rota, c.Horarios, c.Assentos, c.PrecosCentavos); err != nil {
 			return nil, fmt.Errorf("dominio: carona %s: %w", c.ID, err)
 		}
@@ -101,16 +107,20 @@ func CarregarCaronas(caminho string) (map[string]*Carona, error) {
 
 // CarregarEstado monta o Estado inicial do servidor a partir dos dois
 // arquivos de carga (D02): nenhuma reserva existe antes do boot.
-func CarregarEstado(caminhoUsuarios, caminhoCaronas string) (*Estado, error) {
+func CarregarEstado(empresa, caminhoUsuarios, caminhoCaronas string) (*Estado, error) {
+	if err := ValidarEmpresa(empresa); err != nil {
+		return nil, err
+	}
 	usuarios, err := CarregarUsuarios(caminhoUsuarios)
 	if err != nil {
 		return nil, err
 	}
-	caronas, err := CarregarCaronas(caminhoCaronas)
+	caronas, err := CarregarCaronas(empresa, caminhoCaronas)
 	if err != nil {
 		return nil, err
 	}
 	return &Estado{
+		empresa:  empresa,
 		usuarios: usuarios,
 		caronas:  caronas,
 		reservas: make(map[string]*Reserva),

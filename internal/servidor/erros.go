@@ -49,6 +49,11 @@ var traducaoErros = map[error]erroTraduzido{
 	dominio.ErrReservaJaCancelada:        {protocolo.CodigoReservaJaCancelada, "Esta reserva já foi cancelada."},
 	dominio.ErrPrazoCancelamentoExpirado: {protocolo.CodigoPrazoCancelamentoExpirado, "Fora do prazo de cancelamento."},
 	dominio.ErrGeracaoDeID:               {protocolo.CodigoErroInterno, "Falha interna ao gerar o identificador."},
+	// Os dois abaixo nascem no boot e na carga, não de requisição; entram na
+	// tabela só para a cobertura da seção 5.3 e, se um dia vazarem, virarem
+	// ERRO_INTERNO em vez de um código inventado.
+	dominio.ErrEmpresaInvalida: {protocolo.CodigoErroInterno, "Falha interna de configuração da empresa."},
+	dominio.ErrIDSemEmpresa:    {protocolo.CodigoErroInterno, "Falha interna: identificador sem empresa."},
 }
 
 // respostaDeErroDeDominio monta a resposta de erro correspondente ao erro

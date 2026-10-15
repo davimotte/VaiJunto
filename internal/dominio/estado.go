@@ -17,8 +17,9 @@ import "time"
 
 // NovoEstado cria um Estado vazio. Serve aos testes; a execução real usa
 // CarregarEstado, que popula usuários e caronas a partir de dados/ (D02).
-func NovoEstado() *Estado {
+func NovoEstado(empresa string) *Estado {
 	return &Estado{
+		empresa:  empresa,
 		usuarios: make(map[string]*Usuario),
 		caronas:  make(map[string]*Carona),
 		reservas: make(map[string]*Reserva),

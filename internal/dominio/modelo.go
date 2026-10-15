@@ -61,6 +61,10 @@ type Reserva struct {
 // adquire o lock, o que elimina por construção o risco de reentrância no
 // mesmo mutex por caminhos diferentes.
 type Estado struct {
+	// empresa é o prefixo dos IDs gerados aqui (D27). Fica fora do mutex de
+	// propósito: é atribuída na criação e nunca mais escrita, então qualquer
+	// goroutine pode lê-la sem corrida.
+	empresa  string
 	mu       sync.Mutex
 	usuarios map[string]*Usuario
 	caronas  map[string]*Carona

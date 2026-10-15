@@ -13,17 +13,25 @@ import (
 )
 
 func main() {
+	empresa := flag.String("empresa", "", "identificador desta empresa, obrigatório (ex.: vaijunto); prefixa os IDs de carona e de reserva")
 	endereco := flag.String("endereco", "0.0.0.0:9000", "endereço e porta TCP em que o servidor escuta")
-	caminhoUsuarios := flag.String("usuarios", "dados/usuarios.json", "arquivo de carga dos usuários")
-	caminhoCaronas := flag.String("caronas", "dados/caronas.json", "arquivo de carga das caronas")
+	caminhoUsuarios := flag.String("usuarios", "dados/vaijunto/usuarios.json", "arquivo de carga dos usuários")
+	caminhoCaronas := flag.String("caronas", "dados/vaijunto/caronas.json", "arquivo de carga das caronas")
 	logOperacoes := flag.Bool("log-operacoes", true, "registra no terminal cada conexão e cada operação atendida; desligue ao medir carga")
 	flag.Parse()
+
+	// Sem default de propósito: uma empresa que sobe com o nome de outra
+	// geraria IDs com o prefixo errado, e o erro só apareceria entre
+	// máquinas (D27).
+	if err := dominio.ValidarEmpresa(*empresa); err != nil {
+		log.Fatalf("servidor: --empresa é obrigatória e precisa estar no formato certo: %v", err)
+	}
 
 	// Carga única no boot (D02, D12): daqui em diante o estado vive só em
 	// memória. Falha de leitura aborta a subida em vez de deixar o servidor no
 	// ar sem usuário nenhum, situação em que todo LOGIN falharia sem que a
 	// causa aparecesse.
-	estado, err := dominio.CarregarEstado(*caminhoUsuarios, *caminhoCaronas)
+	estado, err := dominio.CarregarEstado(*empresa, *caminhoUsuarios, *caminhoCaronas)
 	if err != nil {
 		log.Fatalf("servidor: carga inicial: %v", err)
 	}
@@ -42,7 +50,7 @@ func main() {
 	if *logOperacoes {
 		s.RegistrarOperacoes(os.Stderr)
 	}
-	log.Printf("servidor: escutando em %s (registro de operações: %t)", s.Endereco(), *logOperacoes)
+	log.Printf("servidor: empresa %s escutando em %s (registro de operações: %t)", *empresa, s.Endereco(), *logOperacoes)
 
 	if err := s.Aceitar(); err != nil {
 		log.Fatalf("servidor: loop de aceitação encerrado: %v", err)
