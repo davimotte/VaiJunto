@@ -1,0 +1,42 @@
+[
+  {
+    "id": "rotacapixaba:car-1",
+    "motorista": "rafael",
+    "rota": [
+      "Vitória da Conquista",
+      "Vitória",
+      "Cachoeiro de Itapemirim"
+    ],
+    "horarios": [
+      "2026-11-05T14:00:00-03:00",
+      "2026-11-06T04:00:00-03:00",
+      "2026-11-06T06:30:00-03:00"
+    ],
+    "assentos": 3,
+    "precos_centavos": [
+      18000,
+      3500
+    ],
+    "_nota": "Perna 2: sai da Bahia (D33, cidade nao pertence a empresa). Folga de 90 min em Vitoria da Conquista."
+  },
+  {
+    "id": "rotacapixaba:car-2",
+    "motorista": "beatriz",
+    "rota": [
+      "Vitória",
+      "Cachoeiro de Itapemirim",
+      "Marataízes"
+    ],
+    "horarios": [
+      "2026-11-06T09:00:00-03:00",
+      "2026-11-06T11:00:00-03:00",
+      "2026-11-06T12:00:00-03:00"
+    ],
+    "assentos": 1,
+    "precos_centavos": [
+      3500,
+      1500
+    ],
+    "_nota": "Disputa cruzada com rotafluminense:car-2 (assento unico). Chega a Cachoeiro 11:00."
+  }
+]

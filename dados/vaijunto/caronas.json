@@ -5,146 +5,35 @@
     "rota": [
       "Salvador",
       "Feira de Santana",
-      "Jequié"
+      "Vitória da Conquista"
     ],
     "horarios": [
-      "2026-10-01T06:00:00-03:00",
-      "2026-10-01T07:45:00-03:00",
-      "2026-10-01T10:45:00-03:00"
+      "2026-11-05T05:00:00-03:00",
+      "2026-11-05T06:45:00-03:00",
+      "2026-11-05T12:30:00-03:00"
     ],
     "assentos": 3,
     "precos_centavos": [
       2500,
-      3500
+      7000
     ],
-    "_nota": "Primeira perna das baldeacoes. Chega em Feira 07:45 e em Jequie 10:45."
+    "_nota": "Perna 1 da viagem interestadual. Chega a Vitoria da Conquista 12:30."
   },
   {
     "id": "vaijunto:car-2",
     "motorista": "carlos",
     "rota": [
-      "Jequié",
-      "Vitória da Conquista"
-    ],
-    "horarios": [
-      "2026-10-01T12:15:00-03:00",
-      "2026-10-01T14:30:00-03:00"
-    ],
-    "assentos": 2,
-    "precos_centavos": [
-      4000
-    ],
-    "_nota": "Segunda perna da baldeacao do enunciado (car-1 + car-2). Folga de 90 min."
-  },
-  {
-    "id": "vaijunto:car-3",
-    "motorista": "ana",
-    "rota": [
-      "Feira de Santana",
-      "Vitória da Conquista"
-    ],
-    "horarios": [
-      "2026-10-01T09:30:00-03:00",
-      "2026-10-01T16:45:00-03:00"
-    ],
-    "assentos": 2,
-    "precos_centavos": [
-      5500
-    ],
-    "_nota": "Com car-1: opcao de uma troca mais barata e que chega mais tarde. Preco desempata antes de chegada."
-  },
-  {
-    "id": "vaijunto:car-4",
-    "motorista": "ana",
-    "rota": [
       "Feira de Santana",
       "Jequié"
     ],
     "horarios": [
-      "2026-10-01T08:15:00-03:00",
-      "2026-10-01T11:15:00-03:00"
-    ],
-    "assentos": 1,
-    "precos_centavos": [
-      3000
-    ],
-    "_nota": "Assento unico. Perna do meio do itinerario de tres pernas; T1 e disputa ao vivo."
-  },
-  {
-    "id": "vaijunto:car-5",
-    "motorista": "joao",
-    "rota": [
-      "Jequié",
-      "Salvador",
-      "Vitória da Conquista"
-    ],
-    "horarios": [
-      "2026-10-01T05:30:00-03:00",
-      "2026-10-01T10:30:00-03:00",
-      "2026-10-01T17:30:00-03:00"
-    ],
-    "assentos": 3,
-    "precos_centavos": [
-      6000,
-      11000
-    ],
-    "_nota": "Direta mais cara, embarcando em Salvador (de = 1). Rota impossivel num corredor fixo (D09)."
-  },
-  {
-    "id": "vaijunto:car-6",
-    "motorista": "carlos",
-    "rota": [
-      "Jequié",
-      "Vitória da Conquista"
-    ],
-    "horarios": [
-      "2026-10-01T11:00:00-03:00",
-      "2026-10-01T13:15:00-03:00"
-    ],
-    "assentos": 4,
-    "precos_centavos": [
-      4000
-    ],
-    "_nota": "CONTROLE NEGATIVO: sai 15 min apos car-1 chegar a Jequie, abaixo da margem de 30."
-  },
-  {
-    "id": "vaijunto:car-7",
-    "motorista": "ana",
-    "rota": [
-      "Salvador",
-      "Feira de Santana",
-      "Jequié",
-      "Vitória da Conquista"
-    ],
-    "horarios": [
-      "2026-10-02T06:00:00-03:00",
-      "2026-10-02T07:45:00-03:00",
-      "2026-10-02T10:45:00-03:00",
-      "2026-10-02T13:00:00-03:00"
-    ],
-    "assentos": 4,
-    "precos_centavos": [
-      2500,
-      3500,
-      4000
-    ],
-    "_nota": "CONTROLE NEGATIVO: em 02/10. Fora da data como primeira perna; 24 h de espera como conexao."
-  },
-  {
-    "id": "vaijunto:car-8",
-    "motorista": "carlos",
-    "rota": [
-      "Feira de Santana",
-      "Salvador"
-    ],
-    "horarios": [
-      "2026-10-01T08:15:00-03:00",
-      "2026-10-01T10:00:00-03:00"
+      "2026-11-05T08:00:00-03:00",
+      "2026-11-05T11:00:00-03:00"
     ],
     "assentos": 2,
     "precos_centavos": [
-      2500
+      3000
     ],
-    "_nota": "CONTROLE NEGATIVO: car-1 ate Feira + car-8 + car-5 volta a Salvador. So a regra de cidade repetida recusa."
+    "_nota": "Carona local, que nao depende das outras empresas."
   }
 ]

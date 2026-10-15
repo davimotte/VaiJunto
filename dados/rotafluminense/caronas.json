@@ -1,0 +1,42 @@
+[
+  {
+    "id": "rotafluminense:car-1",
+    "motorista": "marcos",
+    "rota": [
+      "Cachoeiro de Itapemirim",
+      "Rio de Janeiro",
+      "Petrópolis"
+    ],
+    "horarios": [
+      "2026-11-06T08:00:00-03:00",
+      "2026-11-06T13:00:00-03:00",
+      "2026-11-06T14:30:00-03:00"
+    ],
+    "assentos": 2,
+    "precos_centavos": [
+      9000,
+      3000
+    ],
+    "_nota": "Perna 3; o ultimo assento. Folga de 90 min em Cachoeiro apos rotacapixaba:car-1."
+  },
+  {
+    "id": "rotafluminense:car-2",
+    "motorista": "fernanda",
+    "rota": [
+      "Cachoeiro de Itapemirim",
+      "Nilópolis",
+      "Rio de Janeiro"
+    ],
+    "horarios": [
+      "2026-11-06T12:00:00-03:00",
+      "2026-11-06T16:30:00-03:00",
+      "2026-11-06T17:15:00-03:00"
+    ],
+    "assentos": 1,
+    "precos_centavos": [
+      8500,
+      1500
+    ],
+    "_nota": "Disputa cruzada com rotacapixaba:car-2 (assento unico). Chega ao Rio 17:15, depois de marcos, entao nao serve para Petropolis."
+  }
+]
