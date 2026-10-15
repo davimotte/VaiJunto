@@ -118,22 +118,30 @@ cada resposta com a requisição que a originou e medir latência individual.
 | Data (busca) | String `AAAA-MM-DD` | `"2026-09-15"` |
 | Dinheiro | Inteiro em centavos | `4500` (R$ 45,00) |
 | Cidade | String | `"Feira de Santana"` |
-| Identificadores | String opaca gerada pelo servidor | `"car-3f2a1b7c"`, `"res-91c4e2d8"` |
+| Identificadores | String opaca gerada pelo servidor, com o prefixo da empresa que a criou (`<empresa>:<tipo>-<sufixo>`) | `"vaijunto:car-3f2a1b7c"`, `"vaijunto:res-91c4e2d8"` |
 
 Cidades são comparadas por igualdade exata de string com a grafia canônica
-da lista de cidades atendidas (seção 3.1). O servidor não normaliza nem aceita
+do catálogo de cidades atendidas (seção 3.1). O servidor não normaliza nem aceita
 variações de grafia — os clientes oficiais escolhem a cidade em um menu
 enumerado, não digitam o nome, então a string que chega ao servidor já é sempre
 a canônica. Qualquer outra string responde `CIDADE_DESCONHECIDA`.
 
 ### 3.1 Cidades atendidas
 
-Conjunto fixo do sistema:
+Catálogo fixo, comum a todas as empresas do consórcio (D33). O servidor aceita
+caronas entre quaisquer cidades dele:
 
-- Salvador
-- Feira de Santana
-- Jequié
-- Vitória da Conquista
+| UF | Cidades |
+|---|---|
+| BA | Salvador, Feira de Santana, Jequié, Vitória da Conquista |
+| ES | Vitória, Cachoeiro de Itapemirim, Marataízes |
+| RJ | Rio de Janeiro, Nilópolis, Petrópolis |
+
+O **nome é a chave**: é a string do campo `cidade` em toda mensagem, e a UF
+nunca trafega no protocolo. A UF serve só à exibição nos menus dos clientes
+("Vitória (ES)", "Vitória da Conquista (BA)"). "Vitória" e "Vitória da
+Conquista" são cidades distintas; a comparação continua sendo por igualdade
+exata de string.
 
 O conjunto não impõe ordem nem duração de trajeto. A sequência de paradas de cada
 carona e o horário de cada parada são informados pelo motorista (seção 5.4).
@@ -274,7 +282,7 @@ construção: numa carona recém-publicada, todo trecho tem `livres == assentos`
 
 ```json
 {"id":"2","status":"OK","dados":{
-  "carona_id":"car-3f2a1b7c",
+  "carona_id":"vaijunto:car-3f2a1b7c",
   "rota":["Salvador","Feira de Santana","Jequié","Vitória da Conquista"],
   "horarios":["2026-09-15T08:00:00-03:00","2026-09-15T10:15:00-03:00",
               "2026-09-15T13:40:00-03:00","2026-09-15T16:00:00-03:00"]
@@ -291,7 +299,7 @@ quando ausente, então `dados` vazio lista só as caronas de pé.
 
 ```json
 {"id":"3","status":"OK","dados":{"caronas":[{
-  "carona_id":"car-3f2a1b7c",
+  "carona_id":"vaijunto:car-3f2a1b7c",
   "rota":["Salvador","Feira de Santana","Jequié"],
   "horarios":["2026-09-15T06:00:00-03:00","2026-09-15T08:00:00-03:00","2026-09-15T11:00:00-03:00"],
   "assentos":3,
@@ -317,12 +325,12 @@ Erros: `PERFIL_INCORRETO`, `CAMPO_INVALIDO`.
 
 Atende RF04: passageiros confirmados por trecho.
 
-Requisição: `{"carona_id":"car-3f2a1b7c"}`
+Requisição: `{"carona_id":"vaijunto:car-3f2a1b7c"}`
 
 ```json
-{"id":"4","status":"OK","dados":{"carona_id":"car-3f2a1b7c","trechos":[
+{"id":"4","status":"OK","dados":{"carona_id":"vaijunto:car-3f2a1b7c","trechos":[
   {"indice":0,"origem":"Salvador","destino":"Feira de Santana","livres":2,
-   "passageiros":[{"reserva_id":"res-91c4e2d8","usuario":"maria","nome":"Maria Souza"}]},
+   "passageiros":[{"reserva_id":"vaijunto:res-91c4e2d8","usuario":"maria","nome":"Maria Souza"}]},
   {"indice":1,"origem":"Feira de Santana","destino":"Jequié","livres":3,"passageiros":[]}
 ]}}
 ```
@@ -331,7 +339,7 @@ Erros: `CARONA_NAO_ENCONTRADA`, `NAO_E_DONO`, `PERFIL_INCORRETO`, `CAMPO_INVALID
 
 ### 5.7 `CANCELAR_CARONA`
 
-Requisição: `{"carona_id":"car-3f2a1b7c"}`
+Requisição: `{"carona_id":"vaijunto:car-3f2a1b7c"}`
 
 Permitido até o instante de partida da carona.
 
@@ -344,7 +352,7 @@ O cancelamento em cascata **ignora** o prazo de uma hora do passageiro: aquele
 prazo protege o motorista, não o contrário.
 
 ```json
-{"id":"5","status":"OK","dados":{"carona_id":"car-3f2a1b7c","reservas_canceladas":2}}
+{"id":"5","status":"OK","dados":{"carona_id":"vaijunto:car-3f2a1b7c","reservas_canceladas":2}}
 ```
 
 Fora do prazo, o erro traz a partida da qual o prazo foi contado, no mesmo
@@ -382,11 +390,11 @@ demais foram omitidos:
   "chegada":"2026-10-01T14:30:00-03:00",
   "baldeacoes":1,
   "trechos":[
-    {"carona_id":"car-1","motorista":"João Silva","de":0,"ate":2,
+    {"carona_id":"vaijunto:car-1","motorista":"João Silva","de":0,"ate":2,
      "origem":"Salvador","destino":"Jequié",
      "partida":"2026-10-01T06:00:00-03:00","chegada":"2026-10-01T10:45:00-03:00",
      "preco_centavos":6000},
-    {"carona_id":"car-2","motorista":"Carlos Lima","de":0,"ate":1,
+    {"carona_id":"vaijunto:car-2","motorista":"Carlos Lima","de":0,"ate":1,
      "origem":"Jequié","destino":"Vitória da Conquista",
      "partida":"2026-10-01T12:15:00-03:00","chegada":"2026-10-01T14:30:00-03:00",
      "preco_centavos":4000}
@@ -421,8 +429,8 @@ O cliente devolve os trechos do itinerário escolhido, na ordem:
 
 ```json
 {"id":"7","tipo":"RESERVAR","dados":{"trechos":[
-  {"carona_id":"car-1","de":0,"ate":2},
-  {"carona_id":"car-2","de":0,"ate":1}
+  {"carona_id":"vaijunto:car-1","de":0,"ate":2},
+  {"carona_id":"vaijunto:car-2","de":0,"ate":1}
 ]}}
 ```
 
@@ -447,7 +455,7 @@ o que garante a atomicidade. Nenhuma escrita ocorre antes de toda a validação
 passar, então não existe estado parcial a desfazer.
 
 ```json
-{"id":"7","status":"OK","dados":{"reserva_id":"res-91c4e2d8","preco_total_centavos":10000}}
+{"id":"7","status":"OK","dados":{"reserva_id":"vaijunto:res-91c4e2d8","preco_total_centavos":10000}}
 ```
 
 Erro por indisponibilidade, com detalhe suficiente para o CLI explicar:
@@ -455,15 +463,15 @@ Erro por indisponibilidade, com detalhe suficiente para o CLI explicar:
 ```json
 {"id":"7","status":"ERRO","codigo":"SEM_ASSENTO",
  "mensagem":"Assento esgotado no trecho Salvador → Feira de Santana.",
- "dados":{"carona_id":"car-1","indice_trecho":0}}
+ "dados":{"carona_id":"vaijunto:car-1","indice_trecho":0}}
 ```
 
 Erro por sobreposição:
 
 ```json
 {"id":"7","status":"ERRO","codigo":"CONFLITO_HORARIO",
- "mensagem":"Você já tem a reserva res-91c4e2d8 nesse período.",
- "dados":{"reserva_id":"res-91c4e2d8"}}
+ "mensagem":"Você já tem a reserva vaijunto:res-91c4e2d8 nesse período.",
+ "dados":{"reserva_id":"vaijunto:res-91c4e2d8"}}
 ```
 
 Outros erros: `CARONA_NAO_ENCONTRADA`, `CARONA_CANCELADA`,
@@ -476,17 +484,17 @@ opcional e vale `false` quando ausente.
 
 ```json
 {"id":"8","status":"OK","dados":{"reservas":[{
-  "reserva_id":"res-91c4e2d8","ativa":true,
+  "reserva_id":"vaijunto:res-91c4e2d8","ativa":true,
   "criada_em":"2026-08-27T14:02:11-03:00",
   "preco_total_centavos":10000,
   "partida":"2026-10-01T06:00:00-03:00",
   "chegada":"2026-10-01T14:30:00-03:00",
   "trechos":[
-    {"carona_id":"car-1","motorista":"João Silva",
+    {"carona_id":"vaijunto:car-1","motorista":"João Silva",
      "origem":"Salvador","destino":"Jequié",
      "partida":"2026-10-01T06:00:00-03:00","chegada":"2026-10-01T10:45:00-03:00",
      "preco_centavos":6000},
-    {"carona_id":"car-2","motorista":"Carlos Lima",
+    {"carona_id":"vaijunto:car-2","motorista":"Carlos Lima",
      "origem":"Jequié","destino":"Vitória da Conquista",
      "partida":"2026-10-01T12:15:00-03:00","chegada":"2026-10-01T14:30:00-03:00",
      "preco_centavos":4000}
@@ -502,7 +510,7 @@ Erros: `PERFIL_INCORRETO`, `CAMPO_INVALIDO`.
 
 ### 5.11 `CANCELAR_RESERVA`
 
-Requisição: `{"reserva_id":"res-91c4e2d8"}`
+Requisição: `{"reserva_id":"vaijunto:res-91c4e2d8"}`
 
 Permitido até **1 hora antes** da partida do primeiro trecho da reserva.
 
@@ -510,7 +518,7 @@ Efeito: marca a reserva como inativa e devolve um assento a cada trecho que ela
 consumia, em seção crítica única.
 
 ```json
-{"id":"9","status":"OK","dados":{"reserva_id":"res-91c4e2d8"}}
+{"id":"9","status":"OK","dados":{"reserva_id":"vaijunto:res-91c4e2d8"}}
 ```
 
 ```json
@@ -569,11 +577,11 @@ prazo foi contado. Nos demais, a `mensagem` basta.
 → {"id":"2","tipo":"BUSCAR_ITINERARIOS","dados":{"origem":"Salvador","destino":"Vitória da Conquista","data":"2026-10-01"}}
 ← {"id":"2","status":"OK","dados":{"itinerarios":[ ... 4 opções ... ]}}
 
-→ {"id":"3","tipo":"RESERVAR","dados":{"trechos":[{"carona_id":"car-1","de":0,"ate":1},{"carona_id":"car-4","de":0,"ate":1},{"carona_id":"car-2","de":0,"ate":1}]}}
-← {"id":"3","status":"ERRO","codigo":"SEM_ASSENTO","mensagem":"...","dados":{"carona_id":"car-4","indice_trecho":0}}
+→ {"id":"3","tipo":"RESERVAR","dados":{"trechos":[{"carona_id":"vaijunto:car-1","de":0,"ate":1},{"carona_id":"vaijunto:car-4","de":0,"ate":1},{"carona_id":"vaijunto:car-2","de":0,"ate":1}]}}
+← {"id":"3","status":"ERRO","codigo":"SEM_ASSENTO","mensagem":"...","dados":{"carona_id":"vaijunto:car-4","indice_trecho":0}}
 
-→ {"id":"4","tipo":"RESERVAR","dados":{"trechos":[{"carona_id":"car-1","de":0,"ate":2},{"carona_id":"car-2","de":0,"ate":1}]}}
-← {"id":"4","status":"OK","dados":{"reserva_id":"res-91c4e2d8","preco_total_centavos":10000}}
+→ {"id":"4","tipo":"RESERVAR","dados":{"trechos":[{"carona_id":"vaijunto:car-1","de":0,"ate":2},{"carona_id":"vaijunto:car-2","de":0,"ate":1}]}}
+← {"id":"4","status":"OK","dados":{"reserva_id":"vaijunto:res-91c4e2d8","preco_total_centavos":10000}}
 
 → {"id":"5","tipo":"LOGOUT","dados":{}}
 ← {"id":"5","status":"OK","dados":{}}
@@ -581,6 +589,6 @@ prazo foi contado. Nos demais, a `mensagem` basta.
 
 As caronas são as do cenário do `PROJETO.md` (seção 9.2). A requisição 3
 falhando e a 4 tendo sucesso demonstra o comportamento exigido: o passageiro
-perdeu a disputa pelo assento único de `car-4`, nada foi reservado pela metade —
-nem o trecho de `car-1`, que tinha assento sobrando —, e ele escolheu outro
+perdeu a disputa pelo assento único de `vaijunto:car-4`, nada foi reservado pela metade —
+nem o trecho de `vaijunto:car-1`, que tinha assento sobrando —, e ele escolheu outro
 itinerário.
