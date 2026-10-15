@@ -146,12 +146,12 @@ func TestSemAssentoTrazTrechoNoDados(t *testing.T) {
 	// car-4 tem um assento só (PROJETO.md, seção 9.2).
 	primeiro := conectar(t, endereco)
 	primeiro.entrar("maria", "abcd")
-	primeiro.exigirOK(protocolo.TipoReservar, reserva(trecho("car-4", 0, 1)), nil)
+	primeiro.exigirOK(protocolo.TipoReservar, reserva(trecho("vaijunto:car-4", 0, 1)), nil)
 
 	segundo := conectar(t, endereco)
 	segundo.entrar("pedro", "abcd")
 
-	resp := segundo.enviar(protocolo.TipoReservar, reserva(trecho("car-4", 0, 1)))
+	resp := segundo.enviar(protocolo.TipoReservar, reserva(trecho("vaijunto:car-4", 0, 1)))
 	if resp.Codigo != protocolo.CodigoSemAssento {
 		t.Fatalf("codigo = %q, want %s (mensagem: %q)", resp.Codigo, protocolo.CodigoSemAssento, resp.Mensagem)
 	}
@@ -160,7 +160,7 @@ func TestSemAssentoTrazTrechoNoDados(t *testing.T) {
 	if err := json.Unmarshal(resp.Dados, &dados); err != nil {
 		t.Fatalf("decodificar dados %s: %v", resp.Dados, err)
 	}
-	if dados.CaronaID != "car-4" || dados.IndiceTrecho != 0 {
+	if dados.CaronaID != "vaijunto:car-4" || dados.IndiceTrecho != 0 {
 		t.Errorf("dados = %+v, want car-4 trecho 0", dados)
 	}
 }
@@ -174,9 +174,9 @@ func TestConflitoHorarioTrazReservaNoDados(t *testing.T) {
 
 	// car-1 ocupa maria das 06:00 às 10:45; car-4 vai das 08:15 às 11:15.
 	var primeira protocolo.ReservarResposta
-	c.exigirOK(protocolo.TipoReservar, reserva(trecho("car-1", 0, 2)), &primeira)
+	c.exigirOK(protocolo.TipoReservar, reserva(trecho("vaijunto:car-1", 0, 2)), &primeira)
 
-	resp := c.enviar(protocolo.TipoReservar, reserva(trecho("car-4", 0, 1)))
+	resp := c.enviar(protocolo.TipoReservar, reserva(trecho("vaijunto:car-4", 0, 1)))
 	if resp.Codigo != protocolo.CodigoConflitoHorario {
 		t.Fatalf("codigo = %q, want %s (mensagem: %q)", resp.Codigo, protocolo.CodigoConflitoHorario, resp.Mensagem)
 	}
@@ -283,15 +283,15 @@ func TestRecusasDeReserva(t *testing.T) {
 		{"sem trechos", vazio, protocolo.CodigoCampoInvalido},
 		{"trechos vazio", reserva(), protocolo.CodigoCampoInvalido},
 		{"trechos com tipo errado", map[string]any{"trechos": 7}, protocolo.CodigoCampoInvalido},
-		{"de ausente", map[string]any{"trechos": []any{map[string]any{"carona_id": "car-1", "ate": 1}}}, protocolo.CodigoCampoInvalido},
+		{"de ausente", map[string]any{"trechos": []any{map[string]any{"carona_id": "vaijunto:car-1", "ate": 1}}}, protocolo.CodigoCampoInvalido},
 		{"carona_id vazio", reserva(trecho("", 0, 1)), protocolo.CodigoCampoInvalido},
-		{"de igual a ate", reserva(trecho("car-1", 1, 1)), protocolo.CodigoCampoInvalido},
-		{"ate além da rota", reserva(trecho("car-1", 0, 3)), protocolo.CodigoCampoInvalido},
+		{"de igual a ate", reserva(trecho("vaijunto:car-1", 1, 1)), protocolo.CodigoCampoInvalido},
+		{"ate além da rota", reserva(trecho("vaijunto:car-1", 0, 3)), protocolo.CodigoCampoInvalido},
 		{"carona inexistente", reserva(trecho("car-99", 0, 1)), protocolo.CodigoCaronaNaoEncontrada},
-		{"mesma carona duas vezes", reserva(trecho("car-1", 0, 1), trecho("car-1", 1, 2)), protocolo.CodigoItinerarioInvalido},
-		{"não encadeia no espaço", reserva(trecho("car-1", 0, 1), trecho("car-2", 0, 1)), protocolo.CodigoItinerarioInvalido},
-		{"folga abaixo da margem", reserva(trecho("car-1", 0, 2), trecho("car-6", 0, 1)), protocolo.CodigoItinerarioInvalido},
-		{"volta a cidade visitada", reserva(trecho("car-1", 0, 1), trecho("car-8", 0, 1), trecho("car-5", 1, 2)), protocolo.CodigoItinerarioInvalido},
+		{"mesma carona duas vezes", reserva(trecho("vaijunto:car-1", 0, 1), trecho("vaijunto:car-1", 1, 2)), protocolo.CodigoItinerarioInvalido},
+		{"não encadeia no espaço", reserva(trecho("vaijunto:car-1", 0, 1), trecho("vaijunto:car-2", 0, 1)), protocolo.CodigoItinerarioInvalido},
+		{"folga abaixo da margem", reserva(trecho("vaijunto:car-1", 0, 2), trecho("vaijunto:car-6", 0, 1)), protocolo.CodigoItinerarioInvalido},
+		{"volta a cidade visitada", reserva(trecho("vaijunto:car-1", 0, 1), trecho("vaijunto:car-8", 0, 1), trecho("vaijunto:car-5", 1, 2)), protocolo.CodigoItinerarioInvalido},
 	}
 
 	for _, caso := range casos {

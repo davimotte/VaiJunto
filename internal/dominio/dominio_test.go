@@ -20,12 +20,12 @@ func fusoBrasilia() *time.Location {
 // (PROJETO.md, seção 9.2): car-1 parte de Salvador às 06:00 de 01/10/2026,
 // passa por Feira de Santana e chega a Jequié às 10:45.
 func TestCarregarCaronas_Car1ChegaEmJequieAs1045(t *testing.T) {
-	caronas, err := CarregarCaronas("../../dados/caronas.json")
+	caronas, err := CarregarCaronas("vaijunto", "../../testes/dados/p1/caronas.json")
 	if err != nil {
 		t.Fatalf("CarregarCaronas: %v", err)
 	}
 
-	car1, ok := caronas["car-1"]
+	car1, ok := caronas["vaijunto:car-1"]
 	if !ok {
 		t.Fatalf("car-1 não encontrada; caronas carregadas: %d", len(caronas))
 	}
@@ -92,18 +92,18 @@ func escreverCaronas(t *testing.T, entradas ...map[string]any) string {
 // linha, e 40 minutos entre Jequié e Salvador não é duração de trajeto nenhuma.
 // Uma carga que ainda calculasse os horários falharia aqui.
 func TestCarregarCaronas_LeRotaEHorariosDoArquivo(t *testing.T) {
-	caminho := escreverCaronas(t, caronaDeArquivo("car-x",
+	caminho := escreverCaronas(t, caronaDeArquivo("vaijunto:car-x",
 		[]string{"Jequié", "Salvador", "Vitória da Conquista"},
 		[]string{"2026-09-15T07:00:00-03:00", "2026-09-15T07:40:00-03:00", "2026-09-15T19:00:00-03:00"},
 		2, []int{1000, 2000}))
 
-	caronas, err := CarregarCaronas(caminho)
+	caronas, err := CarregarCaronas("vaijunto", caminho)
 	if err != nil {
 		t.Fatalf("CarregarCaronas: %v", err)
 	}
-	c, ok := caronas["car-x"]
+	c, ok := caronas["vaijunto:car-x"]
 	if !ok {
-		t.Fatalf("car-x não carregada; caronas: %v", caronas)
+		t.Fatalf("vaijunto:car-x não carregada; caronas: %v", caronas)
 	}
 
 	rotaEsperada := []string{"Jequié", "Salvador", "Vitória da Conquista"}
@@ -136,12 +136,12 @@ func TestCarregarCaronas_LeRotaEHorariosDoArquivo(t *testing.T) {
 // publicação que a carga não aplica (D09): os dados de demonstração têm data
 // fixa, e exigir partida no futuro impediria o servidor de subir depois dela.
 func TestCarregarCaronas_NaoExigePartidaNoFuturo(t *testing.T) {
-	caminho := escreverCaronas(t, caronaDeArquivo("car-antiga",
+	caminho := escreverCaronas(t, caronaDeArquivo("vaijunto:car-antiga",
 		[]string{"Salvador", "Feira de Santana"},
 		[]string{"2020-01-10T08:00:00-03:00", "2020-01-10T10:00:00-03:00"},
 		3, []int{3000}))
 
-	if _, err := CarregarCaronas(caminho); err != nil {
+	if _, err := CarregarCaronas("vaijunto", caminho); err != nil {
 		t.Fatalf("CarregarCaronas recusou carona no passado: %v", err)
 	}
 }
@@ -160,7 +160,7 @@ func TestCarregarCaronas_NaoExigePartidaNoFuturo(t *testing.T) {
 // arquivo corrigir.
 func TestCarregarCaronas_RecusaCaronaInvalida(t *testing.T) {
 	valida := func() map[string]any {
-		return caronaDeArquivo("car-ruim",
+		return caronaDeArquivo("vaijunto:car-ruim",
 			[]string{"Salvador", "Feira de Santana", "Jequié"},
 			[]string{"2026-09-15T06:00:00-03:00", "2026-09-15T08:00:00-03:00", "2026-09-15T11:00:00-03:00"},
 			3, []int{3000, 4500})
@@ -217,7 +217,7 @@ func TestCarregarCaronas_RecusaCaronaInvalida(t *testing.T) {
 			entrada := valida()
 			caso.estraga(entrada)
 
-			_, err := CarregarCaronas(escreverCaronas(t, entrada))
+			_, err := CarregarCaronas("vaijunto", escreverCaronas(t, entrada))
 			if !errors.Is(err, caso.quero) {
 				t.Fatalf("err = %v, want %v", err, caso.quero)
 			}
@@ -232,7 +232,7 @@ func TestCarregarCaronas_RecusaCaronaInvalida(t *testing.T) {
 // demonstração são lidos sem erro e populam o Estado inicial, sem nenhuma
 // reserva (D02, D07).
 func TestCarregarEstado(t *testing.T) {
-	estado, err := CarregarEstado("../../dados/usuarios.json", "../../dados/caronas.json")
+	estado, err := CarregarEstado("vaijunto", "../../testes/dados/p1/usuarios.json", "../../testes/dados/p1/caronas.json")
 	if err != nil {
 		t.Fatalf("CarregarEstado: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestCarregarEstado(t *testing.T) {
 // estadoDeTeste monta um Estado com um motorista, um passageiro e nenhuma
 // carona, para exercitar as regras sem depender de dados/.
 func estadoDeTeste() *Estado {
-	e := NovoEstado()
+	e := NovoEstado("vaijunto")
 	e.usuarios["joao"] = &Usuario{Usuario: "joao", Senha: "1234", Nome: "João Silva", Perfil: "MOTORISTA"}
 	e.usuarios["maria"] = &Usuario{Usuario: "maria", Senha: "abcd", Nome: "Maria Souza", Perfil: "PASSAGEIRO"}
 	return e
@@ -632,7 +632,7 @@ func TestDetalharCarona_ListaPassageirosPorTrecho(t *testing.T) {
 // cobrir.
 func estadoDoCenario(t *testing.T) *Estado {
 	t.Helper()
-	e, err := CarregarEstado("../../dados/usuarios.json", "../../dados/caronas.json")
+	e, err := CarregarEstado("vaijunto", "../../testes/dados/p1/usuarios.json", "../../testes/dados/p1/caronas.json")
 	if err != nil {
 		t.Fatalf("CarregarEstado: %v", err)
 	}
@@ -640,7 +640,7 @@ func estadoDoCenario(t *testing.T) *Estado {
 }
 
 // assinatura reduz um itinerário à sequência de trechos que o identifica,
-// no formato "car-1:0-1|car-3:0-2". É o que o teste compara: os horários e o
+// no formato "car-1:0-1|vaijunto:car-3:0-2". É o que o teste compara: os horários e o
 // preço são conferidos à parte, e comparar struct a struct só tornaria a
 // mensagem de falha ilegível.
 func assinatura(it Itinerario) string {
@@ -689,10 +689,10 @@ func TestBuscarItinerarios_CenarioSecao92(t *testing.T) {
 		chegada    time.Time
 		baldeacoes int
 	}{
-		{"car-5:1-2", 11000, as(10, 30), as(17, 30), 0},
-		{"car-1:0-1|car-3:0-1", 8000, as(6, 0), as(16, 45), 1},
-		{"car-1:0-2|car-2:0-1", 10000, as(6, 0), as(14, 30), 1},
-		{"car-1:0-1|car-4:0-1|car-2:0-1", 9500, as(6, 0), as(14, 30), 2},
+		{"vaijunto:car-5:1-2", 11000, as(10, 30), as(17, 30), 0},
+		{"vaijunto:car-1:0-1|vaijunto:car-3:0-1", 8000, as(6, 0), as(16, 45), 1},
+		{"vaijunto:car-1:0-2|vaijunto:car-2:0-1", 10000, as(6, 0), as(14, 30), 1},
+		{"vaijunto:car-1:0-1|vaijunto:car-4:0-1|vaijunto:car-2:0-1", 9500, as(6, 0), as(14, 30), 2},
 	}
 
 	obtidas := make([]string, len(itinerarios))
@@ -740,9 +740,9 @@ func TestBuscarItinerarios_CenarioSecao92(t *testing.T) {
 	// redundante em relação à lista completa acima, mas nomeia a regra que
 	// quebrou: sem ela, a falha diria apenas "5 itinerários, want 4".
 	proibidas := map[string]string{
-		"car-6": "sai 15 min após car-1 chegar a Jequié, abaixo de MARGEM_BALDEACAO",
-		"car-7": "é de 02/10: como primeira perna, fora da data; como conexão, 24 h de espera, acima de ESPERA_MAXIMA_BALDEACAO",
-		"car-8": "volta a Salvador depois de car-1: cidade repetida no itinerário",
+		"vaijunto:car-6": "sai 15 min após car-1 chegar a Jequié, abaixo de MARGEM_BALDEACAO",
+		"vaijunto:car-7": "é de 02/10: como primeira perna, fora da data; como conexão, 24 h de espera, acima de ESPERA_MAXIMA_BALDEACAO",
+		"vaijunto:car-8": "volta a Salvador depois de car-1: cidade repetida no itinerário",
 	}
 	for _, it := range itinerarios {
 		for _, p := range it.Pernas {

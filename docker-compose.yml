@@ -7,11 +7,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.servidor
-    command: ["--endereco", "0.0.0.0:9000", "--usuarios", "/dados/usuarios.json", "--caronas", "/dados/caronas.json"]
+    command: ["--empresa", "vaijunto", "--endereco", "0.0.0.0:9000", "--usuarios", "/dados/usuarios.json", "--caronas", "/dados/caronas.json"]
     ports:
       - "9000:9000"
     volumes:
-      - ./dados:/dados:ro
+      - ./dados/vaijunto:/dados:ro
 
   passageiro:
     build:

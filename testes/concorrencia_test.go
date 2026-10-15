@@ -381,7 +381,7 @@ func TestT1AssentoUnicoDisputadoPor50Clientes(t *testing.T) {
 
 	participantes := passageirosDaCarga()[3:] // os 50 teste01..teste50
 	respostas := disputa(t, endereco, participantes, func(int) protocolo.ReservarRequisicao {
-		return reserva(trecho("car-4", 0, 1))
+		return reserva(trecho("vaijunto:car-4", 0, 1))
 	})
 
 	oks, porCodigo := contar(respostas)
@@ -394,7 +394,7 @@ func TestT1AssentoUnicoDisputadoPor50Clientes(t *testing.T) {
 	}
 
 	caronas := observarCaronas(t, endereco)
-	if livres := caronas["car-4"].livres[0]; livres != 0 {
+	if livres := caronas["vaijunto:car-4"].livres[0]; livres != 0 {
 		t.Errorf("car-4 trecho 0: livres = %d, want 0", livres)
 	}
 	verificarInvariantes(t, endereco)
@@ -888,7 +888,7 @@ func rajadaMalformada(conexao, rodadas int) ([]byte, []respostaEsperada) {
 		linha(`{"id":"`+id+`","tipo":"PING","dados":null}`, respostaEsperada{id, protocolo.CodigoEnvelopeInvalido})
 		linha(`{"id":"`+id+`","tipo":"INVENTADO","dados":{}}`, respostaEsperada{id, protocolo.CodigoTipoDesconhecido})
 		linha(`{"id":"`+id+`","tipo":"ping","dados":{}}`, respostaEsperada{id, protocolo.CodigoTipoDesconhecido})
-		linha(`{"id":"`+id+`","tipo":"RESERVAR","dados":{"trechos":[{"carona_id":"car-4","de":0,"ate":1}]}}`,
+		linha(`{"id":"`+id+`","tipo":"RESERVAR","dados":{"trechos":[{"carona_id":"vaijunto:car-4","de":0,"ate":1}]}}`,
 			respostaEsperada{id, protocolo.CodigoNaoAutenticado})
 		rajada = append(rajada, '\n')
 	}
@@ -957,7 +957,7 @@ func TestT7RajadaDeMensagensMalformadas(t *testing.T) {
 	close(largada)
 	espera.Wait()
 
-	if livres := observarCaronas(t, endereco)["car-4"].livres[0]; livres != 1 {
+	if livres := observarCaronas(t, endereco)["vaijunto:car-4"].livres[0]; livres != 1 {
 		t.Errorf("car-4: livres = %d, want 1 — uma linha recusada alterou o estado", livres)
 	}
 	verificarInvariantes(t, endereco)

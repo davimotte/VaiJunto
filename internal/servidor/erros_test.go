@@ -90,7 +90,7 @@ func TestRespostaDeErroDeDominio_DesconhecidoViraErroInterno(t *testing.T) {
 // funcione, e sim que ela foi reconhecida: qualquer resposta serve, menos
 // TIPO_DESCONHECIDO.
 func TestTodaOperacaoDaTabelaTemHandler(t *testing.T) {
-	estado := dominio.NovoEstado()
+	estado := dominio.NovoEstado("vaijunto")
 
 	for tipo, exigencia := range perfilExigido {
 		sess := &sessao{}

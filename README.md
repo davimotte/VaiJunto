@@ -93,7 +93,8 @@ Nenhuma dependência externa: `go.mod` não tem nenhum `require`.
 
 ```bash
 go build ./...
-go run ./cmd/servidor --usuarios dados/usuarios.json --caronas dados/caronas.json
+go run ./cmd/servidor --empresa vaijunto \
+  --usuarios dados/vaijunto/usuarios.json --caronas dados/vaijunto/caronas.json
 ```
 
 O servidor escuta em `0.0.0.0:9000` por padrão; `--endereco` muda isso.
@@ -262,8 +263,8 @@ cada máquina, conforme abaixo.
 ```bash
 # Máquina A — servidor
 docker run --rm --name vaijunto-servidor -p 9000:9000 -e TZ=America/Bahia \
-  -v "$(pwd)/dados:/dados" vaijunto-servidor \
-  --usuarios /dados/usuarios.json --caronas /dados/caronas.json
+  -v "$(pwd)/dados/vaijunto:/dados" vaijunto-servidor \
+  --empresa vaijunto --usuarios /dados/usuarios.json --caronas /dados/caronas.json
 
 # Máquina B — cliente
 docker run --rm -it -e VAIJUNTO_SERVIDOR=192.168.0.10:9000 \

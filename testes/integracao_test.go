@@ -27,8 +27,8 @@ import (
 )
 
 const (
-	caminhoUsuarios = "../dados/usuarios.json"
-	caminhoCaronas  = "../dados/caronas.json"
+	caminhoUsuarios = "dados/p1/usuarios.json"
+	caminhoCaronas  = "dados/p1/caronas.json"
 
 	// caronasDeJoaoNaCarga é quantas caronas joao tem no cenário da seção 9.2
 	// do PROJETO.md: car-1 e car-5. Os testes que publicam como joao somam as
@@ -61,7 +61,7 @@ func TestMain(m *testing.M) {
 func subirServidor(t *testing.T) string {
 	t.Helper()
 
-	estado, err := dominio.CarregarEstado(caminhoUsuarios, caminhoCaronas)
+	estado, err := dominio.CarregarEstado("vaijunto", caminhoUsuarios, caminhoCaronas)
 	if err != nil {
 		t.Fatalf("carga inicial: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestLoginEmConexaoJaAutenticada(t *testing.T) {
 	var lista protocolo.ListarMinhasCaronasResposta
 	c.exigirOK(protocolo.TipoListarMinhasCaronas, protocolo.ListarMinhasCaronasRequisicao{}, &lista)
 	for _, carona := range lista.Caronas {
-		if carona.CaronaID == "car-2" {
+		if carona.CaronaID == "vaijunto:car-2" {
 			t.Fatalf("a conexão assumiu a identidade de carlos após um LOGIN recusado")
 		}
 	}
@@ -299,7 +299,7 @@ func TestPerfilIncorreto(t *testing.T) {
 
 	c.exigirErro(protocolo.TipoPublicarCarona, vazio, protocolo.CodigoPerfilIncorreto)
 	c.exigirErro(protocolo.TipoListarMinhasCaronas, vazio, protocolo.CodigoPerfilIncorreto)
-	c.exigirErro(protocolo.TipoDetalharCarona, protocolo.DetalharCaronaRequisicao{CaronaID: "car-1"}, protocolo.CodigoPerfilIncorreto)
+	c.exigirErro(protocolo.TipoDetalharCarona, protocolo.DetalharCaronaRequisicao{CaronaID: "vaijunto:car-1"}, protocolo.CodigoPerfilIncorreto)
 
 	// O perfil é verificado antes do payload: nem o carona_id válido de car-1
 	// (que existe e é do joão) muda o resultado.
@@ -339,13 +339,13 @@ func TestIdentidadeEhPorConexao(t *testing.T) {
 	deCarlos := listar(carlos)
 	deJoaoDeNovo := listar(joao)
 
-	if !deJoao["car-1"] || !deJoao["car-5"] || len(deJoao) != caronasDeJoaoNaCarga {
+	if !deJoao["vaijunto:car-1"] || !deJoao["vaijunto:car-5"] || len(deJoao) != caronasDeJoaoNaCarga {
 		t.Fatalf("caronas de joao = %v, want car-1 e car-5", deJoao)
 	}
-	if !deCarlos["car-2"] || !deCarlos["car-6"] || !deCarlos["car-8"] || len(deCarlos) != 3 {
+	if !deCarlos["vaijunto:car-2"] || !deCarlos["vaijunto:car-6"] || !deCarlos["vaijunto:car-8"] || len(deCarlos) != 3 {
 		t.Fatalf("caronas de carlos = %v, want car-2, car-6 e car-8", deCarlos)
 	}
-	if len(deJoaoDeNovo) != caronasDeJoaoNaCarga || !deJoaoDeNovo["car-1"] {
+	if len(deJoaoDeNovo) != caronasDeJoaoNaCarga || !deJoaoDeNovo["vaijunto:car-1"] {
 		t.Fatalf("a segunda listagem de joao mudou: %v", deJoaoDeNovo)
 	}
 
@@ -637,7 +637,7 @@ func TestListarMinhasCaronasDetalhaTrechos(t *testing.T) {
 	// A carga inicial coloca car-5 às 05:30 e car-1 às 06:00: a lista sai
 	// ordenada por partida, e não na ordem do arquivo nem na ordem aleatória
 	// do mapa — car-1 vem antes de car-5 no arquivo e no identificador.
-	ordemEsperada := []string{"car-5", "car-1"}
+	ordemEsperada := []string{"vaijunto:car-5", "vaijunto:car-1"}
 	if len(lista.Caronas) != len(ordemEsperada) {
 		t.Fatalf("joao tem %d caronas, want %d", len(lista.Caronas), len(ordemEsperada))
 	}
@@ -725,7 +725,7 @@ func TestDetalharCaronaListaTrechosVazios(t *testing.T) {
 	c := conectar(t, subirServidor(t))
 	c.entrar("joao", "1234")
 
-	resp := c.enviar(protocolo.TipoDetalharCarona, protocolo.DetalharCaronaRequisicao{CaronaID: "car-1"})
+	resp := c.enviar(protocolo.TipoDetalharCarona, protocolo.DetalharCaronaRequisicao{CaronaID: "vaijunto:car-1"})
 	if resp.Status != protocolo.StatusOK {
 		t.Fatalf("DETALHAR_CARONA: %q %q", resp.Codigo, resp.Mensagem)
 	}
@@ -734,7 +734,7 @@ func TestDetalharCaronaListaTrechosVazios(t *testing.T) {
 	if err := json.Unmarshal(resp.Dados, &detalhe); err != nil {
 		t.Fatalf("decodificar detalhe: %v", err)
 	}
-	if detalhe.CaronaID != "car-1" || len(detalhe.Trechos) != 2 {
+	if detalhe.CaronaID != "vaijunto:car-1" || len(detalhe.Trechos) != 2 {
 		t.Fatalf("detalhe = %+v", detalhe)
 	}
 	esperados := []protocolo.TrechoDetalhado{
@@ -766,7 +766,7 @@ func TestDetalharCaronaRecusas(t *testing.T) {
 	c.entrar("joao", "1234")
 
 	// car-2 é do carlos.
-	c.exigirErro(protocolo.TipoDetalharCarona, protocolo.DetalharCaronaRequisicao{CaronaID: "car-2"}, protocolo.CodigoNaoEDono)
+	c.exigirErro(protocolo.TipoDetalharCarona, protocolo.DetalharCaronaRequisicao{CaronaID: "vaijunto:car-2"}, protocolo.CodigoNaoEDono)
 	c.exigirErro(protocolo.TipoDetalharCarona, protocolo.DetalharCaronaRequisicao{CaronaID: "car-inexistente"}, protocolo.CodigoCaronaNaoEncontrada)
 	c.exigirErro(protocolo.TipoDetalharCarona, vazio, protocolo.CodigoCampoInvalido)
 	c.exigirErro(protocolo.TipoDetalharCarona, map[string]any{"carona_id": 5}, protocolo.CodigoCampoInvalido)
@@ -830,7 +830,7 @@ func TestRajadaDeMensagens(t *testing.T) {
 		linha, err := json.Marshal(protocolo.Requisicao{
 			ID:    fmt.Sprintf("rajada-%d", i),
 			Tipo:  protocolo.TipoDetalharCarona,
-			Dados: json.RawMessage(`{"carona_id":"car-1"}`),
+			Dados: json.RawMessage(`{"carona_id":"vaijunto:car-1"}`),
 		})
 		if err != nil {
 			t.Fatalf("montar envelope: %v", err)

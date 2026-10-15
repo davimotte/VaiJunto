@@ -64,7 +64,7 @@ func livresDe(t *testing.T, e *Estado, motorista, caronaID string) []int {
 func TestReservar_BaldeacaoDaCargaDecrementaSoOsTrechosUsados(t *testing.T) {
 	e := estadoDoCenario(t)
 
-	reserva, itinerario, err := e.Reservar("maria", []ItemReserva{item("car-1", 0, 2), item("car-2", 0, 1)}, as(0, 0))
+	reserva, itinerario, err := e.Reservar("maria", []ItemReserva{item("vaijunto:car-1", 0, 2), item("vaijunto:car-2", 0, 1)}, as(0, 0))
 	if err != nil {
 		t.Fatalf("Reservar: %v", err)
 	}
@@ -81,16 +81,16 @@ func TestReservar_BaldeacaoDaCargaDecrementaSoOsTrechosUsados(t *testing.T) {
 
 	// car-1 tem 3 assentos e os dois trechos foram usados; car-2 tem 2 e só
 	// tem um trecho.
-	if got := livresDe(t, e, "joao", "car-1"); got[0] != 2 || got[1] != 2 {
+	if got := livresDe(t, e, "joao", "vaijunto:car-1"); got[0] != 2 || got[1] != 2 {
 		t.Errorf("car-1 livres = %v, want [2 2]", got)
 	}
-	if got := livresDe(t, e, "carlos", "car-2"); got[0] != 1 {
+	if got := livresDe(t, e, "carlos", "vaijunto:car-2"); got[0] != 1 {
 		t.Errorf("car-2 livres = %v, want [1]", got)
 	}
-	if got := livresDe(t, e, "ana", "car-3"); got[0] != 2 {
+	if got := livresDe(t, e, "ana", "vaijunto:car-3"); got[0] != 2 {
 		t.Errorf("car-3 livres = %v, want [2] — a reserva mexeu em carona que não usou", got)
 	}
-	if got := livresDe(t, e, "ana", "car-4"); got[0] != 1 {
+	if got := livresDe(t, e, "ana", "vaijunto:car-4"); got[0] != 1 {
 		t.Errorf("car-4 livres = %v, want [1] — a reserva mexeu em carona que não usou", got)
 	}
 }
@@ -113,15 +113,15 @@ func TestReservar_Recusas(t *testing.T) {
 	}{
 		{"lista vazia", nil, ErrItemInvalido},
 		{"carona inexistente", []ItemReserva{item("car-99", 0, 1)}, ErrCaronaNaoEncontrada},
-		{"de igual a ate", []ItemReserva{item("car-1", 1, 1)}, ErrItemInvalido},
-		{"de maior que ate", []ItemReserva{item("car-1", 2, 1)}, ErrItemInvalido},
-		{"de negativo", []ItemReserva{item("car-1", -1, 1)}, ErrItemInvalido},
-		{"ate além da rota", []ItemReserva{item("car-1", 0, 3)}, ErrItemInvalido},
-		{"mesma carona duas vezes", []ItemReserva{item("car-1", 0, 1), item("car-1", 1, 2)}, ErrItinerarioInvalido},
-		{"não encadeia no espaço", []ItemReserva{item("car-1", 0, 1), item("car-2", 0, 1)}, ErrItinerarioInvalido},
-		{"folga abaixo da margem (car-6)", []ItemReserva{item("car-1", 0, 2), item("car-6", 0, 1)}, ErrItinerarioInvalido},
-		{"espera acima do teto (car-7)", []ItemReserva{item("car-1", 0, 2), item("car-7", 2, 3)}, ErrItinerarioInvalido},
-		{"volta a cidade visitada (car-8)", []ItemReserva{item("car-1", 0, 1), item("car-8", 0, 1), item("car-5", 1, 2)}, ErrItinerarioInvalido},
+		{"de igual a ate", []ItemReserva{item("vaijunto:car-1", 1, 1)}, ErrItemInvalido},
+		{"de maior que ate", []ItemReserva{item("vaijunto:car-1", 2, 1)}, ErrItemInvalido},
+		{"de negativo", []ItemReserva{item("vaijunto:car-1", -1, 1)}, ErrItemInvalido},
+		{"ate além da rota", []ItemReserva{item("vaijunto:car-1", 0, 3)}, ErrItemInvalido},
+		{"mesma carona duas vezes", []ItemReserva{item("vaijunto:car-1", 0, 1), item("vaijunto:car-1", 1, 2)}, ErrItinerarioInvalido},
+		{"não encadeia no espaço", []ItemReserva{item("vaijunto:car-1", 0, 1), item("vaijunto:car-2", 0, 1)}, ErrItinerarioInvalido},
+		{"folga abaixo da margem (car-6)", []ItemReserva{item("vaijunto:car-1", 0, 2), item("vaijunto:car-6", 0, 1)}, ErrItinerarioInvalido},
+		{"espera acima do teto (car-7)", []ItemReserva{item("vaijunto:car-1", 0, 2), item("vaijunto:car-7", 2, 3)}, ErrItinerarioInvalido},
+		{"volta a cidade visitada (car-8)", []ItemReserva{item("vaijunto:car-1", 0, 1), item("vaijunto:car-8", 0, 1), item("vaijunto:car-5", 1, 2)}, ErrItinerarioInvalido},
 	}
 
 	for _, caso := range casos {
@@ -134,7 +134,7 @@ func TestReservar_Recusas(t *testing.T) {
 			}
 
 			// Nenhuma recusa pode ter escrito nada (passo 5 da seção 7).
-			if got := livresDe(t, e, "joao", "car-1"); got[0] != 3 || got[1] != 3 {
+			if got := livresDe(t, e, "joao", "vaijunto:car-1"); got[0] != 3 || got[1] != 3 {
 				t.Errorf("car-1 livres = %v, want [3 3]: a recusa escreveu antes de validar tudo", got)
 			}
 		})
@@ -220,11 +220,11 @@ func TestReservar_SemAssentoNaoDecrementaAPernaDisponivel(t *testing.T) {
 	e := estadoDoCenario(t)
 
 	// maria toma o assento único de car-4 (Feira de Santana → Jequié).
-	reservarNoCenario(t, e, "maria", item("car-4", 0, 1))
+	reservarNoCenario(t, e, "maria", item("vaijunto:car-4", 0, 1))
 
 	// pedro tenta chegar lá via car-1 até Feira (06:00 → 07:45) e car-4 a
 	// partir das 08:15, folga de 30 min, encadeamento válido. Só falta assento.
-	_, _, err := e.Reservar("pedro", []ItemReserva{item("car-1", 0, 1), item("car-4", 0, 1)}, as(0, 0))
+	_, _, err := e.Reservar("pedro", []ItemReserva{item("vaijunto:car-1", 0, 1), item("vaijunto:car-4", 0, 1)}, as(0, 0))
 	if !errors.Is(err, ErrSemAssento) {
 		t.Fatalf("erro = %v, want ErrSemAssento", err)
 	}
@@ -233,11 +233,11 @@ func TestReservar_SemAssentoNaoDecrementaAPernaDisponivel(t *testing.T) {
 	if !errors.As(err, &detalhe) {
 		t.Fatalf("erro %v não carrega ErroSemAssento; PROTOCOL.md 5.9 exige dizer qual trecho esgotou", err)
 	}
-	if detalhe.CaronaID != "car-4" || detalhe.IndiceTrecho != 0 {
+	if detalhe.CaronaID != "vaijunto:car-4" || detalhe.IndiceTrecho != 0 {
 		t.Errorf("detalhe = %+v, want car-4 trecho 0", detalhe)
 	}
 
-	if got := livresDe(t, e, "joao", "car-1"); got[0] != 3 {
+	if got := livresDe(t, e, "joao", "vaijunto:car-1"); got[0] != 3 {
 		t.Errorf("car-1 livres = %v, want [3 3]: houve reserva parcial", got)
 	}
 }
@@ -256,9 +256,9 @@ func TestReservar_SemAssentoNaoDecrementaAPernaDisponivel(t *testing.T) {
 func TestReservar_ConflitoDeHorarioDoMesmoPassageiro(t *testing.T) {
 	e := estadoDoCenario(t)
 
-	primeira := reservarNoCenario(t, e, "maria", item("car-1", 0, 2))
+	primeira := reservarNoCenario(t, e, "maria", item("vaijunto:car-1", 0, 2))
 
-	_, _, err := e.Reservar("maria", []ItemReserva{item("car-4", 0, 1)}, as(0, 0))
+	_, _, err := e.Reservar("maria", []ItemReserva{item("vaijunto:car-4", 0, 1)}, as(0, 0))
 	if !errors.Is(err, ErrConflitoHorario) {
 		t.Fatalf("erro = %v, want ErrConflitoHorario", err)
 	}
@@ -272,12 +272,12 @@ func TestReservar_ConflitoDeHorarioDoMesmoPassageiro(t *testing.T) {
 	}
 
 	// O mesmo passageiro em outro veículo, mas em período que não se cruza.
-	if _, _, err := e.Reservar("maria", []ItemReserva{item("car-2", 0, 1)}, as(0, 0)); err != nil {
+	if _, _, err := e.Reservar("maria", []ItemReserva{item("vaijunto:car-2", 0, 1)}, as(0, 0)); err != nil {
 		t.Fatalf("reserva em período livre recusada: %v", err)
 	}
 
 	// E o conflito é por passageiro: pedro não é afetado pela reserva de maria.
-	if _, _, err := e.Reservar("pedro", []ItemReserva{item("car-4", 0, 1)}, as(0, 0)); err != nil {
+	if _, _, err := e.Reservar("pedro", []ItemReserva{item("vaijunto:car-4", 0, 1)}, as(0, 0)); err != nil {
 		t.Fatalf("reserva de outro passageiro recusada: %v", err)
 	}
 }
@@ -288,7 +288,7 @@ func TestReservar_ConflitoDeHorarioDoMesmoPassageiro(t *testing.T) {
 func TestCancelarReserva_DevolveAssentosDeTodosOsTrechos(t *testing.T) {
 	e := estadoDoCenario(t)
 
-	reserva := reservarNoCenario(t, e, "maria", item("car-1", 0, 2), item("car-2", 0, 1))
+	reserva := reservarNoCenario(t, e, "maria", item("vaijunto:car-1", 0, 2), item("vaijunto:car-2", 0, 1))
 
 	// 04:00 do dia da viagem: duas horas antes da partida das 06:00, dentro do
 	// prazo de uma hora.
@@ -296,10 +296,10 @@ func TestCancelarReserva_DevolveAssentosDeTodosOsTrechos(t *testing.T) {
 		t.Fatalf("CancelarReserva: %v", err)
 	}
 
-	if got := livresDe(t, e, "joao", "car-1"); got[0] != 3 || got[1] != 3 {
+	if got := livresDe(t, e, "joao", "vaijunto:car-1"); got[0] != 3 || got[1] != 3 {
 		t.Errorf("car-1 livres = %v, want [3 3]", got)
 	}
-	if got := livresDe(t, e, "carlos", "car-2"); got[0] != 2 {
+	if got := livresDe(t, e, "carlos", "vaijunto:car-2"); got[0] != 2 {
 		t.Errorf("car-2 livres = %v, want [2]", got)
 	}
 
@@ -335,7 +335,7 @@ func TestCancelarReserva_PrazoDoPassageiro(t *testing.T) {
 	for _, caso := range casos {
 		t.Run(caso.nome, func(t *testing.T) {
 			e := estadoDoCenario(t)
-			reserva := reservarNoCenario(t, e, "maria", item("car-1", 0, 2))
+			reserva := reservarNoCenario(t, e, "maria", item("vaijunto:car-1", 0, 2))
 
 			err := e.CancelarReserva(reserva.ID, "maria", caso.agora)
 			if caso.permitido {
@@ -354,7 +354,7 @@ func TestCancelarReserva_PrazoDoPassageiro(t *testing.T) {
 				t.Errorf("detalhe do prazo = %+v, want partida 06:00", detalhe)
 			}
 			// Recusa não escreve: o assento continua ocupado.
-			if got := livresDe(t, e, "joao", "car-1"); got[0] != 2 {
+			if got := livresDe(t, e, "joao", "vaijunto:car-1"); got[0] != 2 {
 				t.Errorf("car-1 livres = %v, want [2 2]: a recusa devolveu assento", got)
 			}
 		})
@@ -364,7 +364,7 @@ func TestCancelarReserva_PrazoDoPassageiro(t *testing.T) {
 // TestCancelarReserva_Recusas cobre os outros três erros da seção 5.11.
 func TestCancelarReserva_Recusas(t *testing.T) {
 	e := estadoDoCenario(t)
-	reserva := reservarNoCenario(t, e, "maria", item("car-1", 0, 2))
+	reserva := reservarNoCenario(t, e, "maria", item("vaijunto:car-1", 0, 2))
 
 	if err := e.CancelarReserva("res-inexistente", "maria", as(0, 0)); !errors.Is(err, ErrReservaNaoEncontrada) {
 		t.Errorf("reserva inexistente: erro = %v, want ErrReservaNaoEncontrada", err)
@@ -382,7 +382,7 @@ func TestCancelarReserva_Recusas(t *testing.T) {
 
 	// O segundo cancelamento não pode ter devolvido o assento de novo: seria
 	// I2 violada por cima, com mais assentos livres do que o veículo tem.
-	if got := livresDe(t, e, "joao", "car-1"); got[0] != 3 {
+	if got := livresDe(t, e, "joao", "vaijunto:car-1"); got[0] != 3 {
 		t.Errorf("car-1 livres = %v, want [3 3]", got)
 	}
 }
@@ -409,7 +409,7 @@ func TestCancelarCarona_PrazoDoMotoristaVaiAteAPartida(t *testing.T) {
 		t.Run(caso.nome, func(t *testing.T) {
 			e := estadoDoCenario(t)
 
-			_, err := e.CancelarCarona("car-1", "joao", caso.agora)
+			_, err := e.CancelarCarona("vaijunto:car-1", "joao", caso.agora)
 			if caso.permitido {
 				if err != nil {
 					t.Fatalf("CancelarCarona: %v", err)
@@ -441,11 +441,11 @@ func TestCancelarCarona_PrazoDoMotoristaVaiAteAPartida(t *testing.T) {
 func TestCancelarCarona_CascataDevolveAssentosDeCaronasVizinhas(t *testing.T) {
 	e := estadoDoCenario(t)
 
-	daMaria := reservarNoCenario(t, e, "maria", item("car-1", 0, 2), item("car-2", 0, 1))
-	doPedro := reservarNoCenario(t, e, "pedro", item("car-2", 0, 1))
+	daMaria := reservarNoCenario(t, e, "maria", item("vaijunto:car-1", 0, 2), item("vaijunto:car-2", 0, 1))
+	doPedro := reservarNoCenario(t, e, "pedro", item("vaijunto:car-2", 0, 1))
 
 	// car-2 tem 2 assentos e os dois estão ocupados neste ponto.
-	if got := livresDe(t, e, "carlos", "car-2"); got[0] != 0 {
+	if got := livresDe(t, e, "carlos", "vaijunto:car-2"); got[0] != 0 {
 		t.Fatalf("preparação: car-2 livres = %v, want [0]", got)
 	}
 	// maria já não conseguiria cancelar sozinha às 05:50.
@@ -453,7 +453,7 @@ func TestCancelarCarona_CascataDevolveAssentosDeCaronasVizinhas(t *testing.T) {
 		t.Fatalf("preparação: o prazo da maria deveria estar expirado, erro = %v", err)
 	}
 
-	canceladas, err := e.CancelarCarona("car-1", "joao", as(5, 50))
+	canceladas, err := e.CancelarCarona("vaijunto:car-1", "joao", as(5, 50))
 	if err != nil {
 		t.Fatalf("CancelarCarona: %v", err)
 	}
@@ -463,11 +463,11 @@ func TestCancelarCarona_CascataDevolveAssentosDeCaronasVizinhas(t *testing.T) {
 
 	// I1 na carona cancelada: o assento volta mesmo não valendo mais nada,
 	// porque a invariante é o que o verificador confere depois.
-	if got := livresDe(t, e, "joao", "car-1"); got[0] != 3 || got[1] != 3 {
+	if got := livresDe(t, e, "joao", "vaijunto:car-1"); got[0] != 3 || got[1] != 3 {
 		t.Errorf("car-1 livres = %v, want [3 3]", got)
 	}
 	// O ponto do teste: car-2 recupera o assento da maria e mantém o do pedro.
-	if got := livresDe(t, e, "carlos", "car-2"); got[0] != 1 {
+	if got := livresDe(t, e, "carlos", "vaijunto:car-2"); got[0] != 1 {
 		t.Errorf("car-2 livres = %v, want [1]: a cascata deixou assento órfão na carona vizinha", got)
 	}
 
@@ -484,27 +484,27 @@ func TestCancelarCarona_CascataDevolveAssentosDeCaronasVizinhas(t *testing.T) {
 // que uma recusa não cancela reserva nenhuma.
 func TestCancelarCarona_Recusas(t *testing.T) {
 	e := estadoDoCenario(t)
-	reservarNoCenario(t, e, "maria", item("car-1", 0, 2))
+	reservarNoCenario(t, e, "maria", item("vaijunto:car-1", 0, 2))
 
 	if _, err := e.CancelarCarona("car-99", "joao", as(0, 0)); !errors.Is(err, ErrCaronaNaoEncontrada) {
 		t.Errorf("carona inexistente: erro = %v, want ErrCaronaNaoEncontrada", err)
 	}
 	// car-1 é do joao.
-	if _, err := e.CancelarCarona("car-1", "carlos", as(0, 0)); !errors.Is(err, ErrNaoEDono) {
+	if _, err := e.CancelarCarona("vaijunto:car-1", "carlos", as(0, 0)); !errors.Is(err, ErrNaoEDono) {
 		t.Errorf("carona de outro motorista: erro = %v, want ErrNaoEDono", err)
 	}
 	if ativas := e.ReservasDoPassageiro("maria", false); len(ativas) != 1 {
 		t.Errorf("uma recusa cancelou reservas: maria tem %d ativa(s), want 1", len(ativas))
 	}
 
-	if _, err := e.CancelarCarona("car-1", "joao", as(0, 0)); err != nil {
+	if _, err := e.CancelarCarona("vaijunto:car-1", "joao", as(0, 0)); err != nil {
 		t.Fatalf("CancelarCarona: %v", err)
 	}
-	if _, err := e.CancelarCarona("car-1", "joao", as(0, 0)); !errors.Is(err, ErrCaronaCancelada) {
+	if _, err := e.CancelarCarona("vaijunto:car-1", "joao", as(0, 0)); !errors.Is(err, ErrCaronaCancelada) {
 		t.Errorf("segundo cancelamento: erro = %v, want ErrCaronaCancelada", err)
 	}
 	// O segundo cancelamento não pode ter devolvido assento de novo.
-	if got := livresDe(t, e, "joao", "car-1"); got[0] != 3 {
+	if got := livresDe(t, e, "joao", "vaijunto:car-1"); got[0] != 3 {
 		t.Errorf("car-1 livres = %v, want [3 3]", got)
 	}
 }
@@ -515,11 +515,11 @@ func TestCancelarCarona_Recusas(t *testing.T) {
 func TestReservar_CaronaCanceladaReprova(t *testing.T) {
 	e := estadoDoCenario(t)
 
-	if _, err := e.CancelarCarona("car-1", "joao", as(0, 0)); err != nil {
+	if _, err := e.CancelarCarona("vaijunto:car-1", "joao", as(0, 0)); err != nil {
 		t.Fatalf("CancelarCarona: %v", err)
 	}
 
-	_, _, err := e.Reservar("maria", []ItemReserva{item("car-1", 0, 2)}, as(0, 0))
+	_, _, err := e.Reservar("maria", []ItemReserva{item("vaijunto:car-1", 0, 2)}, as(0, 0))
 	if !errors.Is(err, ErrCaronaCancelada) {
 		t.Fatalf("erro = %v, want ErrCaronaCancelada", err)
 	}
