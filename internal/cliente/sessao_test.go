@@ -12,7 +12,8 @@ import (
 
 // Menu de cidades usado nos testes de ColetarParadas, na ordem de
 // dominio.CidadesAtendidas: 1) Salvador, 2) Feira de Santana, 3) Jequié,
-// 4) Vitória da Conquista e, a partir da terceira parada, 5) encerrar a rota.
+// 4) Vitória da Conquista, 5) Vitória ... 10) Petrópolis (D33) e, a partir da
+// terceira parada, 11) encerrar a rota. A UF aparece ao lado do nome no menu.
 
 // paradasEsperadas compara cidade e horário, parada a parada. Horário por
 // Equal, e não por ==, pelo motivo de sempre (D11).
@@ -77,7 +78,7 @@ func TestColetarParadas_MontaRotaNaOrdemInformada(t *testing.T) {
 		"3\n2026-09-20\n08:00\n" + // Jequié
 			"1\n2026-09-20\n08:50\n" + // Salvador
 			"4\n2026-09-20\n20:10\n" + // Vitória da Conquista
-			"5\n") // encerrar
+			"11\n") // encerrar
 
 	paradas, err := ColetarParadas(term, fusoDasCidadesFixo)
 	if err != nil {
@@ -98,7 +99,7 @@ func TestColetarParadas_EnterRepeteADataDaParadaAnterior(t *testing.T) {
 		"1\n2026-09-20\n20:00\n" + // Salvador, 20/09
 			"2\n\n22:00\n" + // Feira de Santana, Enter: ainda 20/09
 			"3\n2026-09-21\n01:00\n" + // Jequié, já em 21/09
-			"5\n")
+			"11\n")
 
 	paradas, err := ColetarParadas(term, fusoDasCidadesFixo)
 	if err != nil {
@@ -128,7 +129,7 @@ func TestColetarParadas_PrimeiraParadaExigeData(t *testing.T) {
 	term, saida := terminalDeTeste(
 		"1\n\n2026-09-20\n08:00\n" + // Enter recusado, depois a data
 			"2\n\n10:00\n" +
-			"5\n")
+			"11\n")
 
 	paradas, err := ColetarParadas(term, fusoDasCidadesFixo)
 	if err != nil {
@@ -149,13 +150,13 @@ func TestColetarParadas_MarcaCidadesJaNaRota(t *testing.T) {
 	term, saida := terminalDeTeste(
 		"1\n2026-09-20\n08:00\n" + // Salvador
 			"2\n\n10:00\n" + // Feira de Santana
-			"5\n")
+			"11\n")
 
 	if _, err := ColetarParadas(term, fusoDasCidadesFixo); err != nil {
 		t.Fatalf("ColetarParadas: %v", err)
 	}
 	texto := saida.String()
-	for _, linha := range []string{"1) Salvador (já na rota)", "2) Feira de Santana (já na rota)", "3) Jequié\n", "4) Vitória da Conquista\n"} {
+	for _, linha := range []string{"1) Salvador (BA) (já na rota)", "2) Feira de Santana (BA) (já na rota)", "3) Jequié (BA)\n", "4) Vitória da Conquista (BA)\n", "5) Vitória (ES)\n"} {
 		if !strings.Contains(texto, linha) {
 			t.Errorf("menu sem a linha %q:\n%s", linha, texto)
 		}
@@ -175,7 +176,7 @@ func TestColetarParadas_CidadeRepetidaRepetePergunta(t *testing.T) {
 		"1\n2026-09-20\n08:00\n" + // Salvador
 			"1\n" + // Salvador de novo: recusada
 			"2\n2026-09-20\n10:00\n" + // Feira de Santana
-			"5\n")
+			"11\n")
 
 	paradas, err := ColetarParadas(term, fusoDasCidadesFixo)
 	if err != nil {
@@ -200,7 +201,7 @@ func TestColetarParadas_HorarioNaoPosteriorRepetePergunta(t *testing.T) {
 			"2026-09-20\n07:00\n" + // antes: recusado
 			"2026-09-20\n08:00\n" + // igual: recusado
 			"2026-09-20\n09:00\n" + // aceito
-			"5\n")
+			"11\n")
 
 	paradas, err := ColetarParadas(term, fusoDasCidadesFixo)
 	if err != nil {
@@ -216,13 +217,13 @@ func TestColetarParadas_HorarioNaoPosteriorRepetePergunta(t *testing.T) {
 
 // TestColetarParadas_EncerrarSoAPartirDeDuasParadas confere que a opção de
 // encerrar a rota só aparece quando já há uma carona possível: com uma parada
-// só, "5" está fora do menu e é recusado como qualquer número fora da faixa.
+// só, "11" está fora do menu e é recusado como qualquer número fora da faixa.
 func TestColetarParadas_EncerrarSoAPartirDeDuasParadas(t *testing.T) {
 	term, saida := terminalDeTeste(
 		"1\n2026-09-20\n08:00\n" + // Salvador
-			"5\n" + // ainda não há opção 5: recusado
+			"11\n" + // ainda não há opção 11: recusado
 			"2\n2026-09-20\n10:00\n" + // Feira de Santana
-			"5\n") // agora sim, encerrar
+			"11\n") // agora sim, encerrar
 
 	paradas, err := ColetarParadas(term, fusoDasCidadesFixo)
 	if err != nil {
@@ -238,14 +239,20 @@ func TestColetarParadas_EncerrarSoAPartirDeDuasParadas(t *testing.T) {
 
 // TestColetarParadas_TodasAsCidadesEncerraSozinho confere que, com todas as
 // cidades já na rota, o menu não pergunta mais nada: não há cidade que possa
-// entrar sem repetir. A entrada termina logo depois da quarta parada; se o
+// entrar sem repetir. A entrada termina logo depois da décima parada; se o
 // menu perguntasse de novo, a leitura devolveria ErrEntradaEncerrada.
 func TestColetarParadas_TodasAsCidadesEncerraSozinho(t *testing.T) {
 	term, _ := terminalDeTeste(
 		"1\n2026-09-20\n06:00\n" +
 			"2\n2026-09-20\n08:00\n" +
 			"3\n2026-09-20\n11:00\n" +
-			"4\n2026-09-20\n13:30\n")
+			"4\n2026-09-20\n13:30\n" +
+			"5\n2026-09-20\n15:00\n" +
+			"6\n2026-09-20\n16:00\n" +
+			"7\n2026-09-20\n17:00\n" +
+			"8\n2026-09-20\n18:00\n" +
+			"9\n2026-09-20\n19:00\n" +
+			"10\n2026-09-20\n20:00\n")
 
 	paradas, err := ColetarParadas(term, fusoDasCidadesFixo)
 	if err != nil {
@@ -283,6 +290,11 @@ func TestEscolherCidade(t *testing.T) {
 	}
 	if !dominio.CidadeConhecida(cidade) {
 		t.Errorf("cidade %q não é reconhecida pelo domínio", cidade)
+	}
+
+	// A UF aparece só no menu; a string devolvida é o nome puro (D33).
+	if !strings.Contains(saida.String(), "4) Vitória da Conquista (BA)") {
+		t.Errorf("menu sem a UF ao lado da cidade:\n%s", saida.String())
 	}
 
 	// Todas as cidades atendidas precisam estar no menu, ou uma delas ficaria

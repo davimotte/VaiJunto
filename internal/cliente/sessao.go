@@ -13,6 +13,25 @@ import (
 // paradas, o laço de login e a política de tratamento de erro. O fuso das
 // cidades vem de dominio.FusoDasCidades, o mesmo que o servidor usa.
 
+// rotuloDaCidade acrescenta a UF ao nome, só para o menu (D33): com dez
+// cidades, "Vitória" e "Vitória da Conquista" ficam lado a lado e a UF tira a
+// dúvida. O que vai ao servidor continua sendo o nome puro, devolvido pelo
+// índice escolhido.
+func rotuloDaCidade(nome string) string {
+	if uf, ok := dominio.UFDaCidade(nome); ok {
+		return nome + " (" + uf + ")"
+	}
+	return nome
+}
+
+func rotulosDeCidades(nomes []string) []string {
+	rotulos := make([]string, len(nomes))
+	for i, nome := range nomes {
+		rotulos[i] = rotuloDaCidade(nome)
+	}
+	return rotulos
+}
+
 // EscolherCidade mostra as cidades atendidas enumeradas e devolve a grafia
 // canônica.
 //
@@ -23,7 +42,7 @@ import (
 // número em vez de digitar carona_id.
 func EscolherCidade(term *Terminal, titulo string) (string, error) {
 	cidades := dominio.CidadesAtendidas()
-	escolhida, err := term.LerOpcao(titulo, cidades)
+	escolhida, err := term.LerOpcao(titulo, rotulosDeCidades(cidades))
 	if err != nil {
 		return "", err
 	}
@@ -162,10 +181,11 @@ func ColetarParadas(term *Terminal, fuso *time.Location) ([]protocolo.Parada, er
 
 		opcoes := make([]string, 0, len(cidades)+1)
 		for _, cidade := range cidades {
+			rotulo := rotuloDaCidade(cidade)
 			if naRota[cidade] {
-				cidade += " (já na rota)"
+				rotulo += " (já na rota)"
 			}
-			opcoes = append(opcoes, cidade)
+			opcoes = append(opcoes, rotulo)
 		}
 		if len(paradas) >= 2 {
 			opcoes = append(opcoes, "Encerrar a rota aqui")
