@@ -1438,8 +1438,8 @@ sessão. Os critérios de pronto são os que a fase precisa demonstrar, com
 | Fase | Entregável | Critério de pronto | Estado |
 |---|---|---|---|
 | 0 | Projeto | Este documento, `API_CONSORCIO.md` e aviso no topo do `PROJETO.md` | Em andamento |
-| 1A | Catálogo e identidade | D33, `--empresa`, IDs globais (D27), dados atuais em `dados/vaijunto/`, fixture do P1 (seção 12.4). Testes do P1 adaptados passam | ⏳ |
-| 1B | Sementes e ambiente | Sementes das três empresas (seção 12.2), `--dados`, `--pares`, compose com 3 empresas | ⏳ |
+| 1A | Catálogo e identidade | D33, `--empresa`, IDs globais (D27), dados atuais em `dados/vaijunto/`, fixture do P1 (seção 12.4). Testes do P1 adaptados passam | ✅ |
+| 1B | Sementes e ambiente | Sementes das três empresas (seção 12.2), `--dados`, `--pares`, compose com 3 empresas | ✅ |
 | 2 | Persistência | Log com `fsync` e replay das caronas (seção 9.2). Estado sobrevive a reinício; TP1 passa | ⏳ |
 | 3A | Pilha REST | Servidor e cliente HTTP, cabeçalhos, **relógio de Lamport**, papéis, `/saude` | ⏳ |
 | 3B | Busca federada | Seção 6. TB1 e TB2 passam | ⏳ |
