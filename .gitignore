@@ -26,3 +26,5 @@ CLAUDE.md
 
 # Arquivos de análise de estado atual para facilitar a vizualização do estado do projeto
 ANALISE.md
+# Logs write-ahead das empresas (D22): estado de execucao, nao codigo
+/estado/

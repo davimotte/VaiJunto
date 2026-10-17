@@ -3,8 +3,8 @@
 # No laboratorio NAO use este arquivo: rode `docker run` em cada maquina,
 # conforme a secao 13.2 do PROJETO_P2.md.
 #
-# Cada empresa monta SOMENTE o seu diretorio de dados, e nenhum volume e
-# compartilhado entre empresas (RD07, RD11). Dentro do contêiner todas escutam
+# Cada empresa monta SOMENTE o seu diretorio de dados e o seu diretorio de
+# estado, e nenhum volume e compartilhado entre empresas (RD07, RD11). Dentro do contêiner todas escutam
 # em 9000; o host as distingue pelas portas 9001 a 9003.
 #
 # --pares ja e passado para exercitar a validacao, mas ninguem o usa ainda: o
@@ -14,6 +14,11 @@ x-servidor: &servidor
   build:
     context: .
     dockerfile: Dockerfile.servidor
+  # O log (D22) fica em ./estado/<empresa>, no host, e nao dentro do conteiner:
+  # `docker compose restart` e ate `down` preservam as caronas publicadas. O
+  # --user evita que o arquivo nasca com dono root (secao 13.2). Para recomecar
+  # uma empresa do zero, apague o diretorio dela (D37).
+  user: "${UID:-1000}:${GID:-1000}"
   environment:
     TZ: America/Bahia
 
@@ -24,11 +29,13 @@ services:
       - "--empresa=vaijunto"
       - "--endereco=0.0.0.0:9000"
       - "--dados=/dados"
+      - "--log=/estado/vaijunto.wal"
       - "--pares=rotacapixaba=http://rotacapixaba:8080,rotafluminense=http://rotafluminense:8080"
     ports:
       - "9001:9000"
     volumes:
       - ./dados/vaijunto:/dados:ro
+      - ./estado/vaijunto:/estado
 
   rotacapixaba:
     <<: *servidor
@@ -36,11 +43,13 @@ services:
       - "--empresa=rotacapixaba"
       - "--endereco=0.0.0.0:9000"
       - "--dados=/dados"
+      - "--log=/estado/rotacapixaba.wal"
       - "--pares=vaijunto=http://vaijunto:8080,rotafluminense=http://rotafluminense:8080"
     ports:
       - "9002:9000"
     volumes:
       - ./dados/rotacapixaba:/dados:ro
+      - ./estado/rotacapixaba:/estado
 
   rotafluminense:
     <<: *servidor
@@ -48,11 +57,13 @@ services:
       - "--empresa=rotafluminense"
       - "--endereco=0.0.0.0:9000"
       - "--dados=/dados"
+      - "--log=/estado/rotafluminense.wal"
       - "--pares=vaijunto=http://vaijunto:8080,rotacapixaba=http://rotacapixaba:8080"
     ports:
       - "9003:9000"
     volumes:
       - ./dados/rotafluminense:/dados:ro
+      - ./estado/rotafluminense:/estado
 
   # Os clientes ficam no perfil "clientes" para que `docker compose up` suba so
   # as empresas. Uso (escolha a empresa pelo servico de destino):
