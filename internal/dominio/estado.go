@@ -23,7 +23,25 @@ func NovoEstado(empresa string) *Estado {
 		usuarios: make(map[string]*Usuario),
 		caronas:  make(map[string]*Carona),
 		reservas: make(map[string]*Reserva),
+		log:      NovaLogMemoria(),
 	}
+}
+
+// UsarLog troca o destino dos registros. O servidor chama uma vez no boot,
+// depois do Reaplicar e antes de aceitar conexões; o lock é só para que a
+// troca seja visível a qualquer goroutine (-race), não porque haja disputa.
+func (e *Estado) UsarLog(l Log) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.log = l
+}
+
+// Reaplicar refaz o estado a partir dos registros do log, na ordem em que
+// foram gravados (D37, seção 9.2). Não grava nada: o log já os contém.
+func (e *Estado) Reaplicar(registros [][]byte) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return reaplicar(e, registros)
 }
 
 // Autenticar confere as credenciais de LOGIN e devolve o usuário

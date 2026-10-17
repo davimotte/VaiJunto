@@ -170,10 +170,10 @@ func publicarCarona(e *Estado, motoristaID string, rota []string, horarios []tim
 		livres[i] = assentos
 	}
 
-	// Primeira e única escrita. Rota, horários e preços vêm de fora (foram
-	// decodificados do JSON do cliente), então entram copiados: o estado não
-	// pode compartilhar memória com quem o alimentou. Sem a cópia, o chamador
-	// poderia reordenar os horários depois da validação, sem lock nenhum.
+	// Rota, horários e preços vêm de fora (foram decodificados do JSON do
+	// cliente), então entram copiados: o estado não pode compartilhar memória
+	// com quem o alimentou. Sem a cópia, o chamador poderia reordenar os
+	// horários depois da validação, sem lock nenhum.
 	carona := &Carona{
 		ID:          id,
 		MotoristaID: motoristaID,
@@ -183,6 +183,14 @@ func publicarCarona(e *Estado, motoristaID string, rota []string, horarios []tim
 		PrecoTrecho: append([]int(nil), precos...),
 		Livres:      livres,
 		Cancelada:   false,
+	}
+
+	// D22, regra 3: write-ahead. O registro vai ao disco (com fsync) antes de
+	// a carona entrar no mapa; se a gravação falha, nada mudou. Tudo isto
+	// acontece sob o mesmo lock que a aplica, então nenhuma outra conexão vê a
+	// carona antes de ela ser durável.
+	if err := gravar(e, tipoCaronaPublicada, dadosCaronaPublicadaDe(carona)); err != nil {
+		return Carona{}, err
 	}
 	e.caronas[id] = carona
 

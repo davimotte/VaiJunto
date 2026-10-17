@@ -54,6 +54,9 @@ var traducaoErros = map[error]erroTraduzido{
 	// ERRO_INTERNO em vez de um código inventado.
 	dominio.ErrEmpresaInvalida: {protocolo.CodigoErroInterno, "Falha interna de configuração da empresa."},
 	dominio.ErrIDSemEmpresa:    {protocolo.CodigoErroInterno, "Falha interna: identificador sem empresa."},
+	// D22: o registro não chegou ao disco e a operação não foi aplicada. Para o
+	// cliente é falha do servidor, e ele pode tentar de novo.
+	dominio.ErrFalhaNoLog: {protocolo.CodigoErroInterno, "Falha interna ao gravar o registro da operação; nada foi alterado."},
 }
 
 // respostaDeErroDeDominio monta a resposta de erro correspondente ao erro

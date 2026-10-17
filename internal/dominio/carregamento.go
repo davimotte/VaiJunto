@@ -3,7 +3,6 @@ package dominio
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 )
 
@@ -31,17 +30,15 @@ type caronaArquivo struct {
 	PrecosCentavos []int       `json:"precos_centavos"`
 }
 
-// CarregarUsuarios lê dados/usuarios.json (D12): carga única no boot, sem
-// operação de cadastro.
-func CarregarUsuarios(caminho string) (map[string]*Usuario, error) {
-	b, err := os.ReadFile(caminho)
-	if err != nil {
-		return nil, fmt.Errorf("dominio: ler %s: %w", caminho, err)
-	}
-
+// CarregarUsuarios decodifica o conteúdo de dados/usuarios.json (D12): carga
+// única no boot, sem operação de cadastro.
+//
+// Recebe os bytes, e não o caminho, porque o domínio não toca o disco (regra
+// 8): quem lê o arquivo é internal/servidor.CarregarSemente.
+func CarregarUsuarios(conteudo []byte) (map[string]*Usuario, error) {
 	var brutos []usuarioArquivo
-	if err := json.Unmarshal(b, &brutos); err != nil {
-		return nil, fmt.Errorf("dominio: decodificar %s: %w", caminho, err)
+	if err := json.Unmarshal(conteudo, &brutos); err != nil {
+		return nil, fmt.Errorf("dominio: decodificar usuários: %w", err)
 	}
 
 	usuarios := make(map[string]*Usuario, len(brutos))
@@ -56,7 +53,7 @@ func CarregarUsuarios(caminho string) (map[string]*Usuario, error) {
 	return usuarios, nil
 }
 
-// CarregarCaronas lê o arquivo de caronas da empresa, confere que cada ID leva
+// CarregarCaronas decodifica o conteúdo do arquivo de caronas da empresa, confere que cada ID leva
 // o prefixo dela (D27), valida cada carona com as mesmas
 // regras da publicação (menos a da partida no futuro) e inicializa Livres igual
 // a Assentos em todo trecho.
@@ -64,15 +61,10 @@ func CarregarUsuarios(caminho string) (map[string]*Usuario, error) {
 // A validação aqui não é zelo a mais: o arquivo é uma porta de entrada do
 // estado tão real quanto o protocolo, e uma carona com horário fora de ordem
 // quebraria a busca e a reserva do mesmo jeito, só que desde o boot.
-func CarregarCaronas(empresa, caminho string) (map[string]*Carona, error) {
-	b, err := os.ReadFile(caminho)
-	if err != nil {
-		return nil, fmt.Errorf("dominio: ler %s: %w", caminho, err)
-	}
-
+func CarregarCaronas(empresa string, conteudo []byte) (map[string]*Carona, error) {
 	var brutos []caronaArquivo
-	if err := json.Unmarshal(b, &brutos); err != nil {
-		return nil, fmt.Errorf("dominio: decodificar %s: %w", caminho, err)
+	if err := json.Unmarshal(conteudo, &brutos); err != nil {
+		return nil, fmt.Errorf("dominio: decodificar caronas: %w", err)
 	}
 
 	caronas := make(map[string]*Carona, len(brutos))
@@ -105,17 +97,19 @@ func CarregarCaronas(empresa, caminho string) (map[string]*Carona, error) {
 	return caronas, nil
 }
 
-// CarregarEstado monta o Estado inicial do servidor a partir dos dois
-// arquivos de carga (D02): nenhuma reserva existe antes do boot.
-func CarregarEstado(empresa, caminhoUsuarios, caminhoCaronas string) (*Estado, error) {
+// CarregarEstado monta o Estado inicial do servidor a partir do conteúdo dos
+// dois arquivos de carga: nenhuma reserva existe antes do boot (seção 14,
+// limitação das fases 2 a 4). O log do estado começa em memória; o servidor
+// troca por um arquivo com UsarLog antes de aceitar conexões.
+func CarregarEstado(empresa string, usuariosJSON, caronasJSON []byte) (*Estado, error) {
 	if err := ValidarEmpresa(empresa); err != nil {
 		return nil, err
 	}
-	usuarios, err := CarregarUsuarios(caminhoUsuarios)
+	usuarios, err := CarregarUsuarios(usuariosJSON)
 	if err != nil {
 		return nil, err
 	}
-	caronas, err := CarregarCaronas(empresa, caminhoCaronas)
+	caronas, err := CarregarCaronas(empresa, caronasJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -124,5 +118,6 @@ func CarregarEstado(empresa, caminhoUsuarios, caminhoCaronas string) (*Estado, e
 		usuarios: usuarios,
 		caronas:  caronas,
 		reservas: make(map[string]*Reserva),
+		log:      NovaLogMemoria(),
 	}, nil
 }

@@ -21,14 +21,12 @@ import (
 	"testing"
 	"time"
 
-	"vaijunto/internal/dominio"
 	"vaijunto/internal/protocolo"
 	"vaijunto/internal/servidor"
 )
 
 const (
-	caminhoUsuarios = "dados/p1/usuarios.json"
-	caminhoCaronas  = "dados/p1/caronas.json"
+	diretorioSemente = "dados/p1"
 
 	// caronasDeJoaoNaCarga é quantas caronas joao tem no cenário da seção 9.2
 	// do PROJETO.md: car-1 e car-5. Os testes que publicam como joao somam as
@@ -61,7 +59,7 @@ func TestMain(m *testing.M) {
 func subirServidor(t *testing.T) string {
 	t.Helper()
 
-	estado, err := dominio.CarregarEstado("vaijunto", caminhoUsuarios, caminhoCaronas)
+	estado, err := servidor.CarregarSemente("vaijunto", diretorioSemente)
 	if err != nil {
 		t.Fatalf("carga inicial: %v", err)
 	}

@@ -88,6 +88,11 @@ var (
 	// "<empresa>:" (D27). Sem prefixo não há como saber quem é o dono, e o
 	// domínio recusa em vez de presumir a empresa local.
 	ErrIDSemEmpresa = errors.New("dominio: identificador sem prefixo de empresa")
+
+	// ErrFalhaNoLog — o registro não chegou ao disco (D22). A operação NÃO foi
+	// aplicada: sem write-ahead bem-sucedido o servidor não pode lembrar de
+	// algo que o log não guardou.
+	ErrFalhaNoLog = errors.New("dominio: falha ao gravar no log")
 )
 
 // TodosOsErros lista todos os sentinelas exportados do domínio.
@@ -118,6 +123,7 @@ func TodosOsErros() []error {
 		ErrGeracaoDeID,
 		ErrEmpresaInvalida,
 		ErrIDSemEmpresa,
+		ErrFalhaNoLog,
 	}
 }
 

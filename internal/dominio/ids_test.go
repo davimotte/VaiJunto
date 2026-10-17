@@ -89,13 +89,13 @@ func TestCarregarCaronas_RecusaIDForaDaEmpresa(t *testing.T) {
 
 	for _, id := range []string{"car-1", "rotacapixaba:car-1"} {
 		caminho := escreverCaronas(t, caronaDeArquivo(id, rota, horarios, 2, []int{2500}))
-		if _, err := CarregarCaronas("vaijunto", caminho); err == nil {
+		if _, err := lerCaronas("vaijunto", caminho); err == nil {
 			t.Errorf("CarregarCaronas aceitou o ID %q numa semente da vaijunto", id)
 		}
 	}
 
 	caminho := escreverCaronas(t, caronaDeArquivo("vaijunto:car-1", rota, horarios, 2, []int{2500}))
-	if _, err := CarregarCaronas("vaijunto", caminho); err != nil {
+	if _, err := lerCaronas("vaijunto", caminho); err != nil {
 		t.Errorf("CarregarCaronas recusou vaijunto:car-1: %v", err)
 	}
 }

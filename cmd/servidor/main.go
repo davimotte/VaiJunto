@@ -5,11 +5,11 @@ import (
 	"flag"
 	"log"
 	"os"
-	"path/filepath"
 
 	_ "time/tzdata" // fusos embutidos no binário: a imagem Alpine não traz tzdata, e sem eles dominio.FusoDasCidades cairia no deslocamento fixo.
 
 	"vaijunto/internal/dominio"
+	"vaijunto/internal/persistencia"
 	"vaijunto/internal/servidor"
 )
 
@@ -18,6 +18,7 @@ func main() {
 	endereco := flag.String("endereco", "0.0.0.0:9000", "endereço e porta TCP em que o servidor escuta")
 	dirDados := flag.String("dados", "dados/vaijunto", "diretório com usuarios.json e caronas.json desta empresa")
 	listaPares := flag.String("pares", "", "demais empresas do consórcio, no formato empresa=url,empresa=url (D20); só validada nesta fase")
+	caminhoLog := flag.String("log", "", "arquivo do log write-ahead (D22), ex.: /estado/vaijunto.wal; vazio = estado só em memória, perdido a cada reinício")
 	logOperacoes := flag.Bool("log-operacoes", true, "registra no terminal cada conexão e cada operação atendida; desligue ao medir carga")
 	flag.Parse()
 
@@ -36,17 +37,32 @@ func main() {
 		log.Fatalf("servidor: --pares: %v", err)
 	}
 
-	// Carga única no boot (D02, D12): daqui em diante o estado vive só em
-	// memória. Falha de leitura aborta a subida em vez de deixar o servidor no
-	// ar sem usuário nenhum, situação em que todo LOGIN falharia sem que a
-	// causa aparecesse.
+	// Boot (D37, seção 9.2): primeiro a semente, depois o log por cima. A
+	// semente nunca muda depois do primeiro boot; o que mudou desde então está
+	// no log. Falha em qualquer passo aborta a subida em vez de deixar o
+	// servidor no ar com estado duvidoso.
 	//
 	// Cada empresa lê o seu próprio diretório: não há dado compartilhado entre
 	// empresas (RD07, RD11).
-	estado, err := dominio.CarregarEstado(*empresa,
-		filepath.Join(*dirDados, "usuarios.json"), filepath.Join(*dirDados, "caronas.json"))
+	estado, err := servidor.CarregarSemente(*empresa, *dirDados)
 	if err != nil {
 		log.Fatalf("servidor: carga inicial: %v", err)
+	}
+
+	if *caminhoLog == "" {
+		log.Printf("servidor: ATENÇÃO: sem --log, o estado é volátil e as caronas publicadas se perdem ao reiniciar")
+	} else {
+		arquivo, registros, err := persistencia.Abrir(*caminhoLog)
+		if err != nil {
+			log.Fatalf("servidor: log %s: %v", *caminhoLog, err)
+		}
+		// D37: aplica sem revalidar. O log de arquivo só é instalado depois do
+		// replay, para que a reaplicação nunca grave de volta o que está lendo.
+		if err := estado.Reaplicar(registros); err != nil {
+			log.Fatalf("servidor: replay de %s: %v", *caminhoLog, err)
+		}
+		estado.UsarLog(arquivo)
+		log.Printf("servidor: log %s aberto, %d registros reaplicados", *caminhoLog, len(registros))
 	}
 
 	s, err := servidor.Escutar(*endereco, estado)

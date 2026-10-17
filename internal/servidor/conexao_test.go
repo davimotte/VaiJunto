@@ -347,7 +347,7 @@ func TestAceitar_RetornaQuandoOListenerFecha(t *testing.T) {
 func atenderComRegistro(t *testing.T, mensagens ...string) []string {
 	t.Helper()
 
-	estado, err := dominio.CarregarEstado("vaijunto", "../../testes/dados/p1/usuarios.json", "../../testes/dados/p1/caronas.json")
+	estado, err := CarregarSemente("vaijunto", "../../testes/dados/p1")
 	if err != nil {
 		t.Fatalf("carga inicial: %v", err)
 	}

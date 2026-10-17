@@ -33,7 +33,7 @@ func TestSementes_CarregamSemErroComOPrefixoDaPropriaEmpresa(t *testing.T) {
 	for _, emp := range empresasDoConsorcio {
 		t.Run(emp.nome, func(t *testing.T) {
 			dir := diretorioDaSemente(emp.nome)
-			estado, err := CarregarEstado(emp.nome, filepath.Join(dir, "usuarios.json"), filepath.Join(dir, "caronas.json"))
+			estado, err := lerEstado(emp.nome, filepath.Join(dir, "usuarios.json"), filepath.Join(dir, "caronas.json"))
 			if err != nil {
 				t.Fatalf("CarregarEstado(%s): %v", emp.nome, err)
 			}
@@ -60,7 +60,7 @@ func TestSementes_CarregamSemErroComOPrefixoDaPropriaEmpresa(t *testing.T) {
 func TestSementes_UsuariosDaSecao12_1(t *testing.T) {
 	for _, emp := range empresasDoConsorcio {
 		t.Run(emp.nome, func(t *testing.T) {
-			usuarios, err := CarregarUsuarios(filepath.Join(diretorioDaSemente(emp.nome), "usuarios.json"))
+			usuarios, err := lerUsuarios(filepath.Join(diretorioDaSemente(emp.nome), "usuarios.json"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -108,7 +108,7 @@ func twoDigits(i int) string {
 // carregador as aplique.
 func TestSementes_CidadesNoCatalogoEInvarianteI6(t *testing.T) {
 	for _, emp := range empresasDoConsorcio {
-		caronas, err := CarregarCaronas(emp.nome, filepath.Join(diretorioDaSemente(emp.nome), "caronas.json"))
+		caronas, err := lerCaronas(emp.nome, filepath.Join(diretorioDaSemente(emp.nome), "caronas.json"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -145,7 +145,7 @@ func TestSementes_DatasFusoEPrecos(t *testing.T) {
 	fim := inicio.Add(48 * time.Hour)
 
 	for _, emp := range empresasDoConsorcio {
-		caronas, err := CarregarCaronas(emp.nome, filepath.Join(diretorioDaSemente(emp.nome), "caronas.json"))
+		caronas, err := lerCaronas(emp.nome, filepath.Join(diretorioDaSemente(emp.nome), "caronas.json"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -185,7 +185,7 @@ func igual(a, b []int) bool {
 // e a carona de fernanda NÃO serve de conexão depois de marcos.
 func TestSementes_FolgasDeBaldeacaoDaSecao12_2(t *testing.T) {
 	carregar := func(empresa string) map[string]*Carona {
-		c, err := CarregarCaronas(empresa, filepath.Join(diretorioDaSemente(empresa), "caronas.json"))
+		c, err := lerCaronas(empresa, filepath.Join(diretorioDaSemente(empresa), "caronas.json"))
 		if err != nil {
 			t.Fatal(err)
 		}

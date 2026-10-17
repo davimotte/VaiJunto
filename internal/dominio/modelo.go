@@ -69,6 +69,11 @@ type Estado struct {
 	usuarios map[string]*Usuario
 	caronas  map[string]*Carona
 	reservas map[string]*Reserva
+	// log recebe cada mudança ANTES de ela ser aplicada (D22, regra 3). Nunca
+	// é nil: os construtores começam com LogMemoria e o servidor troca por
+	// arquivo com UsarLog. seq numera os registros (seção 4.8).
+	log Log
+	seq uint64
 }
 
 // PernaItinerario é um segmento contíguo de uma única carona dentro de um

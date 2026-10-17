@@ -419,6 +419,14 @@ func cancelarCarona(e *Estado, caronaID, motoristaID string, agora time.Time) (i
 		return 0, &ErroPrazoCancelamento{Partida: partida}
 	}
 
+	// D22, regra 3: o registro é gravado antes de qualquer mudança. É a última
+	// coisa que pode falhar; depois dela a aplicação é só atribuição em memória.
+	// As reservas atingidas não vão ao log nesta fase (seção 14): elas só
+	// existem em memória até o 2PC da Fase 5.
+	if err := gravar(e, tipoCaronaCancelada, dadosCaronaCancelada{Carona: caronaID}); err != nil {
+		return 0, err
+	}
+
 	// A partir daqui nada mais pode falhar.
 	c.Cancelada = true
 

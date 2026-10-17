@@ -20,7 +20,7 @@ func fusoBrasilia() *time.Location {
 // (PROJETO.md, seção 9.2): car-1 parte de Salvador às 06:00 de 01/10/2026,
 // passa por Feira de Santana e chega a Jequié às 10:45.
 func TestCarregarCaronas_Car1ChegaEmJequieAs1045(t *testing.T) {
-	caronas, err := CarregarCaronas("vaijunto", "../../testes/dados/p1/caronas.json")
+	caronas, err := lerCaronas("vaijunto", "../../testes/dados/p1/caronas.json")
 	if err != nil {
 		t.Fatalf("CarregarCaronas: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestCarregarCaronas_LeRotaEHorariosDoArquivo(t *testing.T) {
 		[]string{"2026-09-15T07:00:00-03:00", "2026-09-15T07:40:00-03:00", "2026-09-15T19:00:00-03:00"},
 		2, []int{1000, 2000}))
 
-	caronas, err := CarregarCaronas("vaijunto", caminho)
+	caronas, err := lerCaronas("vaijunto", caminho)
 	if err != nil {
 		t.Fatalf("CarregarCaronas: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestCarregarCaronas_NaoExigePartidaNoFuturo(t *testing.T) {
 		[]string{"2020-01-10T08:00:00-03:00", "2020-01-10T10:00:00-03:00"},
 		3, []int{3000}))
 
-	if _, err := CarregarCaronas("vaijunto", caminho); err != nil {
+	if _, err := lerCaronas("vaijunto", caminho); err != nil {
 		t.Fatalf("CarregarCaronas recusou carona no passado: %v", err)
 	}
 }
@@ -217,7 +217,7 @@ func TestCarregarCaronas_RecusaCaronaInvalida(t *testing.T) {
 			entrada := valida()
 			caso.estraga(entrada)
 
-			_, err := CarregarCaronas("vaijunto", escreverCaronas(t, entrada))
+			_, err := lerCaronas("vaijunto", escreverCaronas(t, entrada))
 			if !errors.Is(err, caso.quero) {
 				t.Fatalf("err = %v, want %v", err, caso.quero)
 			}
@@ -232,7 +232,7 @@ func TestCarregarCaronas_RecusaCaronaInvalida(t *testing.T) {
 // demonstração são lidos sem erro e populam o Estado inicial, sem nenhuma
 // reserva (D02, D07).
 func TestCarregarEstado(t *testing.T) {
-	estado, err := CarregarEstado("vaijunto", "../../testes/dados/p1/usuarios.json", "../../testes/dados/p1/caronas.json")
+	estado, err := lerEstado("vaijunto", "../../testes/dados/p1/usuarios.json", "../../testes/dados/p1/caronas.json")
 	if err != nil {
 		t.Fatalf("CarregarEstado: %v", err)
 	}
@@ -632,7 +632,7 @@ func TestDetalharCarona_ListaPassageirosPorTrecho(t *testing.T) {
 // cobrir.
 func estadoDoCenario(t *testing.T) *Estado {
 	t.Helper()
-	e, err := CarregarEstado("vaijunto", "../../testes/dados/p1/usuarios.json", "../../testes/dados/p1/caronas.json")
+	e, err := lerEstado("vaijunto", "../../testes/dados/p1/usuarios.json", "../../testes/dados/p1/caronas.json")
 	if err != nil {
 		t.Fatalf("CarregarEstado: %v", err)
 	}
