@@ -647,7 +647,7 @@ cmd/motorista          CLI do motorista (P1)
 cmd/passageiro         CLI do passageiro (P1)
 cmd/simulador          gerador de carga sem interface (seção 11.4)
 internal/protocolo     protocolo TCP (P1)
-internal/servidor      pilha TCP (P1); RESERVAR e BUSCAR passam a delegar
+internal/servidor      pilha TCP (P1); lê a semente do disco (CarregarSemente); RESERVAR e BUSCAR passam a delegar
 internal/federacao     handlers REST, cliente HTTP dos pares, busca federada
 internal/transacao     2PC, Lamport, wait-die, terminação, recuperação, outbox
 internal/dominio       regras, estado, mutex, assentos em espera, catálogo
@@ -1440,7 +1440,7 @@ sessão. Os critérios de pronto são os que a fase precisa demonstrar, com
 | 0 | Projeto | Este documento, `API_CONSORCIO.md` e aviso no topo do `PROJETO.md` | Em andamento |
 | 1A | Catálogo e identidade | D33, `--empresa`, IDs globais (D27), dados atuais em `dados/vaijunto/`, fixture do P1 (seção 12.4). Testes do P1 adaptados passam | ✅ |
 | 1B | Sementes e ambiente | Sementes das três empresas (seção 12.2), `--dados`, `--pares`, compose com 3 empresas | ✅ |
-| 2 | Persistência | Log com `fsync` e replay das caronas (seção 9.2). Estado sobrevive a reinício; TP1 passa | ⏳ |
+| 2 | Persistência | Log com `fsync` e replay das caronas (seção 9.2). Estado sobrevive a reinício; TP1 passa | ✅ |
 | 3A | Pilha REST | Servidor e cliente HTTP, cabeçalhos, **relógio de Lamport**, papéis, `/saude` | ⏳ |
 | 3B | Busca federada | Seção 6. TB1 e TB2 passam | ⏳ |
 | 4 | Participante do 2PC | `preparar`, `confirmar` e `abortar` com idempotência e **no-wait** (NÃO imediato quando falta assento); rede em memória | ⏳ |
@@ -1465,7 +1465,10 @@ Notas de sequência:
   transação nasce na fase 5, e a fase 7 só acrescenta o wait-die.
 - **Limitações temporárias.** Da fase 2 à 4, as reservas continuam só em memória
   e com o algoritmo do P1: gravá-las no log seria código descartado quando o
-  2PC substituir o `RESERVAR`. Da fase 5 à 7, os cancelamentos que envolvem
+  2PC substituir o `RESERVAR`. Consequência da fase 2: só as caronas vão ao
+  log; após um reinício toda carona volta com todos os assentos livres e as
+  reservas somem, inclusive as atingidas por um cancelamento já gravado. Da
+  fase 5 à 7, os cancelamentos que envolvem
   reservas respondem um erro provisório, até a fase 8.
 - **O TF8 fica na fase 8**, porque o ponto `aviso-apos-registrar` depende do
   outbox.
