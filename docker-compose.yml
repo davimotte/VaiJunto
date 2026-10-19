@@ -4,11 +4,12 @@
 # conforme a secao 13.2 do PROJETO_P2.md.
 #
 # Cada empresa monta SOMENTE o seu diretorio de dados e o seu diretorio de
-# estado, e nenhum volume e compartilhado entre empresas (RD07, RD11). Dentro do contêiner todas escutam
-# em 9000; o host as distingue pelas portas 9001 a 9003.
+# estado, e nenhum volume e compartilhado entre empresas (RD07, RD11). Dentro
+# do conteiner todas escutam em 9000 (clientes) e 8080 (pares); o host as
+# distingue pelas portas 9001 a 9003 e 8081 a 8083 (secao 13.3).
 #
-# --pares ja e passado para exercitar a validacao, mas ninguem o usa ainda: o
-# HTTP entre servidores (portas 808x) entra na fase 3A.
+# Entre conteineres, os pares se encontram pelo nome do servico
+# (http://rotacapixaba:8080) e usam a porta 8080 interna, nao a publicada.
 
 x-servidor: &servidor
   build:
@@ -28,11 +29,13 @@ services:
     command:
       - "--empresa=vaijunto"
       - "--endereco=0.0.0.0:9000"
+      - "--endereco-pares=0.0.0.0:8080"
       - "--dados=/dados"
       - "--log=/estado/vaijunto.wal"
       - "--pares=rotacapixaba=http://rotacapixaba:8080,rotafluminense=http://rotafluminense:8080"
     ports:
       - "9001:9000"
+      - "8081:8080"
     volumes:
       - ./dados/vaijunto:/dados:ro
       - ./estado/vaijunto:/estado
@@ -42,11 +45,13 @@ services:
     command:
       - "--empresa=rotacapixaba"
       - "--endereco=0.0.0.0:9000"
+      - "--endereco-pares=0.0.0.0:8080"
       - "--dados=/dados"
       - "--log=/estado/rotacapixaba.wal"
       - "--pares=vaijunto=http://vaijunto:8080,rotafluminense=http://rotafluminense:8080"
     ports:
       - "9002:9000"
+      - "8082:8080"
     volumes:
       - ./dados/rotacapixaba:/dados:ro
       - ./estado/rotacapixaba:/estado
@@ -56,11 +61,13 @@ services:
     command:
       - "--empresa=rotafluminense"
       - "--endereco=0.0.0.0:9000"
+      - "--endereco-pares=0.0.0.0:8080"
       - "--dados=/dados"
       - "--log=/estado/rotafluminense.wal"
       - "--pares=vaijunto=http://vaijunto:8080,rotacapixaba=http://rotacapixaba:8080"
     ports:
       - "9003:9000"
+      - "8083:8080"
     volumes:
       - ./dados/rotafluminense:/dados:ro
       - ./estado/rotafluminense:/estado
