@@ -19,24 +19,30 @@ import (
 // (tipo desconhecido, dados ilegíveis, ID repetido, cancelamento de carona
 // que não existe) não é um fato passado, é corrupção, e o boot é recusado com
 // o número do registro.
-func reaplicar(e *Estado, registros [][]byte) error {
+//
+// Devolve o maior carimbo de Lamport visto, para o boot restaurar o relógio
+// (seção 4.8). É o maior, e não o do último registro, porque o campo é o L do
+// momento da gravação e nada obriga o log a ser crescente nele: o relógio
+// avança por mensagem recebida, não por registro gravado.
+func reaplicar(e *Estado, registros [][]byte) (uint64, error) {
+	var maiorLamport uint64
 	for i, bruto := range registros {
 		n := i + 1
 		var r registro
 		if err := json.Unmarshal(bruto, &r); err != nil {
-			return fmt.Errorf("dominio: log, registro %d: envelope ilegível: %w", n, err)
+			return 0, fmt.Errorf("dominio: log, registro %d: envelope ilegível: %w", n, err)
 		}
 		switch r.Tipo {
 		case tipoCaronaPublicada:
 			var d dadosCaronaPublicada
 			if err := json.Unmarshal(r.Dados, &d); err != nil {
-				return fmt.Errorf("dominio: log, registro %d (%s): dados ilegíveis: %w", n, r.Tipo, err)
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): dados ilegíveis: %w", n, r.Tipo, err)
 			}
 			if len(d.Rota) < 2 || len(d.Horarios) != len(d.Rota) || len(d.PrecosCentavos) != len(d.Rota)-1 {
-				return fmt.Errorf("dominio: log, registro %d (%s): carona %q com rota, horários e preços incoerentes", n, r.Tipo, d.Carona)
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): carona %q com rota, horários e preços incoerentes", n, r.Tipo, d.Carona)
 			}
 			if _, existe := e.caronas[d.Carona]; existe {
-				return fmt.Errorf("dominio: log, registro %d (%s): carona %q já existe", n, r.Tipo, d.Carona)
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): carona %q já existe", n, r.Tipo, d.Carona)
 			}
 			livres := make([]int, len(d.Rota)-1)
 			for j := range livres {
@@ -54,20 +60,23 @@ func reaplicar(e *Estado, registros [][]byte) error {
 		case tipoCaronaCancelada:
 			var d dadosCaronaCancelada
 			if err := json.Unmarshal(r.Dados, &d); err != nil {
-				return fmt.Errorf("dominio: log, registro %d (%s): dados ilegíveis: %w", n, r.Tipo, err)
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): dados ilegíveis: %w", n, r.Tipo, err)
 			}
 			c, ok := e.caronas[d.Carona]
 			if !ok {
-				return fmt.Errorf("dominio: log, registro %d (%s): carona %q não existe", n, r.Tipo, d.Carona)
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): carona %q não existe", n, r.Tipo, d.Carona)
 			}
 			c.Cancelada = true
 		default:
-			return fmt.Errorf("dominio: log, registro %d: tipo desconhecido %q", n, r.Tipo)
+			return 0, fmt.Errorf("dominio: log, registro %d: tipo desconhecido %q", n, r.Tipo)
 		}
 		// O seq do disco é a verdade: o próximo registro continua dele.
 		if r.Seq > e.seq {
 			e.seq = r.Seq
 		}
+		if r.Lamport > maiorLamport {
+			maiorLamport = r.Lamport
+		}
 	}
-	return nil
+	return maiorLamport, nil
 }

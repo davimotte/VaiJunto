@@ -99,8 +99,9 @@ func CarregarCaronas(empresa string, conteudo []byte) (map[string]*Carona, error
 
 // CarregarEstado monta o Estado inicial do servidor a partir do conteúdo dos
 // dois arquivos de carga: nenhuma reserva existe antes do boot (seção 14,
-// limitação das fases 2 a 4). O log do estado começa em memória; o servidor
-// troca por um arquivo com UsarLog antes de aceitar conexões.
+// limitação das fases 2 a 4). O log do estado começa em memória e o relógio
+// parado; o servidor troca os dois com UsarLog e UsarRelogio antes de aceitar
+// conexões.
 func CarregarEstado(empresa string, usuariosJSON, caronasJSON []byte) (*Estado, error) {
 	if err := ValidarEmpresa(empresa); err != nil {
 		return nil, err
@@ -119,5 +120,6 @@ func CarregarEstado(empresa string, usuariosJSON, caronasJSON []byte) (*Estado, 
 		caronas:  caronas,
 		reservas: make(map[string]*Reserva),
 		log:      NovaLogMemoria(),
+		lamport:  relogioParado,
 	}, nil
 }

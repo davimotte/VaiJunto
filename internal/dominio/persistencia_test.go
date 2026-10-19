@@ -28,7 +28,7 @@ func publicarDeTeste(t *testing.T, e *Estado) Carona {
 func reiniciar(t *testing.T, antes *Estado) *Estado {
 	t.Helper()
 	depois := estadoDeTeste()
-	if err := depois.Reaplicar(antes.log.(*LogMemoria).Registros()); err != nil {
+	if _, err := depois.Reaplicar(antes.log.(*LogMemoria).Registros()); err != nil {
 		t.Fatalf("Reaplicar: %v", err)
 	}
 	return depois
@@ -137,7 +137,7 @@ func TestReaplicar_CanceladaContinuaCancelada(t *testing.T) {
 func TestReaplicar_NaoRevalida(t *testing.T) {
 	linha := `{"seq":1,"lamport":0,"tipo":"CARONA_PUBLICADA","dados":{"carona":"vaijunto:car-aa11bb22","motorista":"joao","rota":["Salvador","Feira de Santana"],"horarios":["2020-01-01T06:00:00-03:00","2020-01-01T07:30:00-03:00"],"assentos":2,"precos_centavos":[1500]}}`
 	e := estadoDeTeste()
-	if err := e.Reaplicar([][]byte{[]byte(linha)}); err != nil {
+	if _, err := e.Reaplicar([][]byte{[]byte(linha)}); err != nil {
 		t.Fatalf("Reaplicar recusou carona de partida passada: %v", err)
 	}
 	if _, _, err := e.DetalharCarona("vaijunto:car-aa11bb22", "joao"); err != nil {
@@ -149,7 +149,7 @@ func TestReaplicar_NaoRevalida(t *testing.T) {
 func TestReaplicar_UsaOIDDoRegistro(t *testing.T) {
 	linha := `{"seq":7,"lamport":0,"tipo":"CARONA_PUBLICADA","dados":{"carona":"vaijunto:car-cafe0001","motorista":"joao","rota":["Salvador","Feira de Santana"],"horarios":["2026-10-01T06:00:00-03:00","2026-10-01T07:30:00-03:00"],"assentos":2,"precos_centavos":[1500]}}`
 	e := estadoDeTeste()
-	if err := e.Reaplicar([][]byte{[]byte(linha)}); err != nil {
+	if _, err := e.Reaplicar([][]byte{[]byte(linha)}); err != nil {
 		t.Fatalf("Reaplicar: %v", err)
 	}
 	lista := e.CaronasDoMotorista("joao", true)
@@ -176,7 +176,7 @@ func TestReaplicar_RecusaRegistroIncoerente(t *testing.T) {
 	}
 	for nome, linha := range casos {
 		t.Run(nome, func(t *testing.T) {
-			err := estadoDeTeste().Reaplicar([][]byte{[]byte(linha)})
+			_, err := estadoDeTeste().Reaplicar([][]byte{[]byte(linha)})
 			if err == nil {
 				t.Fatal("Reaplicar aceitou registro incoerente")
 			}
@@ -189,7 +189,72 @@ func TestReaplicar_RecusaRegistroIncoerente(t *testing.T) {
 
 func TestReaplicar_RecusaIDDuplicado(t *testing.T) {
 	linha := `{"seq":1,"lamport":0,"tipo":"CARONA_PUBLICADA","dados":{"carona":"vaijunto:car-aa11bb22","motorista":"joao","rota":["Salvador","Feira de Santana"],"horarios":["2026-10-01T06:00:00-03:00","2026-10-01T07:30:00-03:00"],"assentos":2,"precos_centavos":[1500]}}`
-	if err := estadoDeTeste().Reaplicar([][]byte{[]byte(linha), []byte(linha)}); err == nil {
+	if _, err := estadoDeTeste().Reaplicar([][]byte{[]byte(linha), []byte(linha)}); err == nil {
 		t.Fatal("Reaplicar aceitou o mesmo ID duas vezes")
+	}
+}
+
+// O campo lamport do registro (seção 4.8) vem do relógio injetado no boot, e
+// não de um zero fixo: é por ele que o log de uma empresa mostra em que ponto
+// da ordem global cada mudança aconteceu.
+func TestGravar_UsaORelogioInjetado(t *testing.T) {
+	e := estadoDeTeste()
+	e.UsarRelogio(func() uint64 { return 41 })
+
+	publicarDeTeste(t, e)
+
+	var env struct{ Lamport uint64 }
+	if err := json.Unmarshal(e.log.(*LogMemoria).Registros()[0], &env); err != nil {
+		t.Fatalf("envelope: %v", err)
+	}
+	if env.Lamport != 41 {
+		t.Errorf("lamport do registro = %d, want 41", env.Lamport)
+	}
+}
+
+// Sem relógio injetado, grava 0: é o caso dos testes e de um servidor que
+// ainda não tem a camada de transação. O que não pode é dar panic por campo
+// nil dentro da seção crítica.
+func TestGravar_SemRelogioGravaZero(t *testing.T) {
+	e := estadoDeTeste()
+
+	publicarDeTeste(t, e)
+
+	var env struct{ Lamport uint64 }
+	if err := json.Unmarshal(e.log.(*LogMemoria).Registros()[0], &env); err != nil {
+		t.Fatalf("envelope: %v", err)
+	}
+	if env.Lamport != 0 {
+		t.Errorf("lamport do registro = %d, want 0", env.Lamport)
+	}
+}
+
+// Reaplicar devolve o MAIOR lamport do log, com que o boot restaura o relógio
+// (seção 4.8). Não é o do último registro: o relógio avança por mensagem
+// recebida, e nada garante que o campo cresça ao longo do arquivo.
+func TestReaplicar_DevolveOMaiorLamport(t *testing.T) {
+	linhas := [][]byte{
+		[]byte(`{"seq":1,"lamport":5,"tipo":"CARONA_PUBLICADA","dados":{"carona":"vaijunto:car-aa11bb22","motorista":"joao","rota":["Salvador","Feira de Santana"],"horarios":["2026-10-01T06:00:00-03:00","2026-10-01T07:30:00-03:00"],"assentos":2,"precos_centavos":[1500]}}`),
+		[]byte(`{"seq":2,"lamport":57,"tipo":"CARONA_PUBLICADA","dados":{"carona":"vaijunto:car-aa11bb23","motorista":"joao","rota":["Salvador","Feira de Santana"],"horarios":["2026-10-01T06:00:00-03:00","2026-10-01T07:30:00-03:00"],"assentos":2,"precos_centavos":[1500]}}`),
+		[]byte(`{"seq":3,"lamport":12,"tipo":"CARONA_CANCELADA","dados":{"carona":"vaijunto:car-aa11bb22"}}`),
+	}
+
+	maior, err := estadoDeTeste().Reaplicar(linhas)
+	if err != nil {
+		t.Fatalf("Reaplicar: %v", err)
+	}
+	if maior != 57 {
+		t.Errorf("maior lamport = %d, want 57", maior)
+	}
+}
+
+// Log vazio: nada a restaurar, e o relógio continua onde está.
+func TestReaplicar_LogVazioNaoMoveORelogio(t *testing.T) {
+	maior, err := estadoDeTeste().Reaplicar(nil)
+	if err != nil {
+		t.Fatalf("Reaplicar: %v", err)
+	}
+	if maior != 0 {
+		t.Errorf("maior lamport = %d, want 0", maior)
 	}
 }

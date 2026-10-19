@@ -22,7 +22,7 @@ func subirComLog(t *testing.T, caminho string) (*dominio.Estado, *persistencia.A
 	if err != nil {
 		t.Fatalf("Abrir: %v", err)
 	}
-	if err := estado.Reaplicar(registros); err != nil {
+	if _, err := estado.Reaplicar(registros); err != nil {
 		t.Fatalf("Reaplicar: %v", err)
 	}
 	estado.UsarLog(arq)

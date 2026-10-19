@@ -24,7 +24,30 @@ func NovoEstado(empresa string) *Estado {
 		caronas:  make(map[string]*Carona),
 		reservas: make(map[string]*Reserva),
 		log:      NovaLogMemoria(),
+		lamport:  relogioParado,
 	}
+}
+
+// relogioParado é o relógio dos testes e de qualquer Estado antes do boot
+// injetar o de verdade: todo registro sai com lamport 0.
+//
+// Existe para que gravar nunca precise de um if contra nil. Um campo de função
+// que pode ser nil obrigaria a checagem em todo ponto de gravação, e bastaria
+// um esquecimento para o servidor morrer com panic dentro da seção crítica,
+// com o lock tomado.
+func relogioParado() uint64 { return 0 }
+
+// UsarRelogio injeta a leitura do relógio de Lamport (D24) que preenche o
+// campo lamport dos registros (seção 4.8).
+//
+// Recebe uma função em vez do relógio porque o relógio mora em
+// internal/transacao e o domínio não importa pacote interno nenhum (regra 8).
+// O servidor chama uma vez no boot, antes de qualquer gravação; o lock é só
+// para a troca ser visível a qualquer goroutine (-race), como em UsarLog.
+func (e *Estado) UsarRelogio(lamport func() uint64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.lamport = lamport
 }
 
 // UsarLog troca o destino dos registros. O servidor chama uma vez no boot,
@@ -38,7 +61,13 @@ func (e *Estado) UsarLog(l Log) {
 
 // Reaplicar refaz o estado a partir dos registros do log, na ordem em que
 // foram gravados (D37, seção 9.2). Não grava nada: o log já os contém.
-func (e *Estado) Reaplicar(registros [][]byte) error {
+//
+// Devolve o maior carimbo de Lamport encontrado, com que o boot restaura o
+// relógio (seção 4.8, último parágrafo). Vem no retorno, e não num acessor,
+// porque quem conhece o conteúdo do log é o domínio e quem tem o relógio é a
+// camada de transação: obrigar o chamador a receber o valor é o que impede um
+// boot futuro de esquecer de restaurá-lo e deixar o relógio andando para trás.
+func (e *Estado) Reaplicar(registros [][]byte) (uint64, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return reaplicar(e, registros)

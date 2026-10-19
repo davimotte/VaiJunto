@@ -74,6 +74,13 @@ type Estado struct {
 	// arquivo com UsarLog. seq numera os registros (seção 4.8).
 	log Log
 	seq uint64
+	// lamport lê o relógio de Lamport da empresa para o campo lamport dos
+	// registros (seção 4.8). É uma função, e não o relógio, porque quem o
+	// implementa é internal/transacao e o domínio não importa pacote interno
+	// nenhum (regra 8, seção 5.3). Nunca é nil: os construtores começam com
+	// uma função que devolve 0 e o servidor injeta a de verdade com
+	// UsarRelogio.
+	lamport func() uint64
 }
 
 // PernaItinerario é um segmento contíguo de uma única carona dentro de um

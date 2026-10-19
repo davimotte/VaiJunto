@@ -52,8 +52,8 @@ const (
 	tipoCaronaCancelada = "CARONA_CANCELADA"
 )
 
-// registro é o envelope de cada linha do log (seção 4.8). Lamport grava 0 até
-// a Fase 3A criar o relógio.
+// registro é o envelope de cada linha do log (seção 4.8). Lamport é o L da
+// empresa no momento da gravação (D24).
 type registro struct {
 	Seq     uint64          `json:"seq"`
 	Lamport uint64          `json:"lamport"`
@@ -101,7 +101,10 @@ func gravar(e *Estado, tipo string, dados any) error {
 	if err != nil {
 		return fmt.Errorf("%w: serializar %s: %v", ErrFalhaNoLog, tipo, err)
 	}
-	linha, err := json.Marshal(registro{Seq: e.seq + 1, Lamport: 0, Tipo: tipo, Dados: bruto})
+	// O relógio é só lido (seção 8.1): gravar em disco é evento local da
+	// empresa, não troca de mensagem, e por isso não avança L. Quem o avança é
+	// a borda REST, num ponto único (seção 5.7).
+	linha, err := json.Marshal(registro{Seq: e.seq + 1, Lamport: e.lamport(), Tipo: tipo, Dados: bruto})
 	if err != nil {
 		return fmt.Errorf("%w: serializar envelope de %s: %v", ErrFalhaNoLog, tipo, err)
 	}
