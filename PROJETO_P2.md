@@ -1442,7 +1442,7 @@ sessão. Os critérios de pronto são os que a fase precisa demonstrar, com
 | 1B | Sementes e ambiente | Sementes das três empresas (seção 12.2), `--dados`, `--pares`, compose com 3 empresas | ✅ |
 | 2 | Persistência | Log com `fsync` e replay das caronas (seção 9.2). Estado sobrevive a reinício; TP1 passa | ✅ |
 | 3A | Pilha REST | Servidor e cliente HTTP, cabeçalhos, **relógio de Lamport**, `/saude` | ✅ |
-| 3B | Busca federada | Seção 6. TB1 e TB2 passam | ⏳ |
+| 3B | Busca federada | Seção 6. TB1 e TB2 passam | ✅ |
 | 4 | Participante do 2PC | `preparar`, `confirmar` e `abortar` com idempotência, **no-wait** (NÃO imediato quando falta assento) e verificação de papéis (seção 1.2); rede em memória | ⏳ |
 | 5 | Coordenador do 2PC | Seção 7.1, ainda com no-wait; `/auditoria` e verificador de invariantes. TR1, TR2 e TR5 passam | ⏳ |
 | 6A | Recuperação | Seções 9.3 e 9.4: retomada, `consultar`, veto e terminação. TF9 e TF10 passam | ⏳ |
@@ -1469,9 +1469,7 @@ Notas de sequência:
   log; após um reinício toda carona volta com todos os assentos livres e as
   reservas somem, inclusive as atingidas por um cancelamento já gravado. Da
   fase 5 à 7, os cancelamentos que envolvem
-  reservas respondem um erro provisório, até a fase 8. Na fase 3A o cliente
-  HTTP dos pares existe e é testado, mas só ganha chamador na busca federada
-  (3B): antes dela, `--prazo-chamada` não decide nada em execução.
+  reservas respondem um erro provisório, até a fase 8.
 - **O TF8 fica na fase 8**, porque o ponto `aviso-apos-registrar` depende do
   outbox.
 
