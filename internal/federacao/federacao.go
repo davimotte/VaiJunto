@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"time"
 
+	"vaijunto/internal/dominio"
 	"vaijunto/internal/transacao"
 )
 
@@ -59,9 +60,26 @@ type Config struct {
 	// Registro é o registro de operações (D19); nil desliga.
 	Registro *Registro
 
+	// Estado é o estado desta empresa, de onde saem as caronas de
+	// GET /federacao/caronas e do passo 3 da busca (seção 6). Obrigatório da
+	// fase 3B em diante.
+	//
+	// A pilha REST recebe o *dominio.Estado, e não uma interface: a direção de
+	// importação da seção 5.3 já é federacao → dominio, e um tipo intermediário
+	// aqui só acrescentaria uma peça para explicar. Quem continua garantindo a
+	// disciplina do lock é o próprio Estado, cujos métodos são os únicos que o
+	// adquirem (D05).
+	Estado *dominio.Estado
+
 	// PrazoChamada é o prazo de cada chamada a um par (D41, 2 s por padrão).
 	// Só o cliente o usa.
 	PrazoChamada time.Duration
+
+	// PrazoBusca é o prazo **único** da rodada de pares de uma busca federada
+	// (D41, 2 s por padrão). É separado de PrazoChamada de propósito: aquele
+	// limita uma chamada, este limita o leque inteiro, de modo que três pares
+	// lentos não somem três prazos na espera do passageiro.
+	PrazoBusca time.Duration
 }
 
 // NovoHandler monta o roteador REST com o middleware único (seção 1 da API).
@@ -75,6 +93,13 @@ func NovoHandler(cfg Config) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /saude", func(w http.ResponseWriter, r *http.Request) {
 		responderJSON(w, http.StatusOK, saudeAtual(cfg.Empresa))
+	})
+	// Não entra em caminhosSemCabecalho: exigir X-VaiJunto-Empresa é o que faz
+	// o middleware recusar com 403 quem não está na lista de pares (D20). As
+	// caronas são dado da empresa, e /saude é diagnóstico — por isso só o
+	// segundo é aberto.
+	mux.HandleFunc("GET /federacao/caronas", func(w http.ResponseWriter, r *http.Request) {
+		tratarCaronas(w, r, cfg.Estado, cfg.Empresa)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		responderErro(w, erroHTTP{http.StatusNotFound, codigoRecursoInexistente, "Recurso inexistente."})

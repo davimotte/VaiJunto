@@ -15,7 +15,7 @@ import (
 // switch, em um só lugar, por sessao.autorizar. Nenhum handler repete
 // checagem de autenticação ou de perfil: quando um deles roda, já se sabe que
 // a conexão podia executar aquela operação.
-func rotear(req protocolo.Requisicao, estado *dominio.Estado, s *sessao) protocolo.Resposta {
+func rotear(req protocolo.Requisicao, n *nucleo, s *sessao) protocolo.Resposta {
 	if recusa := s.autorizar(req); recusa != nil {
 		return *recusa
 	}
@@ -24,25 +24,25 @@ func rotear(req protocolo.Requisicao, estado *dominio.Estado, s *sessao) protoco
 	case protocolo.TipoPing:
 		return tratarPing(req)
 	case protocolo.TipoLogin:
-		return tratarLogin(req, estado, s)
+		return tratarLogin(req, n.estado, s)
 	case protocolo.TipoLogout:
 		return tratarLogout(req, s)
 	case protocolo.TipoPublicarCarona:
-		return tratarPublicarCarona(req, estado, s)
+		return tratarPublicarCarona(req, n.estado, s)
 	case protocolo.TipoListarMinhasCaronas:
-		return tratarListarMinhasCaronas(req, estado, s)
+		return tratarListarMinhasCaronas(req, n.estado, s)
 	case protocolo.TipoDetalharCarona:
-		return tratarDetalharCarona(req, estado, s)
+		return tratarDetalharCarona(req, n.estado, s)
 	case protocolo.TipoCancelarCarona:
-		return tratarCancelarCarona(req, estado, s)
+		return tratarCancelarCarona(req, n.estado, s)
 	case protocolo.TipoBuscarItinerarios:
-		return tratarBuscarItinerarios(req, estado, s)
+		return tratarBuscarItinerarios(req, n, s)
 	case protocolo.TipoReservar:
-		return tratarReservar(req, estado, s)
+		return tratarReservar(req, n.estado, s)
 	case protocolo.TipoListarMinhasReservas:
-		return tratarListarMinhasReservas(req, estado, s)
+		return tratarListarMinhasReservas(req, n.estado, s)
 	case protocolo.TipoCancelarReserva:
-		return tratarCancelarReserva(req, estado, s)
+		return tratarCancelarReserva(req, n.estado, s)
 	default:
 		// Inalcançável: autorizar já recusou todo tipo fora da tabela de
 		// perfis. Fica como rede de segurança para o caso de a tabela ganhar

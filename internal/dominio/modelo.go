@@ -83,6 +83,37 @@ type Estado struct {
 	lamport func() uint64
 }
 
+// CaronaBusca é uma carona como a busca federada a enxerga, venha ela do
+// estado local ou de um par (PROJETO_P2.md, seção 6, passos 3 e 5).
+//
+// É o par de domínio da "Carona federada" da seção 3.4 do API_CONSORCIO.md, e
+// não leva tags JSON: quem serializa é internal/federacao, porque o domínio
+// não conhece a rede (regra 8). Difere de Carona em três pontos, e cada um tem
+// motivo:
+//
+//   - MotoristaNome já vem resolvido, e não é um MotoristaID: quem sabe o nome
+//     de um motorista é a empresa dele, e o mapa de usuários de outra empresa
+//     não existe aqui (D32).
+//   - Empresa é explícita, e não derivada do prefixo do ID. É o que a resposta
+//     do par informa, e confrontá-la com o prefixo é uma das validações do
+//     passo 5.
+//   - Não tem Cancelada: carona cancelada não entra na busca, e quem a filtra é
+//     o dono, antes de responder (D40).
+//
+// Livres[t] é assentos − confirmados − em espera no trecho t (D25, D40). É uma
+// fotografia, nunca uma promessa: o valor que vale é o que o dono verifica no
+// PREPARAR.
+type CaronaBusca struct {
+	ID            string
+	Empresa       string
+	MotoristaNome string
+	Rota          []string    // ex.: ["Salvador", "Feira de Santana", "Jequié"]
+	Horarios      []time.Time // len == len(Rota)
+	Assentos      int
+	PrecoTrecho   []int // centavos; len == len(Rota)-1
+	Livres        []int // len == len(Rota)-1
+}
+
 // PernaItinerario é um segmento contíguo de uma única carona dentro de um
 // itinerário: dos índices De até Ate da rota daquela carona, consumindo os
 // trechos De, De+1, …, Ate-1 (PROTOCOL.md, seção 5.8).
@@ -90,8 +121,16 @@ type Estado struct {
 // Motorista é o nome de exibição, e não o identificador de login: quem lê o
 // resultado da busca é o passageiro, que escolhe com quem viajar e nunca
 // digita identificador (D15).
+//
+// Empresa é a dona da carona (D27), e é campo em vez de valor derivado do
+// prefixo do CaronaID na borda, como acontece com o número de baldeações: a
+// perna nasce de uma CaronaBusca, que já informa a empresa, e EmpresaDoID
+// devolve erro — erro sem tratamento razoável num caminho em que o ID já foi
+// validado. Na busca federada é também o que o passageiro precisa ver para
+// saber com quantas empresas vai viajar (PROJETO_P2.md, seção 5.6).
 type PernaItinerario struct {
 	CaronaID      string
+	Empresa       string
 	Motorista     string
 	De, Ate       int
 	Origem        string

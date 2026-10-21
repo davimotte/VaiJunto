@@ -69,6 +69,26 @@ func (r *Registro) enviada(destino, metodo, caminho string, lamport uint64, resu
 		r.empresa, nomeDeEmpresa(destino), metodo, caminho, lamport, resultado, emMilissegundos(duracao)))
 }
 
+// descartou registra uma carona recebida de um par e jogada fora no passo 5 da
+// busca (PROJETO_P2.md, seção 6).
+//
+// É a linha que o documento pede ("descartar, com registro no log"), e ela é o
+// que torna visível o caso que a validação existe para cobrir: um par rodando
+// outra versão do binário. Sem ela, a carona simplesmente não apareceria na
+// busca, e a diferença entre "o par não tem essa carona" e "o par mandou uma
+// carona que recusamos" ficaria invisível na demonstração.
+//
+// O ID vem de fora e sai entre aspas, com escapes, pelo mesmo motivo de
+// nomeDeEmpresa: sem isso, um par poria "\n" nele e escreveria linhas inteiras
+// no nosso registro.
+func (r *Registro) descartou(empresa, caronaID, motivo string) {
+	if r == nil {
+		return
+	}
+	r.escrever(fmt.Sprintf("[%s] ✗ %s carona %s descartada: %s",
+		r.empresa, nomeDeEmpresa(empresa), strconv.Quote(caronaID), motivo))
+}
+
 // nomeDeEmpresa protege o registro de uma linha forjada: o nome vem do
 // cabeçalho X-VaiJunto-Empresa, que é texto de fora. Nome fora do formato da
 // D27 sai entre aspas, com escapes; nome ausente sai como "-".

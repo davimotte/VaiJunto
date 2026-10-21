@@ -1,6 +1,7 @@
 package servidor
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -227,12 +228,15 @@ type buscarItinerariosPedido struct {
 }
 
 // tratarBuscarItinerarios responde a BUSCAR_ITINERARIOS (PROTOCOL.md, seção
-// 5.8).
+// 5.8) delegando à busca federada (PROJETO_P2.md, seção 6).
+//
+// A borda TCP não executa mais o algoritmo: ela decodifica, resolve o fuso da
+// data, delega e traduz o resultado. É a camada 1–4' que conhece prazo e rede.
 //
 // Nada aqui reserva ou bloqueia assento: os valores refletem o instante da
-// consulta e podem estar desatualizados quando o passageiro confirmar (D07). É
+// consulta e podem estar desatualizados quando o passageiro confirmar (D26). É
 // o que garante que nenhum assento fique preso a uma reserva nunca concluída.
-func tratarBuscarItinerarios(req protocolo.Requisicao, estado *dominio.Estado, s *sessao) protocolo.Resposta {
+func tratarBuscarItinerarios(req protocolo.Requisicao, n *nucleo, s *sessao) protocolo.Resposta {
 	var pedido buscarItinerariosPedido
 	if err := json.Unmarshal(req.Dados, &pedido); err != nil {
 		return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "Algum campo veio com o tipo errado.")
@@ -252,19 +256,27 @@ func tratarBuscarItinerarios(req protocolo.Requisicao, estado *dominio.Estado, s
 		return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "A data precisa estar no formato AAAA-MM-DD (ex.: 2026-09-15).")
 	}
 
-	itinerarios, err := estado.BuscarItinerarios(*pedido.Origem, *pedido.Destino, data)
+	// context.Background, e não um context da requisição: o protocolo TCP não
+	// tem cancelamento por mensagem — um cliente que desiste fecha a conexão, e
+	// isso só é percebido na escrita da resposta. Quem limita a espera é o prazo
+	// único da própria busca (D41), e por isso uma empresa fora do ar não
+	// prende esta goroutine.
+	resultado, err := n.busca.Buscar(context.Background(), *pedido.Origem, *pedido.Destino, data)
 	if err != nil {
 		return respostaDeErroDeDominio(req.ID, err)
 	}
 
 	resposta := protocolo.BuscarItinerariosResposta{
-		Itinerarios: make([]protocolo.Itinerario, 0, len(itinerarios)),
+		Itinerarios:           make([]protocolo.Itinerario, 0, len(resultado.Itinerarios)),
+		Parcial:               resultado.Parcial,
+		EmpresasIndisponiveis: resultado.EmpresasIndisponiveis,
 	}
-	for _, it := range itinerarios {
+	for _, it := range resultado.Itinerarios {
 		trechos := make([]protocolo.TrechoItinerario, 0, len(it.Pernas))
 		for _, p := range it.Pernas {
 			trechos = append(trechos, protocolo.TrechoItinerario{
 				CaronaID:      p.CaronaID,
+				Empresa:       p.Empresa,
 				Motorista:     p.Motorista,
 				De:            p.De,
 				Ate:           p.Ate,

@@ -25,7 +25,7 @@ import (
 // (PROTOCOL.md, seções 1 e 2), que é validado antes de qualquer regra de
 // acesso, e o resultado não pode depender de quem está logado.
 func processar(linha string) protocolo.Resposta {
-	_, resp := processarLinha([]byte(linha), dominio.NovoEstado("vaijunto"), &sessao{})
+	_, resp := processarLinha([]byte(linha), nucleoDeTeste(), &sessao{})
 	return resp
 }
 
@@ -181,7 +181,7 @@ func (c *conexaoFalsa) SetWriteDeadline(time.Time) error { return nil }
 func TestAtenderConexao_EOFLimpo(t *testing.T) {
 	conn := &conexaoFalsa{entrada: strings.NewReader(`{"id":"1","tipo":"PING","dados":{}}` + "\n")}
 
-	if err := atenderConexao(conn, dominio.NovoEstado("vaijunto"), prazoEscrita, nil); err != nil {
+	if err := atenderConexao(conn, nucleoDeTeste(), prazoEscrita, nil); err != nil {
 		t.Fatalf("EOF limpo não deveria produzir erro: %v", err)
 	}
 	if !conn.fechada {
@@ -200,7 +200,7 @@ func TestAtenderConexao_LinhaIncompletaNaoResponde(t *testing.T) {
 	// JSON sintaticamente completo, mas sem o '\n': não é uma mensagem.
 	conn := &conexaoFalsa{entrada: strings.NewReader(`{"id":"1","tipo":"PING","dados":{}}`)}
 
-	err := atenderConexao(conn, dominio.NovoEstado("vaijunto"), prazoEscrita, nil)
+	err := atenderConexao(conn, nucleoDeTeste(), prazoEscrita, nil)
 	if !errors.Is(err, protocolo.ErrLinhaIncompleta) {
 		t.Fatalf("err = %v, want protocolo.ErrLinhaIncompleta", err)
 	}
@@ -219,7 +219,7 @@ func TestAtenderConexao_RespondeAntesDeDescartarFragmento(t *testing.T) {
 	entrada := `{"id":"1","tipo":"PING","dados":{}}` + "\n" + `{"id":"2","tipo":"PIN`
 	conn := &conexaoFalsa{entrada: strings.NewReader(entrada)}
 
-	if err := atenderConexao(conn, dominio.NovoEstado("vaijunto"), prazoEscrita, nil); !errors.Is(err, protocolo.ErrLinhaIncompleta) {
+	if err := atenderConexao(conn, nucleoDeTeste(), prazoEscrita, nil); !errors.Is(err, protocolo.ErrLinhaIncompleta) {
 		t.Fatalf("err = %v, want protocolo.ErrLinhaIncompleta", err)
 	}
 
@@ -245,7 +245,7 @@ func TestAtenderConexao_ClienteQueNaoLeEncerraNoPrazo(t *testing.T) {
 
 	resultado := make(chan error, 1)
 	go func() {
-		resultado <- atenderConexao(ladoServidor, dominio.NovoEstado("vaijunto"), 50*time.Millisecond, nil)
+		resultado <- atenderConexao(ladoServidor, nucleoDeTeste(), 50*time.Millisecond, nil)
 	}()
 
 	if _, err := ladoCliente.Write([]byte(`{"id":"1","tipo":"PING","dados":{}}` + "\n")); err != nil {
@@ -265,13 +265,15 @@ func TestAtenderConexao_ClienteQueNaoLeEncerraNoPrazo(t *testing.T) {
 // TestAtenderConexao_PanicoEncerraSoAConexao confere a D18: um pânico no
 // atendimento vira erro da conexão, e não a queda do processo.
 //
-// O Estado nil provoca um pânico de verdade no primeiro acesso ao estado,
-// dentro do handler de LOGIN — o mesmo tipo de defeito que o recover existe
-// para conter.
+// O núcleo com Estado nil provoca um pânico de verdade no primeiro acesso ao
+// estado, dentro do handler de LOGIN — o mesmo tipo de defeito que o recover
+// existe para conter. O núcleo em si não vai nil de propósito: o pânico tem de
+// nascer dentro de um handler, como nasceria um bug de verdade, e não na
+// primeira linha do roteamento.
 func TestAtenderConexao_PanicoEncerraSoAConexao(t *testing.T) {
 	conn := &conexaoFalsa{entrada: strings.NewReader(`{"id":"1","tipo":"LOGIN","dados":{"usuario":"joao","senha":"1234"}}` + "\n")}
 
-	err := atenderConexao(conn, nil, prazoEscrita, nil)
+	err := atenderConexao(conn, &nucleo{}, prazoEscrita, nil)
 	if err == nil || !strings.Contains(err.Error(), "pânico") {
 		t.Fatalf("err = %v, want erro de pânico recuperado", err)
 	}
@@ -302,7 +304,7 @@ func (l *listenerFalso) Addr() net.Addr { return nil }
 func TestAceitar_FalhaTransitoriaNaoEncerra(t *testing.T) {
 	semDescritor := &net.OpError{Op: "accept", Net: "tcp", Err: syscall.EMFILE}
 	listener := &listenerFalso{erros: []error{semDescritor, semDescritor}}
-	s := &Servidor{listener: listener, estado: dominio.NovoEstado("vaijunto")}
+	s := &Servidor{listener: listener, nucleo: nucleoDeTeste()}
 
 	if err := s.Aceitar(); !errors.Is(err, net.ErrClosed) {
 		t.Fatalf("Aceitar = %v, want net.ErrClosed", err)
@@ -316,7 +318,7 @@ func TestAceitar_FalhaTransitoriaNaoEncerra(t *testing.T) {
 // um listener real, Fechar ainda encerra o laço, em vez de fazê-lo tentar de
 // novo para sempre.
 func TestAceitar_RetornaQuandoOListenerFecha(t *testing.T) {
-	s, err := Escutar("127.0.0.1:0", dominio.NovoEstado("vaijunto"))
+	s, err := Escutar("127.0.0.1:0", dominio.NovoEstado("vaijunto"), buscaVazia{})
 	if err != nil {
 		t.Fatalf("escutar: %v", err)
 	}
@@ -354,7 +356,7 @@ func atenderComRegistro(t *testing.T, mensagens ...string) []string {
 	conn := &conexaoFalsa{entrada: strings.NewReader(strings.Join(mensagens, "\n") + "\n")}
 
 	var saida bytes.Buffer
-	if err := atenderConexao(conn, estado, prazoEscrita, novoRegistro(&saida)); err != nil {
+	if err := atenderConexao(conn, &nucleo{estado: estado, busca: buscaVazia{}}, prazoEscrita, novoRegistro(&saida)); err != nil {
 		t.Fatalf("atender conexão: %v", err)
 	}
 	if saida.Len() == 0 {

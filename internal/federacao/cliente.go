@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
 	"time"
 
@@ -101,6 +103,43 @@ func (c *Cliente) Saude(ctx context.Context, destino string) (Saude, error) {
 	var s Saude
 	err := c.chamar(ctx, destino, http.MethodGet, "/saude", nil, &s)
 	return s, err
+}
+
+// Caronas pede a um par as caronas dele com alguma parada em [desde, ate)
+// (seção 4.2 da API; passo 4 da busca federada).
+//
+// O prazo é o do ctx que a busca entrega, que é o prazo único do leque (D41), e
+// não o PrazoChamada: chamar é quem aplica o menor dos dois, porque
+// context.WithTimeout sobre um ctx que já tem prazo mantém o mais apertado.
+//
+// Os instantes vão em RFC 3339, codificados por url.Values: o deslocamento de
+// fuso tem "+", que sem codificação viraria espaço na query.
+func (c *Cliente) Caronas(ctx context.Context, destino string, desde, ate time.Time) (RespostaCaronas, error) {
+	parametros := url.Values{}
+	parametros.Set("desde", desde.Format(time.RFC3339))
+	parametros.Set("ate", ate.Format(time.RFC3339))
+
+	var r RespostaCaronas
+	err := c.chamar(ctx, destino, http.MethodGet, "/federacao/caronas?"+parametros.Encode(), nil, &r)
+	return r, err
+}
+
+// Pares devolve os nomes das empresas da lista estática (D20), em ordem.
+//
+// Ordenados porque é a partir desta lista que a busca abre o leque e monta
+// empresas_indisponiveis: a iteração de um mapa em Go é aleatória, e sem a
+// ordem a mesma falha produziria a mesma lista em ordens diferentes, o que
+// tornaria a resposta não comparável num teste.
+//
+// Devolve uma fatia nova, e não o mapa: a lista de pares é fixa no boot, e quem
+// consulta não pode alterá-la de dentro.
+func (c *Cliente) Pares() []string {
+	nomes := make([]string, 0, len(c.pares))
+	for empresa := range c.pares {
+		nomes = append(nomes, empresa)
+	}
+	sort.Strings(nomes)
+	return nomes
 }
 
 // chamar é o caminho único de toda chamada a um par: monta a URL, põe os

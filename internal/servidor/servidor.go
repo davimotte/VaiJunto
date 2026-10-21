@@ -4,6 +4,7 @@
 package servidor
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"vaijunto/internal/dominio"
+	"vaijunto/internal/federacao"
 	"vaijunto/internal/protocolo"
 )
 
@@ -23,6 +25,31 @@ const prazoEscrita = 10 * time.Second
 // ao Accept não volta (D18).
 const pausaAposFalhaDeAccept = 100 * time.Millisecond
 
+// BuscaFederada é o que a borda TCP precisa da camada de federação: o
+// algoritmo da seção 6 do PROJETO_P2.md, já pronto.
+//
+// A interface é declarada aqui, no consumidor, e não exportada pela federação:
+// é a borda TCP que diz do que depende, e assim os testes deste pacote trocam a
+// busca por uma dublê sem subir três servidores HTTP. O tipo do resultado vem
+// de federacao porque duplicá-lo criaria duas definições do mesmo contrato.
+//
+// A direção de importação continua a da seção 5.3: servidor → federacao, nunca
+// o contrário.
+type BuscaFederada interface {
+	Buscar(ctx context.Context, origem, destino string, data time.Time) (federacao.Resultado, error)
+}
+
+// nucleo é o que uma conexão precisa para atender qualquer operação: o estado
+// desta empresa e a busca federada.
+//
+// É uma struct, e não dois parâmetros soltos, porque a lista cresce com as
+// fases: o coordenador do 2PC entra aqui na fase 5, sem mexer de novo na
+// assinatura de atenderConexao nem de rotear.
+type nucleo struct {
+	estado *dominio.Estado
+	busca  BuscaFederada
+}
+
 // Servidor aceita conexões TCP e despacha cada uma para sua própria
 // goroutine (camada 1 — modelo thread-per-connection, PROJETO.md, decisão
 // D03).
@@ -30,18 +57,23 @@ const pausaAposFalhaDeAccept = 100 * time.Millisecond
 // mutex global (D04). O Servidor apenas o repassa a cada goroutine.
 type Servidor struct {
 	listener net.Listener
-	estado   *dominio.Estado
+	nucleo   *nucleo
 	registro *registro // nil enquanto RegistrarOperacoes não é chamado
 }
 
-// Escutar abre o listener TCP no endereço informado (ex.: "0.0.0.0:9000") e
-// o associa ao estado de domínio que as conexões vão compartilhar.
-func Escutar(endereco string, estado *dominio.Estado) (*Servidor, error) {
+// Escutar abre o listener TCP no endereço informado (ex.: "0.0.0.0:9000") e o
+// associa ao estado de domínio e à busca federada que as conexões vão
+// compartilhar.
+//
+// A busca é um parâmetro, e não algo montado aqui dentro, porque quem a
+// constrói é o boot: ela precisa da mesma Config da pilha REST, para que o
+// relógio de Lamport e a lista de pares sejam os mesmos das duas pontas.
+func Escutar(endereco string, estado *dominio.Estado, busca BuscaFederada) (*Servidor, error) {
 	l, err := net.Listen("tcp", endereco)
 	if err != nil {
 		return nil, err
 	}
-	return &Servidor{listener: l, estado: estado}, nil
+	return &Servidor{listener: l, nucleo: &nucleo{estado: estado, busca: busca}}, nil
 }
 
 // Endereco devolve o endereço em que o servidor está escutando.
@@ -69,7 +101,7 @@ func (s *Servidor) Aceitar() error {
 			continue
 		}
 		go func() {
-			if err := atenderConexao(conn, s.estado, prazoEscrita, s.registro); err != nil {
+			if err := atenderConexao(conn, s.nucleo, prazoEscrita, s.registro); err != nil {
 				log.Printf("servidor: conexão %s encerrada: %v", conn.RemoteAddr(), err)
 			}
 		}()

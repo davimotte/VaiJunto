@@ -120,6 +120,7 @@ type BuscarItinerariosRequisicao struct {
 
 type TrechoItinerario struct {
 	CaronaID      string    `json:"carona_id"`
+	Empresa       string    `json:"empresa"`
 	Motorista     string    `json:"motorista"`
 	De            int       `json:"de"`
 	Ate           int       `json:"ate"`
@@ -140,6 +141,17 @@ type Itinerario struct {
 
 type BuscarItinerariosResposta struct {
 	Itinerarios []Itinerario `json:"itinerarios"`
+
+	// Parcial diz que a busca não ouviu todas as empresas do consórcio, e
+	// EmpresasIndisponiveis nomeia as que faltaram (PROJETO_P2.md, seção 6,
+	// passo 7; D26). Resultado parcial é resposta OK, não erro: os itinerários
+	// que vieram são válidos, e o passageiro precisa saber que podem existir
+	// outros.
+	//
+	// A lista nunca sai como null: o cliente que a percorre não deve precisar
+	// de um if antes do laço. Quem monta a resposta a cria vazia.
+	Parcial               bool     `json:"parcial"`
+	EmpresasIndisponiveis []string `json:"empresas_indisponiveis"`
 }
 
 // ReservarRequisicao e ReservarResposta — seção 5.9.

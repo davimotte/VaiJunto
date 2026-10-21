@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"vaijunto/internal/dominio"
 	"vaijunto/internal/transacao"
 )
 
@@ -21,7 +22,9 @@ func configDeTeste() Config {
 		Empresa:      "vaijunto",
 		Pares:        map[string]string{"rotacapixaba": "http://rotacapixaba.invalido:8080"},
 		Relogio:      transacao.NovoRelogio(),
+		Estado:       dominio.NovoEstado("vaijunto"),
 		PrazoChamada: 50 * time.Millisecond,
+		PrazoBusca:   50 * time.Millisecond,
 	}
 }
 

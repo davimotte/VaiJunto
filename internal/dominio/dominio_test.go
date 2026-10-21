@@ -671,9 +671,9 @@ func assinatura(it Itinerario) string {
 func TestBuscarItinerarios_CenarioSecao92(t *testing.T) {
 	e := estadoDoCenario(t)
 
-	itinerarios, err := e.BuscarItinerarios("Salvador", "Vitória da Conquista", as(0, 0))
+	itinerarios, err := buscarNoEstado(e, "Salvador", "Vitória da Conquista", as(0, 0))
 	if err != nil {
-		t.Fatalf("BuscarItinerarios: %v", err)
+		t.Fatalf("buscarNoEstado: %v", err)
 	}
 
 	// Ordem esperada (D16; PROTOCOL.md, seção 5.8), calculada à mão na seção
@@ -783,13 +783,26 @@ func publicarComPreco(t *testing.T, e *Estado, precoPorTrecho int, rota []string
 	return c.ID
 }
 
+// buscarNoEstado roda a busca sobre as caronas de um Estado, compondo as duas
+// peças em que ela foi dividida na fase 3B: a cópia sob o lock
+// (CaronasNaJanela) e a função pura (BuscarItinerariosEm).
+//
+// É o caminho de uma empresa sozinha, o mesmo que a busca federada percorre com
+// zero pares consultados (PROJETO_P2.md, seção 6). Os testes de busca deste
+// pacote exercitam a regra de negócio, e não a federação: a composição aqui é o
+// que mantém todos eles válidos sem subir servidor nenhum.
+func buscarNoEstado(e *Estado, origem, destino string, data time.Time) ([]Itinerario, error) {
+	desde, ate := JanelaDaBusca(data)
+	return BuscarItinerariosEm(e.CaronasNaJanela(desde, ate), origem, destino, data)
+}
+
 // buscarNoDia busca de origem a destino no dia do helper as e devolve as
 // assinaturas dos itinerários, na ordem da resposta.
 func buscarNoDia(t *testing.T, e *Estado, origem, destino string) ([]Itinerario, []string) {
 	t.Helper()
-	itinerarios, err := e.BuscarItinerarios(origem, destino, as(0, 0))
+	itinerarios, err := buscarNoEstado(e, origem, destino, as(0, 0))
 	if err != nil {
-		t.Fatalf("BuscarItinerarios(%s, %s): %v", origem, destino, err)
+		t.Fatalf("buscarNoEstado(%s, %s): %v", origem, destino, err)
 	}
 	assinaturas := make([]string, len(itinerarios))
 	for i, it := range itinerarios {

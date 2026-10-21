@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"vaijunto/internal/dominio"
 	"vaijunto/internal/transacao"
 )
 
@@ -29,7 +30,9 @@ func clienteApontadoPara(t *testing.T, par string, h http.Handler, prazo time.Du
 		Empresa:      "vaijunto",
 		Pares:        map[string]string{par: srv.URL},
 		Relogio:      transacao.NovoRelogio(),
+		Estado:       dominio.NovoEstado("vaijunto"),
 		PrazoChamada: prazo,
+		PrazoBusca:   prazo,
 	}
 	return NovoCliente(cfg), cfg
 }
@@ -37,11 +40,19 @@ func clienteApontadoPara(t *testing.T, par string, h http.Handler, prazo time.Du
 // configDoPar é a Config do servidor do outro lado: empresa diferente, e a
 // nossa na lista de pares dele.
 func configDoPar(empresa string) Config {
+	return configDoParCom(empresa, dominio.NovoEstado(empresa))
+}
+
+// configDoParCom é a mesma Config com um estado escolhido pelo teste, para os
+// casos em que o par precisa ter caronas a devolver.
+func configDoParCom(empresa string, estado *dominio.Estado) Config {
 	return Config{
 		Empresa:      empresa,
 		Pares:        map[string]string{"vaijunto": "http://vaijunto.invalido:8080"},
 		Relogio:      transacao.NovoRelogio(),
+		Estado:       estado,
 		PrazoChamada: time.Second,
+		PrazoBusca:   time.Second,
 	}
 }
 

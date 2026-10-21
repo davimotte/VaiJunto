@@ -8,7 +8,6 @@ import (
 	"runtime/debug"
 	"time"
 
-	"vaijunto/internal/dominio"
 	"vaijunto/internal/protocolo"
 )
 
@@ -34,7 +33,7 @@ import (
 // reg nil desliga o registro de operações (D19). O encerramento com erro não
 // passa por ele: volta ao chamador, que o registra sempre, com o registro
 // ligado ou não.
-func atenderConexao(conn net.Conn, estado *dominio.Estado, prazoEscrita time.Duration, reg *registro) (err error) {
+func atenderConexao(conn net.Conn, n *nucleo, prazoEscrita time.Duration, reg *registro) (err error) {
 	defer conn.Close()
 	defer func() {
 		if r := recover(); r != nil {
@@ -77,7 +76,7 @@ func atenderConexao(conn net.Conn, estado *dominio.Estado, prazoEscrita time.Dur
 		// sem a entrega da resposta, que depende do cliente ler (D17).
 		usuario := sess.usuario.Usuario
 		inicio := time.Now()
-		req, resp := processarLinha(linha, estado, sess)
+		req, resp := processarLinha(linha, n, sess)
 		duracao := time.Since(inicio)
 		if sess.autenticado {
 			usuario = sess.usuario.Usuario
@@ -108,7 +107,7 @@ func atenderConexao(conn net.Conn, estado *dominio.Estado, prazoEscrita time.Dur
 // A requisição volta junto com a resposta para o registro de operações (D19),
 // inclusive quando o envelope é inválido: o que foi possível ler dela ainda
 // identifica a linha no terminal.
-func processarLinha(linha []byte, estado *dominio.Estado, sess *sessao) (protocolo.Requisicao, protocolo.Resposta) {
+func processarLinha(linha []byte, n *nucleo, sess *sessao) (protocolo.Requisicao, protocolo.Resposta) {
 	req, err := protocolo.DecodificarRequisicao(linha)
 	if err != nil {
 		if errors.Is(err, protocolo.ErrJSONInvalido) {
@@ -116,5 +115,5 @@ func processarLinha(linha []byte, estado *dominio.Estado, sess *sessao) (protoco
 		}
 		return req, respostaErro(req.ID, protocolo.CodigoEnvelopeInvalido, "Envelope inválido: id, tipo e dados são obrigatórios, e dados precisa ser um objeto.")
 	}
-	return req, rotear(req, estado, sess)
+	return req, rotear(req, n, sess)
 }

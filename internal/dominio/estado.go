@@ -110,21 +110,29 @@ func (e *Estado) DetalharCarona(caronaID, motoristaID string) (Carona, [][]Passa
 	return detalharCarona(e, caronaID, motoristaID)
 }
 
-// BuscarItinerarios devolve os itinerários da origem ao destino cuja primeira
-// perna parte na data pedida (PROTOCOL.md, seção 5.8).
+// CaronasNaJanela devolve as caronas desta empresa com alguma parada em
+// [desde, ate), na forma que a busca consome (D40).
 //
-// Trava como todas as demais operações, embora não escreva nada: Livres é
-// lido para podar pernas sem assento, e ler contador que outra goroutine
-// decrementa é corrida mesmo quando o valor lido não vai a lugar nenhum. O
-// resultado é montado inteiro dentro da seção crítica e sai como valor, sem
-// nenhum ponteiro para dentro do estado.
+// É o passo 3 da busca federada (PROJETO_P2.md, seção 6) e, ao mesmo tempo, o
+// corpo de GET /federacao/caronas: as duas pontas precisam exatamente do mesmo
+// recorte, e escrevê-lo duas vezes seria convidar a divergência entre o que a
+// empresa responde ao par e o que ela usa de si mesma — a equivalência federada
+// quebraria só na metade que ninguém testa.
 //
-// data carrega o fuso em que a pergunta "que dia é 15/09?" deve ser
-// respondida; quem chama é responsável por escolhê-lo (D11).
-func (e *Estado) BuscarItinerarios(origem, destino string, data time.Time) ([]Itinerario, error) {
+// Este é o **único** ponto da busca que trava, e ele não calcula nada: copia e
+// devolve. Livres é lido aqui dentro porque ler contador que outra goroutine
+// decrementa é corrida mesmo quando o valor lido é só indicativo (-race
+// acusaria). A partir do retorno, tudo o que a busca faz é sobre cópias, e por
+// isso as chamadas aos pares acontecem com o lock já solto (regra 2).
+//
+// A lista sai ordenada por ID. Nenhuma regra depende disso — a busca tem as
+// suas duas ordenações —, mas é o que torna a resposta de /federacao/caronas
+// byte a byte igual entre duas chamadas, e portanto comparável num teste e
+// legível numa demonstração.
+func (e *Estado) CaronasNaJanela(desde, ate time.Time) []CaronaBusca {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return buscarItinerarios(e, origem, destino, data)
+	return caronasNaJanela(e, desde, ate)
 }
 
 // CancelarCarona cancela a carona e propaga o cancelamento às reservas que a

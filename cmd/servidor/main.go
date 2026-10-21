@@ -25,7 +25,8 @@ func main() {
 	listaPares := flag.String("pares", "", "demais empresas do consórcio, no formato empresa=url,empresa=url (D20)")
 	caminhoLog := flag.String("log", "", "arquivo do log write-ahead (D22), ex.: /estado/vaijunto.wal; vazio = estado só em memória, perdido a cada reinício")
 	logOperacoes := flag.Bool("log-operacoes", true, "registra no terminal cada conexão e cada operação atendida, dos clientes e dos pares; desligue ao medir carga")
-	prazoChamada := flag.Duration("prazo-chamada", 2*time.Second, "prazo de cada chamada HTTP a um par (D41); quem o consome é o cliente da federação, a partir da busca federada")
+	prazoChamada := flag.Duration("prazo-chamada", 2*time.Second, "prazo de cada chamada HTTP a um par (D41)")
+	prazoBusca := flag.Duration("prazo-busca", 2*time.Second, "prazo único da rodada de pares de uma busca federada (D41); vale para o leque inteiro, não por par")
 	flag.Parse()
 
 	// Sem default de propósito: uma empresa que sobe com o nome de outra
@@ -86,23 +87,26 @@ func main() {
 		log.Printf("servidor: log %s aberto, %d registros reaplicados, relógio de Lamport em %d", *caminhoLog, len(registros), relogio.Agora())
 	}
 
-	// Config única para as duas pontas da pilha REST: assim o servidor HTTP e
-	// o cliente da federação de uma empresa compartilham obrigatoriamente o
-	// mesmo relógio. Dois relógios no mesmo processo quebrariam a ordem total
-	// da seção 8.1.
-	//
-	// O cliente (federacao.NovoCliente) entra com a busca federada; aqui a
-	// Config já carrega o prazo dele, como a flag --pares foi validada uma
-	// fase antes de ter consumidor.
+	// Config única para as três pontas da pilha REST: assim o servidor HTTP, o
+	// cliente da federação e a busca de uma empresa compartilham
+	// obrigatoriamente o mesmo relógio e a mesma lista de pares. Dois relógios
+	// no mesmo processo quebrariam a ordem total da seção 8.1.
 	cfgREST := federacao.Config{
 		Empresa:      *empresa,
 		Pares:        pares,
 		Relogio:      relogio,
+		Estado:       estado,
 		PrazoChamada: *prazoChamada,
+		PrazoBusca:   *prazoBusca,
 	}
 	if *logOperacoes {
 		cfgREST.Registro = federacao.NovoRegistro(os.Stderr, *empresa)
 	}
+
+	// O cliente dos pares ganha aqui o seu primeiro chamador de verdade: a
+	// busca federada (D26). Até a fase 3A ele existia e era testado, mas
+	// --prazo-chamada não decidia nada em execução.
+	busca := federacao.NovaBusca(cfgREST, federacao.NovoCliente(cfgREST))
 
 	// As duas portas são abertas antes de qualquer uma ser atendida: porta
 	// ocupada vira falha de boot com mensagem clara, em vez de aparecer depois
@@ -112,7 +116,7 @@ func main() {
 		log.Fatalf("servidor: não foi possível escutar em %s (porta dos pares): %v", *enderecoPares, err)
 	}
 
-	s, err := servidor.Escutar(*endereco, estado)
+	s, err := servidor.Escutar(*endereco, estado, busca)
 	if err != nil {
 		log.Fatalf("servidor: não foi possível escutar em %s: %v", *endereco, err)
 	}

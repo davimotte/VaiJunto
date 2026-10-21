@@ -307,6 +307,23 @@ const (
 	// conexão noturna legítima da espera de um dia inteiro.
 	ESPERA_MAXIMA_BALDEACAO = 12 * time.Hour
 
+	// JANELA_BUSCA é a largura da janela da busca federada (D40): da meia-noite
+	// do dia pedido até 48 h depois.
+	//
+	// Não é um valor escolhido à parte das duas constantes acima: é
+	// consequência delas. O filtro de data vale só para a primeira perna, e
+	// cada baldeação seguinte pode esperar até ESPERA_MAXIMA_BALDEACAO; com o
+	// teto de |cidades| − 1 pernas, um itinerário que comece às 23:59 do dia
+	// pedido ainda pode chegar no dia seguinte, e 48 h cobrem a cadeia inteira
+	// com folga. Uma janela mais estreita faria um par omitir caronas que
+	// serviriam de perna intermediária, e a busca devolveria menos itinerários
+	// conforme a hora da partida — resultado que depende do dado que o par
+	// resolveu mandar, e não das regras.
+	//
+	// O critério de inclusão é "alguma parada na janela", e não "partida na
+	// janela", para manter o embarque no meio da rota (D40).
+	JANELA_BUSCA = 48 * time.Hour
+
 	// MAXIMO_ITINERARIOS limita a resposta da busca (D16; PROTOCOL.md, seção
 	// 5.8).
 	//
@@ -326,14 +343,148 @@ const (
 	MAXIMO_ITENS_LISTAGEM = 50
 )
 
+// caronasNaJanela é o recorte que a busca federada e GET /federacao/caronas
+// consomem (PROJETO_P2.md, seção 6, passo 3; D40).
+//
+// Carona cancelada fica de fora, e o filtro é feito aqui, no dono, e não em
+// quem recebe: é o dono que sabe o que está cancelado, e mandar carona
+// cancelada pela rede só para o outro descartar gastaria banda para informar o
+// que ninguém pode usar (D29).
+func caronasNaJanela(e *Estado, desde, ate time.Time) []CaronaBusca {
+	lista := make([]CaronaBusca, 0, len(e.caronas))
+	for _, c := range e.caronas {
+		if c.Cancelada || !c.temParadaEm(desde, ate) {
+			continue
+		}
+
+		// O nome de exibição é resolvido aqui porque só esta empresa tem o mapa
+		// de usuários dela (D32): quem recebe a carona pela rede não teria como
+		// traduzir um MotoristaID. O fallback para o ID vale pelo mesmo motivo
+		// de caronasDoMotorista — carona cuja semente cita usuário inexistente
+		// aparece com o identificador, em vez de aparecer sem motorista.
+		motorista := c.MotoristaID
+		if u, ok := e.usuarios[c.MotoristaID]; ok {
+			motorista = u.Nome
+		}
+
+		lista = append(lista, c.paraBusca(e.empresa, motorista))
+	}
+
+	sort.Slice(lista, func(i, j int) bool { return lista[i].ID < lista[j].ID })
+	return lista
+}
+
+// JanelaDaBusca devolve a janela do passo 2 da busca federada (PROJETO_P2.md,
+// seção 6; D40): da meia-noite do dia de data até JANELA_BUSCA depois.
+//
+// O dia é lido no fuso de data, e não em time.Local, pelo mesmo motivo de
+// mesmaData: "05/11" só tem sentido dentro de um fuso, e deixá-lo implícito
+// faria a mesma busca pedir janelas diferentes conforme a configuração da
+// máquina — dentro de um contêiner, inclusive (PROJETO.md, seção 10.1).
+//
+// É função única do domínio porque os dois lados a usam: a busca a calcula para
+// pedir aos pares, e o dono a recebe para filtrar o que devolve. Duas contas
+// equivalentes escritas em lugares diferentes são duas contas que um dia
+// divergem.
+func JanelaDaBusca(data time.Time) (desde, ate time.Time) {
+	ano, mes, dia := data.Date()
+	desde = time.Date(ano, mes, dia, 0, 0, 0, 0, data.Location())
+	return desde, desde.Add(JANELA_BUSCA)
+}
+
+// temParadaEm responde se alguma parada da carona cai em [desde, ate).
+//
+// O intervalo é semiaberto, como manda a seção 4.2 do API_CONSORCIO.md: assim
+// duas janelas consecutivas nunca contam a mesma parada duas vezes. A
+// comparação é por Before, nunca por ==, porque instantes iguais em fusos
+// diferentes são o mesmo ponto no tempo (D11).
+func (c *Carona) temParadaEm(desde, ate time.Time) bool {
+	for _, h := range c.Horarios {
+		if !h.Before(desde) && h.Before(ate) {
+			return true
+		}
+	}
+	return false
+}
+
+// paraBusca converte a carona do estado na forma que a busca consome,
+// resolvendo o nome do motorista, que só esta empresa conhece (D32).
+//
+// Copia as fatias pelo mesmo motivo de copia: o resultado atravessa a fronteira
+// da seção crítica, e a busca roda fora do lock (PROJETO_P2.md, seção 6, passo
+// 6). Sem a cópia, a função pura leria Livres enquanto outra goroutine o
+// decrementa.
+func (c *Carona) paraBusca(empresa, motoristaNome string) CaronaBusca {
+	return CaronaBusca{
+		ID:            c.ID,
+		Empresa:       empresa,
+		MotoristaNome: motoristaNome,
+		Rota:          append([]string(nil), c.Rota...),
+		Horarios:      append([]time.Time(nil), c.Horarios...),
+		Assentos:      c.Assentos,
+		PrecoTrecho:   append([]int(nil), c.PrecoTrecho...),
+		Livres:        append([]int(nil), c.Livres...),
+	}
+}
+
+// Validar é o passo 5 da busca federada (PROJETO_P2.md, seção 6): confere a
+// forma de uma carona **recebida de um par** antes de ela entrar no conjunto
+// sobre o qual a busca roda.
+//
+// Existe porque um par pode estar rodando outra versão do binário. Sem esta
+// conferência, uma carona com três horários para duas paradas faria gerarPernas
+// indexar fora da fatia e derrubaria a busca inteira — uma empresa com defeito
+// tirando do ar a busca das outras duas. Com ela, a carona é descartada, a
+// linha vai ao registro e a busca segue.
+//
+// Reaproveita validarCarona, a mesma função que valida a publicação e a
+// semente: rota de menos de duas paradas, cidade fora do catálogo (D33), cidade
+// repetida, horários fora de ordem, preços incoerentes ou negativos e assentos
+// inválidos já saem de lá. O que se acrescenta aqui é o que só existe nesta
+// forma — os contadores de assento livre e o prefixo da empresa.
+//
+// Nenhum sentinela novo: os erros são os mesmos do domínio, e as duas tabelas
+// de tradução das bordas continuam completas.
+func (c CaronaBusca) Validar() error {
+	if err := validarCarona(c.Rota, c.Horarios, c.Assentos, c.PrecoTrecho); err != nil {
+		return err
+	}
+
+	trechos := len(c.Rota) - 1
+	if len(c.Livres) != trechos {
+		return fmt.Errorf("%w: %d contadores de assento livre para %d trechos", ErrRotaInvalida, len(c.Livres), trechos)
+	}
+	for i, livres := range c.Livres {
+		// Acima de Assentos seria assento vendido que nunca existiu; abaixo de
+		// zero, assento vendido duas vezes. Nos dois casos a carona mente sobre
+		// a própria capacidade, e a busca ofereceria perna que a reserva recusa.
+		if livres < 0 || livres > c.Assentos {
+			return fmt.Errorf("%w: trecho %d com %d livres de %d assentos", ErrAssentosInvalidos, i, livres, c.Assentos)
+		}
+	}
+
+	// O prefixo é quem diz o dono do trecho (D27). Divergir da Empresa
+	// declarada faria o 2PC rotear o PREPARAR para a empresa errada, e a
+	// reserva falharia muito depois da busca, sem explicação.
+	dona, err := EmpresaDoID(c.ID)
+	if err != nil {
+		return err
+	}
+	if dona != c.Empresa {
+		return fmt.Errorf("%w: carona %q declarada da empresa %q", ErrIDSemEmpresa, c.ID, c.Empresa)
+	}
+	return nil
+}
+
 // pernaCandidata é uma perna gerada no passo 2 da busca, antes de entrar em
 // qualquer itinerário.
 //
 // Além da perna em si, guarda as cidades que o passageiro percorre nela, da
 // de embarque à de desembarque, inclusive as intermediárias: é sobre elas que
 // a busca em profundidade aplica a regra de não revisitar cidade (D09). A
-// fatia aponta para dentro de Carona.Rota sem cópia, o que é seguro porque só
-// é lida, e só dentro da seção crítica da busca.
+// fatia aponta para dentro de CaronaBusca.Rota sem cópia, o que é seguro
+// porque a CaronaBusca já é uma cópia — ninguém mais tem o ponteiro dela — e
+// porque a busca só a lê.
 type pernaCandidata struct {
 	perna   PernaItinerario
 	cidades []string
@@ -343,24 +494,25 @@ type pernaCandidata struct {
 // todo segmento contíguo de toda carona com assento livre, indexado pela
 // cidade de embarque.
 //
-// A única poda é a de trecho sem assento, a única que lê estado mutável — e
-// ela é só uma poda: a busca não reserva nem promete nada, e a reserva refaz
-// a verificação inteira sob o lock (D07). Não há poda geométrica: as cidades
-// não têm ordem nem sentido de viagem (D09), e uma poda pelo sentido das
-// primeiras paradas descartaria caronas que servem à busca.
+// Recebe a lista de caronas em vez de ler o Estado (PROJETO_P2.md, seção 6,
+// passo 6). A lista é a união das caronas locais com as recebidas dos pares, e
+// aqui as duas são indistinguíveis: é essa indiferença que faz o resultado da
+// busca não depender de qual empresa hospeda cada carona, que é a equivalência
+// federada que o TB1 verifica.
+//
+// A única poda é a de trecho sem assento — e ela é só uma poda: a busca não
+// reserva nem promete nada, e o dono refaz a verificação inteira sob o seu
+// próprio lock no PREPARAR (D26). Não há poda geométrica: as cidades não têm
+// ordem nem sentido de viagem (D09), e uma poda pelo sentido das primeiras
+// paradas descartaria caronas que servem à busca.
 //
 // Uma carona com k paradas gera no máximo k(k−1)/2 pernas.
-func gerarPernas(e *Estado) map[string][]pernaCandidata {
+func gerarPernas(caronas []CaronaBusca) map[string][]pernaCandidata {
 	pernas := make(map[string][]pernaCandidata)
 
-	for _, c := range e.caronas {
-		if c.Cancelada || len(c.Rota) < 2 {
+	for _, c := range caronas {
+		if len(c.Rota) < 2 {
 			continue
-		}
-
-		motorista := c.MotoristaID
-		if u, ok := e.usuarios[c.MotoristaID]; ok {
-			motorista = u.Nome
 		}
 
 		for a := 0; a < len(c.Rota)-1; a++ {
@@ -378,7 +530,8 @@ func gerarPernas(e *Estado) map[string][]pernaCandidata {
 				pernas[c.Rota[a]] = append(pernas[c.Rota[a]], pernaCandidata{
 					perna: PernaItinerario{
 						CaronaID:      c.ID,
-						Motorista:     motorista,
+						Empresa:       c.Empresa,
+						Motorista:     c.MotoristaNome,
 						De:            a,
 						Ate:           b,
 						Origem:        c.Rota[a],
@@ -393,11 +546,20 @@ func gerarPernas(e *Estado) map[string][]pernaCandidata {
 		}
 	}
 
-	// A iteração de um mapa em Go é aleatória por construção, então sem esta
-	// ordenação a busca visitaria as pernas em ordem diferente a cada
-	// chamada. Não muda o conjunto de itinerários encontrados, mas fixa a
-	// ordem em que eles são gerados, que é o que torna o resultado
-	// reproduzível na demonstração e o teste estável.
+	// A primeira das duas ordenações de determinismo (PROJETO.md, seção 6). Não
+	// muda o conjunto de itinerários encontrados, mas fixa a ordem em que eles
+	// são gerados, que é o que torna o resultado reproduzível na demonstração e
+	// o teste estável.
+	//
+	// A chave agora é o ID **global**, com o prefixo da empresa (D27), e por
+	// isso a ordem alfabética não é mais a dos sufixos: "rotacapixaba:car-2"
+	// vem antes de "vaijunto:car-1". Isso é inofensivo porque esta ordenação
+	// não decide o que é devolvido, e sim em que sequência é gerado; quem decide
+	// a resposta é a ordenação do passo 4, que começa pelos três critérios de
+	// negócio da D16. Os quatro itinerários da regressão não empatam em nenhum
+	// deles, e é por isso que a distribuição do fixture entre as três empresas
+	// não altera a lista nem a ordem (PROJETO_P2.md, seção 6, "Equivalência
+	// federada").
 	for cidade := range pernas {
 		lista := pernas[cidade]
 		sort.Slice(lista, func(i, j int) bool {
@@ -426,16 +588,26 @@ func mesmaData(instante, data time.Time) bool {
 	return a1 == a2 && m1 == m2 && d1 == d2
 }
 
-// buscarItinerarios implementa o algoritmo da seção 6 do PROJETO.md e
-// responde a BUSCAR_ITINERARIOS (PROTOCOL.md, seção 5.8).
+// BuscarItinerariosEm implementa os passos 1 a 4 do algoritmo da seção 6 do
+// PROJETO.md sobre uma lista de caronas, e é o passo 6 da busca federada
+// (PROJETO_P2.md, seção 6).
 //
-// Roda sob o mesmo mutex de todas as outras operações (D04) e **não escreve
-// nada**: lê Livres apenas para podar pernas inviáveis. É essa escolha que
-// dispensa reserva em duas fases (D07) — nenhum assento fica bloqueado por
-// uma consulta que o passageiro nunca confirma. O preço da escolha é que o
-// resultado pode estar desatualizado quando ele confirmar, e por isso a
-// reserva revalida tudo.
-func buscarItinerarios(e *Estado, origem, destino string, data time.Time) ([]Itinerario, error) {
+// É uma **função pura**: não toca o Estado, não trava nada e não faz E/S. Roda
+// fora do lock porque só trabalha sobre cópias, que é o que a regra 2 do
+// projeto exige da busca federada — as chamadas aos pares acontecem antes dela,
+// e segurar o mutex durante elas prenderia o servidor inteiro ao prazo da
+// empresa mais lenta.
+//
+// É também o único lugar em que a busca existe: quem busca só na própria
+// empresa chama esta mesma função, com a lista de caronas locais e nenhum par
+// consultado.
+//
+// Não escreve nada: lê Livres apenas para podar pernas inviáveis. É essa
+// escolha que dispensa reservar na consulta (D26) — nenhum assento fica
+// bloqueado por uma busca que o passageiro nunca confirma. O preço é que o
+// resultado pode estar desatualizado quando ele confirmar, e por isso o dono
+// revalida tudo no PREPARAR.
+func BuscarItinerariosEm(caronas []CaronaBusca, origem, destino string, data time.Time) ([]Itinerario, error) {
 	// Passo 1 — validar.
 	if !CidadeConhecida(origem) {
 		return nil, fmt.Errorf("%w: origem %q", ErrCidadeDesconhecida, origem)
@@ -448,7 +620,7 @@ func buscarItinerarios(e *Estado, origem, destino string, data time.Time) ([]Iti
 	}
 
 	// Passo 2 — gerar pernas candidatas.
-	pernas := gerarPernas(e)
+	pernas := gerarPernas(caronas)
 
 	// Passo 3 — busca em profundidade. O estado é a cidade atual, o instante
 	// em que o passageiro fica livre nela e as cidades por onde ele já passou.

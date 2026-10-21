@@ -90,7 +90,7 @@ func TestRespostaDeErroDeDominio_DesconhecidoViraErroInterno(t *testing.T) {
 // funcione, e sim que ela foi reconhecida: qualquer resposta serve, menos
 // TIPO_DESCONHECIDO.
 func TestTodaOperacaoDaTabelaTemHandler(t *testing.T) {
-	estado := dominio.NovoEstado("vaijunto")
+	n := &nucleo{estado: dominio.NovoEstado("vaijunto"), busca: buscaVazia{}}
 
 	for tipo, exigencia := range perfilExigido {
 		sess := &sessao{}
@@ -104,7 +104,7 @@ func TestTodaOperacaoDaTabelaTemHandler(t *testing.T) {
 		}
 
 		req := protocolo.Requisicao{ID: "1", Tipo: tipo, Dados: json.RawMessage("{}")}
-		resp := rotear(req, estado, sess)
+		resp := rotear(req, n, sess)
 		if resp.Codigo == protocolo.CodigoTipoDesconhecido {
 			t.Errorf("tipo %q está em perfilExigido mas não tem case em rotear", tipo)
 		}
