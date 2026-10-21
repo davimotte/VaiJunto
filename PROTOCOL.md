@@ -380,31 +380,75 @@ permite baldeação atravessando a meia-noite. O dia é lido no fuso das cidades
 atendidas (`America/Bahia`, −03:00), e não no fuso da máquina do servidor: uma
 partida às `2026-10-01T22:00:00-03:00` pertence à busca de `2026-10-01`.
 
-Resposta, com um dos itinerários do cenário do `PROJETO.md` (seção 9.2); os
-demais foram omitidos:
+A busca é **federada**: o servidor consulta em paralelo as demais empresas do
+consórcio e devolve itinerários que combinam caronas de várias delas
+(`PROJETO_P2.md`, seção 6). O passageiro continua falando só com a empresa a que
+está conectado.
+
+Resposta, com o itinerário interestadual da seção 12.2 do `PROJETO_P2.md`: três
+pernas, uma em cada empresa, por R$ 430,00.
 
 ```json
-{"id":"6","status":"OK","dados":{"itinerarios":[{
-  "preco_total_centavos":10000,
-  "partida":"2026-10-01T06:00:00-03:00",
-  "chegada":"2026-10-01T14:30:00-03:00",
-  "baldeacoes":1,
-  "trechos":[
-    {"carona_id":"vaijunto:car-1","motorista":"João Silva","de":0,"ate":2,
-     "origem":"Salvador","destino":"Jequié",
-     "partida":"2026-10-01T06:00:00-03:00","chegada":"2026-10-01T10:45:00-03:00",
-     "preco_centavos":6000},
-    {"carona_id":"vaijunto:car-2","motorista":"Carlos Lima","de":0,"ate":1,
-     "origem":"Jequié","destino":"Vitória da Conquista",
-     "partida":"2026-10-01T12:15:00-03:00","chegada":"2026-10-01T14:30:00-03:00",
-     "preco_centavos":4000}
-  ]
-}]}}
+{"id":"6","status":"OK","dados":{
+  "parcial":false,
+  "empresas_indisponiveis":[],
+  "itinerarios":[{
+    "preco_total_centavos":43000,
+    "partida":"2026-11-05T05:00:00-03:00",
+    "chegada":"2026-11-06T14:30:00-03:00",
+    "baldeacoes":2,
+    "trechos":[
+      {"carona_id":"vaijunto:car-1","empresa":"vaijunto",
+       "motorista":"João Silva","de":0,"ate":2,
+       "origem":"Salvador","destino":"Vitória da Conquista",
+       "partida":"2026-11-05T05:00:00-03:00","chegada":"2026-11-05T12:30:00-03:00",
+       "preco_centavos":9500},
+      {"carona_id":"rotacapixaba:car-1","empresa":"rotacapixaba",
+       "motorista":"Rafael Mendonça Pires","de":0,"ate":2,
+       "origem":"Vitória da Conquista","destino":"Cachoeiro de Itapemirim",
+       "partida":"2026-11-05T14:00:00-03:00","chegada":"2026-11-06T06:30:00-03:00",
+       "preco_centavos":21500},
+      {"carona_id":"rotafluminense:car-1","empresa":"rotafluminense",
+       "motorista":"Marcos Antunes Barreto","de":0,"ate":2,
+       "origem":"Cachoeiro de Itapemirim","destino":"Petrópolis",
+       "partida":"2026-11-06T08:00:00-03:00","chegada":"2026-11-06T14:30:00-03:00",
+       "preco_centavos":12000}
+    ]
+  }]
+}}
 ```
 
 Cada elemento de `trechos` é um segmento contíguo dentro de uma única carona, dos
 índices `de` até `ate` da rota daquela carona, consumindo os trechos `de`,
 `de+1`, …, `ate-1`.
+
+`empresa` é a dona da carona daquele trecho, e é sempre o prefixo do
+`carona_id` (D27). Vem explícito para que o cliente possa dizer ao passageiro
+com quantas empresas ele vai viajar sem interpretar o identificador.
+
+#### Resultado parcial
+
+`parcial` é `true` quando ao menos uma empresa do consórcio não respondeu dentro
+do prazo, e `empresas_indisponiveis` nomeia essas empresas, em ordem alfabética.
+A lista vem sempre presente, vazia quando todas responderam, e nunca como
+`null`.
+
+Resultado parcial **é resposta `OK`, não erro**: os itinerários devolvidos são
+válidos, e o que falta é a informação de que podem existir outros. Tratar a
+queda de uma empresa como falha da busca faria uma empresa fora do ar derrubar a
+consulta de todas as outras (D26, D30).
+
+```json
+{"id":"6","status":"OK","dados":{
+  "parcial":true,
+  "empresas_indisponiveis":["rotacapixaba"],
+  "itinerarios":[]
+}}
+```
+
+Uma empresa que respondeu, mas mandou uma carona malformada ou com cidade fora
+do catálogo, **não** entra na lista: aquela carona é descartada e o resto do que
+ela mandou continua valendo. A lista é de empresas de quem não se sabe nada.
 
 Um itinerário nunca passa duas vezes pela mesma cidade, contando as cidades
 intermediárias de cada trecho.
