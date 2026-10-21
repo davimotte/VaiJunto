@@ -1,3 +1,7 @@
+> **Registro histórico do Problema 1.** O projeto atual é o consórcio do Problema 2,
+> descrito em `PROJETO_P2.md`. Várias decisões deste documento foram revogadas
+> ou reinterpretadas (ver `PROJETO_P2.md`, seção 3.1).
+
 # VAIJUNTO — Documento de projeto
 
 Problema 1 de TEC502 (Concorrência e Conectividade). Sistema de caronas
