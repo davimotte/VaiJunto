@@ -56,6 +56,11 @@ func TestMain(m *testing.M) {
 // Cada teste chama esta função e ganha um Estado próprio: publicar carona
 // altera o estado, e testes que compartilhassem o mesmo servidor passariam a
 // depender da ordem em que rodam.
+//
+// É uma empresa **sozinha**, sem par nenhum: a busca federada com zero pares é
+// exatamente o caminho do P1 (PROJETO_P2.md, seção 6), e é por isso que a
+// regressão inteira continua valendo sem subir consórcio. O consórcio de três
+// empresas é o subirConsorcioDeBusca, em busca_test.go.
 func subirServidor(t *testing.T) string {
 	t.Helper()
 
@@ -63,7 +68,7 @@ func subirServidor(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("carga inicial: %v", err)
 	}
-	s, err := servidor.Escutar("127.0.0.1:0", estado)
+	s, err := servidor.Escutar("127.0.0.1:0", estado, buscaDe(t, "vaijunto", estado, nil, nil, 0))
 	if err != nil {
 		t.Fatalf("escutar: %v", err)
 	}
