@@ -2,6 +2,7 @@ package federacao
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -64,7 +65,16 @@ func comMiddleware(cfg Config, prox http.Handler) http.Handler {
 		}
 
 		cfg.Registro.recebida(r.Header.Get(cabecalhoEmpresa), r.Method,
-			r.URL.EscapedPath(), lamport, obs.status, time.Since(inicio))
+			r.URL.EscapedPath(), lamport, obs.detalhe, obs.status, time.Since(inicio))
+
+		// Seção 5.1 da API: a violação de protocolo é registrada. Ela nunca
+		// deveria acontecer (seção 7.4), e por isso ganha uma linha própria, que
+		// o teste procura e que numa demonstração não se perde no meio das
+		// outras. Fica aqui, e não nos handlers, para que nenhum caminho novo
+		// possa esquecê-la: quem responde 409 já disse tudo o que era preciso.
+		if obs.status == http.StatusConflict {
+			cfg.Registro.violacao(r.Header.Get(cabecalhoEmpresa), r.Method, r.URL.EscapedPath(), obs.detalhe)
+		}
 	})
 }
 
@@ -157,18 +167,37 @@ func limitarCorpo(r *http.Request) *erroHTTP {
 	return nil
 }
 
-// respostaObservada anota o status respondido, para a linha do registro de
-// operações (D19). Sem o embrulho, o middleware não tem como saber o que o
-// handler respondeu: a ResponseWriter do net/http não conta.
+// respostaObservada anota o status respondido e o detalhe que só o handler
+// conhece, para a linha do registro de operações (D19). Sem o embrulho, o
+// middleware não tem como saber o que o handler respondeu: a ResponseWriter do
+// net/http não conta.
 //
-// O valor inicial é 200 porque um handler que escreve o corpo sem chamar
-// WriteHeader responde 200, exatamente como o net/http faz.
+// O valor inicial do status é 200 porque um handler que escreve o corpo sem
+// chamar WriteHeader responde 200, exatamente como o net/http faz.
+//
+// O detalhe existe para que o registro continue tendo **um único escritor**. A
+// seção 5.2 do PROJETO_P2.md quer uma linha por requisição, com o txID e o
+// carimbo visíveis — dados que o middleware não tem, porque estão no corpo. Em
+// vez de o handler escrever uma segunda linha, ele anota o que sabe e o
+// middleware a compõe: o formato do registro fica em um lugar só.
 type respostaObservada struct {
 	http.ResponseWriter
-	status int
+	status  int
+	detalhe string
 }
 
 func (r *respostaObservada) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
+}
+
+// anotar guarda o detalhe da operação para a linha do registro.
+//
+// Aceita qualquer ResponseWriter e ignora quem não for a nossa: um teste de
+// unidade que chame o handler direto com um httptest.Recorder continua
+// funcionando, e o handler não precisa saber por onde está sendo servido.
+func anotar(w http.ResponseWriter, formato string, args ...any) {
+	if obs, nossa := w.(*respostaObservada); nossa {
+		obs.detalhe = fmt.Sprintf(formato, args...)
+	}
 }

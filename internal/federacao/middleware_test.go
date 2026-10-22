@@ -18,11 +18,16 @@ import (
 // configDeTeste monta a Config de uma empresa "vaijunto" com um par conhecido.
 // O relógio começa em zero; quem precisa de outro valor chama Restaurar.
 func configDeTeste() Config {
+	// Estado e participante saem do mesmo Estado, como no boot (cmd/servidor):
+	// um participante ligado a outro estado responderia sobre assentos que não
+	// são os que a busca enxerga.
+	estado := dominio.NovoEstado("vaijunto")
 	return Config{
 		Empresa:      "vaijunto",
 		Pares:        map[string]string{"rotacapixaba": "http://rotacapixaba.invalido:8080"},
 		Relogio:      transacao.NovoRelogio(),
-		Estado:       dominio.NovoEstado("vaijunto"),
+		Estado:       estado,
+		Participante: transacao.NovoParticipante(estado),
 		PrazoChamada: 50 * time.Millisecond,
 		PrazoBusca:   50 * time.Millisecond,
 	}
@@ -259,13 +264,17 @@ func TestMiddleware_CorpoGrandeEm413(t *testing.T) {
 // Exatamente 64 KB passa: o limite é "acima de 64 KB".
 func TestMiddleware_CorpoNoLimitePassa(t *testing.T) {
 	corpo := bytes.NewReader(bytes.Repeat([]byte("a"), limiteCorpo))
-	req := comCabecalhos(httptest.NewRequest(http.MethodPost, "/transacoes/vaijunto:res-1/preparar", corpo), "rotacapixaba", 7)
+	req := comCabecalhos(httptest.NewRequest(http.MethodPost, "/transacoes/rotacapixaba:res-1/preparar", corpo), "rotacapixaba", 7)
 
 	rec := pedir(configDeTeste(), req)
-	// O caminho não existe nesta fase; o que se afirma aqui é que o corpo
-	// passou do limite de tamanho e chegou ao roteamento.
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (corpo de 64 KB exatos deve passar)", rec.Code)
+	// O que se afirma aqui é que o corpo passou do limite de tamanho e chegou
+	// ao handler: 64 KB de "a" não são um JSON de preparar, e a recusa vem do
+	// handler (CORPO_INVALIDO), não do middleware (CORPO_GRANDE).
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (corpo de 64 KB exatos deve passar)", rec.Code)
+	}
+	if got := codigoDoErro(t, rec); got != codigoCorpoInvalido {
+		t.Errorf("codigo = %q, want %q", got, codigoCorpoInvalido)
 	}
 }
 

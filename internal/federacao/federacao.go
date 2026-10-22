@@ -71,6 +71,15 @@ type Config struct {
 	// adquirem (D05).
 	Estado *dominio.Estado
 
+	// Participante é o lado dono dos assentos do 2PC (D21), a quem os handlers
+	// de preparar, confirmar e abortar entregam cada requisição. Obrigatório da
+	// fase 4 em diante.
+	//
+	// É o **mesmo** Participante que o coordenador local chama direto, sem rede,
+	// quando a empresa do passageiro também é dona de algum trecho (seção 7.1,
+	// passo 5): dois caminhos de entrada, um código só.
+	Participante *transacao.Participante
+
 	// PrazoChamada é o prazo de cada chamada a um par (D41, 2 s por padrão).
 	// Só o cliente o usa.
 	PrazoChamada time.Duration
@@ -100,6 +109,18 @@ func NovoHandler(cfg Config) http.Handler {
 	// segundo é aberto.
 	mux.HandleFunc("GET /federacao/caronas", func(w http.ResponseWriter, r *http.Request) {
 		tratarCaronas(w, r, cfg.Estado, cfg.Empresa)
+	})
+	// Os recursos de transação levam o txID no caminho, sem codificação: o
+	// caractere ":" é válido num segmento de URL (seção 1.4 da API). O curinga
+	// {tx} casa exatamente um segmento, que é o identificador inteiro.
+	mux.HandleFunc("POST /transacoes/{tx}/preparar", func(w http.ResponseWriter, r *http.Request) {
+		tratarPreparar(w, r, cfg.Participante)
+	})
+	mux.HandleFunc("POST /transacoes/{tx}/confirmar", func(w http.ResponseWriter, r *http.Request) {
+		tratarConfirmar(w, r, cfg.Participante)
+	})
+	mux.HandleFunc("POST /transacoes/{tx}/abortar", func(w http.ResponseWriter, r *http.Request) {
+		tratarAbortar(w, r, cfg.Participante)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		responderErro(w, erroHTTP{http.StatusNotFound, codigoRecursoInexistente, "Recurso inexistente."})

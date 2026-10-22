@@ -16,6 +16,11 @@ import (
 //	2026/11/05 08:15:02.431 [rotacapixaba] ← vaijunto GET /saude L=41 → 200 (1.8 ms)
 //	2026/11/05 08:15:02.437 [vaijunto] → rotacapixaba GET /saude L=42 → 200 (2.1 ms)
 //
+// Nos recursos de transação, o handler acrescenta à mesma linha o que só ele
+// sabe — txID, carimbo e voto —, e é por ela que o 2PC fica visível:
+//
+//	2026/11/05 08:15:02.431 [rotacapixaba] ← vaijunto POST /transacoes/vaijunto:res-3f0b11c4/preparar L=42 tx=vaijunto:res-3f0b11c4 carimbo=(41,vaijunto) voto=SIM → 200 (1.800 ms)
+//
 // A seta diz o sentido: ← é requisição recebida de um par, → é chamada que
 // este servidor fez. É por estas linhas que o protocolo fica visível na
 // demonstração.
@@ -50,12 +55,31 @@ func NovoRegistro(saida io.Writer, empresa string) *Registro {
 // valor que foi para o cabeçalho da resposta. Isso faz a linha do servidor que
 // recebeu e a do que chamou poderem ser comparadas numa demonstração com os
 // dois terminais lado a lado.
-func (r *Registro) recebida(origem, metodo, caminho string, lamport uint64, status int, duracao time.Duration) {
+func (r *Registro) recebida(origem, metodo, caminho string, lamport uint64, detalhe string, status int, duracao time.Duration) {
 	if r == nil {
 		return
 	}
-	r.escrever(fmt.Sprintf("[%s] ← %s %s %s L=%d → %d (%s)",
-		r.empresa, nomeDeEmpresa(origem), metodo, caminho, lamport, status, emMilissegundos(duracao)))
+	if detalhe != "" {
+		detalhe = " " + detalhe
+	}
+	r.escrever(fmt.Sprintf("[%s] ← %s %s %s L=%d%s → %d (%s)",
+		r.empresa, nomeDeEmpresa(origem), metodo, caminho, lamport, detalhe, status, emMilissegundos(duracao)))
+}
+
+// violacao registra uma transição impossível pela seção 7.4 do PROJETO_P2.md,
+// respondida com 409 VIOLACAO_PROTOCOLO (seção 5.1 da API).
+//
+// Pelo argumento de atomicidade ela nunca deveria acontecer: um CONFIRMAR para
+// participação abortada significaria que o coordenador decidiu confirmar sem
+// unanimidade. A linha existe para que, se acontecer, o erro seja visível,
+// registrado e verificável pelo teste, em vez de ficar escondido entre as
+// respostas normais.
+func (r *Registro) violacao(origem, metodo, caminho, detalhe string) {
+	if r == nil {
+		return
+	}
+	r.escrever(fmt.Sprintf("[%s] ‼ VIOLACAO_PROTOCOLO de %s em %s %s: %s",
+		r.empresa, nomeDeEmpresa(origem), metodo, caminho, detalhe))
 }
 
 // enviada registra uma chamada a um par. resultado é o status HTTP ou o motivo

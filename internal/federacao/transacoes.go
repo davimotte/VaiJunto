@@ -1,0 +1,350 @@
+package federacao
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"time"
+
+	"vaijunto/internal/dominio"
+	"vaijunto/internal/transacao"
+)
+
+// Recursos de transação da API: preparar, confirmar e abortar (seções 4.3 a 4.5
+// do API_CONSORCIO.md). É a borda do participante do 2PC para o lado dos pares.
+//
+// Os handlers são finos de propósito. Eles fazem três coisas, e só elas:
+//
+//  1. conferem o **papel** de quem chama (seção 1.2), que depende do cabeçalho
+//     e do caminho, e portanto não pode ser decidido no domínio;
+//  2. traduzem JSON em tipos do domínio e de volta;
+//  3. traduzem erro de domínio em voto NÃO ou em erro HTTP, pela tabela única
+//     de erros.go (seção 5.5).
+//
+// Toda regra de significado — carona desta empresa, índices, assento,
+// idempotência — vive no domínio, porque o coordenador local chama o
+// participante direto, sem passar por aqui (seção 7.1, passo 5), e uma regra
+// escrita só no handler não valeria para metade das chamadas.
+
+// Tipos de fio. Existem separados dos do domínio porque as tags JSON são o
+// contrato da API, e o domínio não conhece a rede (regra 8). São os mesmos
+// motivos de CaronaFederada existir ao lado de dominio.CaronaBusca.
+//
+// Os campos obrigatórios são **ponteiros**, pelo mesmo motivo dos pedidos da
+// borda TCP (internal/servidor/reservas.go): sem eles, "de" ausente e "de": 0
+// chegariam indistinguíveis, e um pedido sem o campo viraria silenciosamente um
+// pedido do trecho 0 em vez do 400 CORPO_INVALIDO que a seção 5.1 manda.
+type pedidoPreparar struct {
+	Coordenador   *string          `json:"coordenador"`
+	Participantes *[]string        `json:"participantes"`
+	Carimbo       *carimboDeFio    `json:"carimbo"`
+	Passageiro    *passageiroDeFio `json:"passageiro"`
+	Itens         *[]itemPreparar  `json:"itens"`
+}
+
+type carimboDeFio struct {
+	Lamport *uint64 `json:"lamport"`
+	Empresa *string `json:"empresa"`
+}
+
+type passageiroDeFio struct {
+	Ref  *string `json:"ref"`
+	Nome *string `json:"nome"`
+}
+
+type itemPreparar struct {
+	CaronaID *string `json:"carona_id"`
+	De       *int    `json:"de"`
+	Ate      *int    `json:"ate"`
+}
+
+// pernaDeFio é a Perna da seção 3.3: os dados autoritativos que o dono afirma
+// sobre a sua perna e o coordenador guarda na reserva (D34, D42).
+type pernaDeFio struct {
+	CaronaID      string    `json:"carona_id"`
+	Empresa       string    `json:"empresa"`
+	MotoristaNome string    `json:"motorista_nome"`
+	De            int       `json:"de"`
+	Ate           int       `json:"ate"`
+	Cidades       []string  `json:"cidades"`
+	Partida       time.Time `json:"partida"`
+	Chegada       time.Time `json:"chegada"`
+	PrecoCentavos int       `json:"preco_centavos"`
+}
+
+// respostaVoto é o corpo 200 do preparar, nas suas três formas (seção 4.3).
+//
+// Trecho é ponteiro porque o trecho 0 é um trecho legítimo, e omitempty o
+// apagaria justamente no primeiro trecho de cada carona.
+type respostaVoto struct {
+	Voto     string       `json:"voto"`
+	Pernas   []pernaDeFio `json:"pernas,omitempty"`
+	Motivo   string       `json:"motivo,omitempty"`
+	CaronaID string       `json:"carona_id,omitempty"`
+	Trecho   *int         `json:"trecho,omitempty"`
+}
+
+// respostaSituacao é o corpo 200 de confirmar e abortar (seções 4.4 e 4.5).
+type respostaSituacao struct {
+	Situacao string `json:"situacao"`
+}
+
+// tratarPreparar responde POST /transacoes/{tx}/preparar: a fase 1 do 2PC.
+func tratarPreparar(w http.ResponseWriter, r *http.Request, p *transacao.Participante) {
+	txID, erro := txDoCoordenador(r)
+	if erro != nil {
+		responderErro(w, *erro)
+		return
+	}
+	pedido, erro := pedidoDoCorpo(r, txID)
+	if erro != nil {
+		anotar(w, "tx=%s", txID)
+		responderErro(w, *erro)
+		return
+	}
+
+	voto, falha := votoDoParticipante(p.Preparar(pedido))
+	carimbo := fmt.Sprintf("carimbo=(%d,%s)", pedido.Carimbo.Lamport, pedido.Carimbo.Empresa)
+	if falha != nil {
+		anotar(w, "tx=%s %s erro=%s", txID, carimbo, falha.Codigo)
+		responderErro(w, *falha)
+		return
+	}
+
+	if voto.Motivo != "" {
+		anotar(w, "tx=%s %s voto=%s motivo=%s", txID, carimbo, voto.Voto, voto.Motivo)
+	} else {
+		anotar(w, "tx=%s %s voto=%s", txID, carimbo, voto.Voto)
+	}
+	responderJSON(w, http.StatusOK, votoDeFio(voto))
+}
+
+// votoDoParticipante traduz o resultado do participante no voto que o
+// coordenador consome, ou na falha HTTP correspondente.
+//
+// É o ponto onde a tabela de erros.go decide a natureza da resposta: status 200
+// nela significa "isto é um voto NÃO", e não um erro — o participante processou
+// o PREPARAR e respondeu com uma recusa (seção 2 da API). É o que impede o
+// coordenador de confundir recusa legítima com falha de comunicação e repetir à
+// toa.
+//
+// Está isolado do handler porque as **duas** implementações da rede o usam: o
+// caminho HTTP, aqui, e a rede em memória dos testes. Se cada uma traduzisse por
+// conta própria, a rede em memória deixaria de ser um substituto fiel
+// exatamente na distinção que o coordenador mais precisa acertar.
+func votoDoParticipante(pernas []dominio.Perna, err error) (transacao.RespostaPreparar, *erroHTTP) {
+	if err == nil {
+		return transacao.RespostaPreparar{Voto: transacao.VotoSim, Pernas: pernas}, nil
+	}
+
+	traducao := erroHTTPDeDominio(err)
+	if traducao.Status != http.StatusOK {
+		return transacao.RespostaPreparar{}, &traducao
+	}
+
+	voto := transacao.RespostaPreparar{Voto: transacao.VotoNao, Motivo: traducao.Codigo}
+	// CaronaID e Trecho saem do erro tipado do domínio, com errors.As, e não de
+	// uma segunda consulta ao estado: quem sabe qual trecho esgotou é quem olhou
+	// o contador sob o lock, e reler depois daria outra resposta.
+	var semAssento *dominio.ErroSemAssento
+	if errors.As(err, &semAssento) {
+		voto.CaronaID = semAssento.CaronaID
+		voto.Trecho = semAssento.IndiceTrecho
+	}
+	return voto, nil
+}
+
+// tratarConfirmar responde POST /transacoes/{tx}/confirmar.
+func tratarConfirmar(w http.ResponseWriter, r *http.Request, p *transacao.Participante) {
+	tratarDecisao(w, r, "CONFIRMAR", p.Confirmar)
+}
+
+// tratarAbortar responde POST /transacoes/{tx}/abortar.
+func tratarAbortar(w http.ResponseWriter, r *http.Request, p *transacao.Participante) {
+	tratarDecisao(w, r, "ABORTAR", p.Abortar)
+}
+
+// tratarDecisao atende os dois recursos da fase 2, que diferem apenas na
+// operação que chamam: os dois recebem corpo vazio, conferem o mesmo papel e
+// respondem a mesma situação. Escrevê-los duas vezes seria convidar a
+// divergência num deles.
+func tratarDecisao(w http.ResponseWriter, r *http.Request, operacao string, aplicar func(string) (dominio.Situacao, error)) {
+	txID, erro := txDoCoordenador(r)
+	if erro != nil {
+		responderErro(w, *erro)
+		return
+	}
+
+	situacao, err := aplicar(txID)
+	if err != nil {
+		traducao := erroHTTPDeDominio(err)
+		anotar(w, "tx=%s %s erro=%s", txID, operacao, traducao.Codigo)
+		responderErro(w, traducao)
+		return
+	}
+
+	anotar(w, "tx=%s %s situacao=%s", txID, operacao, situacao)
+	responderJSON(w, http.StatusOK, respostaSituacao{Situacao: string(situacao)})
+}
+
+// txDoCoordenador extrai o txID do caminho e confere o papel de quem chama
+// (seção 1.2 da API): preparar, confirmar e abortar só são aceitos do
+// coordenador, que é a empresa do prefixo do txID (D27).
+//
+// A verificação é aqui, e não no domínio, porque depende do cabeçalho
+// X-VaiJunto-Empresa e do caminho da URL — as duas coisas que o domínio não
+// conhece. Ela não substitui autenticação (seção 15): impede que um bug ou um
+// par mal configurado mexa em transações que não são dele.
+//
+// O prefixo é o que responde quem coordena, sem consultar ninguém. Sem
+// prefixo não há papel a comparar, e o caminho é malformado.
+func txDoCoordenador(r *http.Request) (string, *erroHTTP) {
+	txID := r.PathValue("tx")
+	coordenador, err := dominio.EmpresaDoID(txID)
+	if err != nil {
+		return "", &erroHTTP{http.StatusBadRequest, codigoCorpoInvalido,
+			"O identificador de transação precisa do prefixo da empresa coordenadora."}
+	}
+	if quemChama := r.Header.Get(cabecalhoEmpresa); quemChama != coordenador {
+		return "", &erroHTTP{http.StatusForbidden, codigoPapelInvalido,
+			"Só o coordenador da transação pode decidi-la."}
+	}
+	return txID, nil
+}
+
+// pedidoDoCorpo decodifica o corpo do preparar (seção 4.3).
+//
+// Confere **presença**, não significado: campo ausente é 400 CORPO_INVALIDO
+// (seção 5.1), porque um campo que não veio não existe como conceito no
+// domínio — o valor zero de Go o esconderia. Se o campo veio e não vale,
+// quem recusa é o domínio, com o sentinela que a tabela traduz.
+//
+// A única exceção é o coordenador, conferido aqui contra o prefixo do caminho:
+// é a coerência entre corpo e URL, e o domínio não vê a URL.
+func pedidoDoCorpo(r *http.Request, txID string) (dominio.PedidoPreparacao, *erroHTTP) {
+	invalido := func(detalhe string) *erroHTTP {
+		return &erroHTTP{http.StatusBadRequest, codigoCorpoInvalido, detalhe}
+	}
+
+	// Campos desconhecidos são ignorados (seção 1 da API): um par com uma
+	// versão mais nova pode mandar campo que ainda não conhecemos.
+	var corpo pedidoPreparar
+	if err := json.NewDecoder(r.Body).Decode(&corpo); err != nil {
+		return dominio.PedidoPreparacao{}, invalido("Corpo não é um JSON válido de preparar.")
+	}
+
+	switch {
+	case corpo.Coordenador == nil:
+		return dominio.PedidoPreparacao{}, invalido("Informe o campo coordenador.")
+	case corpo.Participantes == nil:
+		return dominio.PedidoPreparacao{}, invalido("Informe o campo participantes.")
+	case corpo.Carimbo == nil || corpo.Carimbo.Lamport == nil || corpo.Carimbo.Empresa == nil:
+		return dominio.PedidoPreparacao{}, invalido("Informe o carimbo com lamport e empresa.")
+	case corpo.Passageiro == nil || corpo.Passageiro.Ref == nil || corpo.Passageiro.Nome == nil:
+		return dominio.PedidoPreparacao{}, invalido("Informe o passageiro com ref e nome.")
+	case corpo.Itens == nil:
+		return dominio.PedidoPreparacao{}, invalido("Informe o campo itens.")
+	}
+
+	// Seção 4.3: o coordenador do corpo é igual ao prefixo de {tx}. Divergir é
+	// erro do coordenador, e nenhuma repetição o conserta.
+	if empresaDoTx, _ := dominio.EmpresaDoID(txID); *corpo.Coordenador != empresaDoTx {
+		return dominio.PedidoPreparacao{}, invalido(
+			fmt.Sprintf("O coordenador %q não é o prefixo de %q.", *corpo.Coordenador, txID))
+	}
+
+	itens := make([]dominio.ItemReserva, 0, len(*corpo.Itens))
+	for i, item := range *corpo.Itens {
+		if item.CaronaID == nil || item.De == nil || item.Ate == nil {
+			return dominio.PedidoPreparacao{}, invalido(
+				fmt.Sprintf("O item %d precisa de carona_id, de e ate.", i))
+		}
+		itens = append(itens, dominio.ItemReserva{CaronaID: *item.CaronaID, De: *item.De, Ate: *item.Ate})
+	}
+
+	return dominio.PedidoPreparacao{
+		TxID:          txID,
+		Coordenador:   *corpo.Coordenador,
+		Participantes: *corpo.Participantes,
+		Carimbo:       dominio.Carimbo{Lamport: *corpo.Carimbo.Lamport, Empresa: *corpo.Carimbo.Empresa},
+		Passageiro:    dominio.Passageiro{Ref: *corpo.Passageiro.Ref, Nome: *corpo.Passageiro.Nome},
+		Itens:         itens,
+	}, nil
+}
+
+// votoDeFio converte o voto para o corpo da resposta (seção 4.3).
+//
+// O trecho só vai quando há carona a indicar: carona_id e trecho acompanham
+// juntos SEM_ASSENTO, PRECEDENCIA e AGUARDE, e nunca um sem o outro.
+func votoDeFio(voto transacao.RespostaPreparar) respostaVoto {
+	corpo := respostaVoto{
+		Voto:     string(voto.Voto),
+		Pernas:   pernasDeFio(voto.Pernas),
+		Motivo:   voto.Motivo,
+		CaronaID: voto.CaronaID,
+	}
+	if voto.CaronaID != "" {
+		trecho := voto.Trecho
+		corpo.Trecho = &trecho
+	}
+	return corpo
+}
+
+// pernasDeFio converte as pernas autoritativas para o formato da seção 3.3.
+func pernasDeFio(pernas []dominio.Perna) []pernaDeFio {
+	saida := make([]pernaDeFio, 0, len(pernas))
+	for _, p := range pernas {
+		saida = append(saida, pernaDeFio{
+			CaronaID:      p.CaronaID,
+			Empresa:       p.Empresa,
+			MotoristaNome: p.MotoristaNome,
+			De:            p.De,
+			Ate:           p.Ate,
+			Cidades:       p.Cidades,
+			Partida:       p.Partida,
+			Chegada:       p.Chegada,
+			PrecoCentavos: p.PrecoCentavos,
+		})
+	}
+	return saida
+}
+
+// pernasDoFio é o caminho inverso, usado por quem chama ao ler um voto SIM.
+func pernasDoFio(pernas []pernaDeFio) []dominio.Perna {
+	saida := make([]dominio.Perna, 0, len(pernas))
+	for _, p := range pernas {
+		saida = append(saida, dominio.Perna{
+			CaronaID:      p.CaronaID,
+			Empresa:       p.Empresa,
+			MotoristaNome: p.MotoristaNome,
+			De:            p.De,
+			Ate:           p.Ate,
+			Cidades:       p.Cidades,
+			Partida:       p.Partida,
+			Chegada:       p.Chegada,
+			PrecoCentavos: p.PrecoCentavos,
+		})
+	}
+	return saida
+}
+
+// pedidoDeFio converte um pedido do domínio para o corpo da requisição, no
+// lado de quem chama.
+func pedidoDeFio(p dominio.PedidoPreparacao) pedidoPreparar {
+	itens := make([]itemPreparar, 0, len(p.Itens))
+	for _, item := range p.Itens {
+		carona, de, ate := item.CaronaID, item.De, item.Ate
+		itens = append(itens, itemPreparar{CaronaID: &carona, De: &de, Ate: &ate})
+	}
+	coordenador, participantes := p.Coordenador, p.Participantes
+	lamport, empresa := p.Carimbo.Lamport, p.Carimbo.Empresa
+	ref, nome := p.Passageiro.Ref, p.Passageiro.Nome
+	return pedidoPreparar{
+		Coordenador:   &coordenador,
+		Participantes: &participantes,
+		Carimbo:       &carimboDeFio{Lamport: &lamport, Empresa: &empresa},
+		Passageiro:    &passageiroDeFio{Ref: &ref, Nome: &nome},
+		Itens:         &itens,
+	}
+}

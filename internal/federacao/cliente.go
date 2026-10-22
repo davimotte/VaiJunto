@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"time"
 
+	"vaijunto/internal/dominio"
 	"vaijunto/internal/transacao"
 )
 
@@ -122,6 +123,79 @@ func (c *Cliente) Caronas(ctx context.Context, destino string, desde, ate time.T
 	var r RespostaCaronas
 	err := c.chamar(ctx, destino, http.MethodGet, "/federacao/caronas?"+parametros.Encode(), nil, &r)
 	return r, err
+}
+
+// O Cliente é a implementação HTTP da rede do 2PC (seção 5.4). A asserção é em
+// tempo de compilação para que uma mudança na interface apareça aqui, e não só
+// no teste que por acaso use as duas pontas.
+var _ transacao.Rede = (*Cliente)(nil)
+
+// Preparar envia a fase 1 do 2PC a um par (seção 4.3 da API).
+//
+// O txID vai no caminho sem codificação: o caractere ":" é válido num segmento
+// de URL (seção 1.4 da API), e escapá-lo faria o par receber um identificador
+// diferente do que foi enviado.
+//
+// Um voto que não é SIM, NÃO ou AGUARDE, um SIM sem pernas ou um NÃO sem motivo
+// são ErrRespostaInvalida, e não falha de par: alguém está no ar falando outra
+// língua, e repetir não ajuda. O coordenador precisa das pernas do SIM para a
+// validação da D34, então um SIM vazio não é utilizável.
+func (c *Cliente) Preparar(ctx context.Context, destino string, pedido dominio.PedidoPreparacao) (transacao.RespostaPreparar, error) {
+	var corpo respostaVoto
+	if err := c.chamar(ctx, destino, http.MethodPost, caminhoDaTransacao(pedido.TxID, "preparar"), pedidoDeFio(pedido), &corpo); err != nil {
+		return transacao.RespostaPreparar{}, err
+	}
+
+	voto := transacao.Voto(corpo.Voto)
+	switch {
+	case voto == transacao.VotoSim && len(corpo.Pernas) > 0:
+	case voto == transacao.VotoNao && corpo.Motivo != "":
+	case voto == transacao.VotoAguarde:
+	default:
+		return transacao.RespostaPreparar{}, fmt.Errorf("%w: %s: voto %q sem a forma da seção 4.3", ErrRespostaInvalida, destino, corpo.Voto)
+	}
+
+	resposta := transacao.RespostaPreparar{
+		Voto:     voto,
+		Pernas:   pernasDoFio(corpo.Pernas),
+		Motivo:   corpo.Motivo,
+		CaronaID: corpo.CaronaID,
+	}
+	if corpo.Trecho != nil {
+		resposta.Trecho = *corpo.Trecho
+	}
+	return resposta, nil
+}
+
+// Confirmar envia a decisão de confirmar (seção 4.4 da API).
+func (c *Cliente) Confirmar(ctx context.Context, destino, txID string) (dominio.Situacao, error) {
+	return c.decidir(ctx, destino, txID, "confirmar")
+}
+
+// Abortar envia a decisão de abortar (seção 4.5 da API).
+func (c *Cliente) Abortar(ctx context.Context, destino, txID string) (dominio.Situacao, error) {
+	return c.decidir(ctx, destino, txID, "abortar")
+}
+
+// decidir é o corpo comum dos dois recursos da fase 2: mesmo corpo vazio, mesma
+// resposta. O corpo é "{}", e não ausente, como manda a seção 1 da API.
+func (c *Cliente) decidir(ctx context.Context, destino, txID, recurso string) (dominio.Situacao, error) {
+	var corpo respostaSituacao
+	if err := c.chamar(ctx, destino, http.MethodPost, caminhoDaTransacao(txID, recurso), struct{}{}, &corpo); err != nil {
+		return "", err
+	}
+
+	switch situacao := dominio.Situacao(corpo.Situacao); situacao {
+	case dominio.SituacaoPreparado, dominio.SituacaoConfirmado, dominio.SituacaoAbortado, dominio.SituacaoCancelado:
+		return situacao, nil
+	default:
+		return "", fmt.Errorf("%w: %s: situação %q desconhecida", ErrRespostaInvalida, destino, corpo.Situacao)
+	}
+}
+
+// caminhoDaTransacao monta o caminho de um recurso de transação (seção 5.7).
+func caminhoDaTransacao(txID, recurso string) string {
+	return "/transacoes/" + txID + "/" + recurso
 }
 
 // Pares devolve os nomes das empresas da lista estática (D20), em ordem.

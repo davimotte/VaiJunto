@@ -92,10 +92,15 @@ func main() {
 	// obrigatoriamente o mesmo relógio e a mesma lista de pares. Dois relógios
 	// no mesmo processo quebrariam a ordem total da seção 8.1.
 	cfgREST := federacao.Config{
-		Empresa:      *empresa,
-		Pares:        pares,
-		Relogio:      relogio,
-		Estado:       estado,
+		Empresa: *empresa,
+		Pares:   pares,
+		Relogio: relogio,
+		Estado:  estado,
+		// D21: o participante do 2PC é montado sobre o mesmo Estado, e é por
+		// ele que passam tanto as chamadas dos pares quanto, a partir da fase
+		// 5, o coordenador local quando esta empresa também é dona de um
+		// trecho (seção 7.1, passo 5).
+		Participante: transacao.NovoParticipante(estado),
 		PrazoChamada: *prazoChamada,
 		PrazoBusca:   *prazoBusca,
 	}
