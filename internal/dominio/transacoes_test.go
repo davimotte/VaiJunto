@@ -791,7 +791,7 @@ func TestReplay_AbortDevolveAssentosEVetoVolta(t *testing.T) {
 // subir com estado inventado.
 func TestReplay_RecusaRegistrosIncoerentes(t *testing.T) {
 	envelope := func(seq int, tipo, dados string) []byte {
-		return []byte(fmt.Sprintf(`{"seq":%d,"lamport":1,"tipo":%q,"dados":%s}`, seq, tipo, dados))
+		return fmt.Appendf(nil, `{"seq":%d,"lamport":1,"tipo":%q,"dados":%s}`, seq, tipo, dados)
 	}
 	publicada := envelope(1, "CARONA_PUBLICADA", `{"carona":"vaijunto:car-x","motorista":"joao",
 		"rota":["Salvador","Jequié"],"horarios":["2026-10-01T06:00:00-03:00","2026-10-01T10:00:00-03:00"],
