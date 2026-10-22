@@ -146,10 +146,10 @@ func instalarWAL(t *testing.T, estado *dominio.Estado, caminho string) *persiste
 // parâmetro do teste: a disputa pelo último assento precisa de uma carona com
 // exatamente um.
 func caronasDe(empresa string, assentos int) []byte {
-	return []byte(fmt.Sprintf(`[{"id":%q,"motorista":"joao",
+	return fmt.Appendf(nil, `[{"id":%q,"motorista":"joao",
 		"rota":["Salvador","Feira de Santana"],
 		"horarios":["2026-10-01T06:00:00-03:00","2026-10-01T07:45:00-03:00"],
-		"assentos":%d,"precos_centavos":[2000]}]`, empresa+":car-1", assentos))
+		"assentos":%d,"precos_centavos":[2000]}]`, empresa+":car-1", assentos)
 }
 
 // pedidoPara monta um PedidoPreparacao de um coordenador para uma perna de
