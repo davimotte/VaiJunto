@@ -648,7 +648,7 @@ cmd/passageiro         CLI do passageiro (P1)
 cmd/simulador          gerador de carga sem interface (seção 11.4)
 internal/protocolo     protocolo TCP (P1)
 internal/servidor      pilha TCP (P1); lê a semente do disco (CarregarSemente); RESERVAR e BUSCAR passam a delegar
-internal/federacao     handlers REST, cliente HTTP dos pares, busca federada
+internal/federacao     handlers REST, cliente HTTP dos pares, busca federada, rede em memória
 internal/transacao     2PC, Lamport, wait-die, terminação, recuperação, outbox
 internal/dominio       regras, estado, mutex, assentos em espera, catálogo
 internal/persistencia  log em arquivo
@@ -675,7 +675,9 @@ O coordenador e o participante não chamam HTTP diretamente: falam com uma
 interface `transacao.Rede`, com uma operação para cada recurso da API. Em
 produção, quem a implementa é o cliente HTTP do pacote `federacao`. Nos testes,
 uma rede em memória implementa a mesma interface e permite **injetar atraso,
-perda de mensagem e partição** de forma determinística.
+perda de mensagem e partição** de forma determinística. As duas implementações
+moram no pacote `federacao`, para que o voto NÃO saia da mesma tabela de
+tradução da borda (seção 5.5) nos dois caminhos.
 
 É isso que torna testáveis os cenários que dependem de ordem de chegada, como a
 disputa cruzada da seção 8.3: o teste decide em que ordem cada PREPARAR chega a
@@ -1443,7 +1445,7 @@ sessão. Os critérios de pronto são os que a fase precisa demonstrar, com
 | 2 | Persistência | Log com `fsync` e replay das caronas (seção 9.2). Estado sobrevive a reinício; TP1 passa | ✅ |
 | 3A | Pilha REST | Servidor e cliente HTTP, cabeçalhos, **relógio de Lamport**, `/saude` | ✅ |
 | 3B | Busca federada | Seção 6. TB1 e TB2 passam | ✅ |
-| 4 | Participante do 2PC | `preparar`, `confirmar` e `abortar` com idempotência, **no-wait** (NÃO imediato quando falta assento) e verificação de papéis (seção 1.2); rede em memória | ⏳ |
+| 4 | Participante do 2PC | `preparar`, `confirmar` e `abortar` com idempotência, **no-wait** (NÃO imediato quando falta assento) e verificação de papéis (seção 1.2); rede em memória | ✅ |
 | 5 | Coordenador do 2PC | Seção 7.1, ainda com no-wait; `/auditoria` e verificador de invariantes. TR1, TR2 e TR5 passam | ⏳ |
 | 6A | Recuperação | Seções 9.3 e 9.4: retomada, `consultar`, veto e terminação. TF9 e TF10 passam | ⏳ |
 | 6B | Injeção de falhas | `FALHAR_EM` (seção 9.5). TF1 a TF7 passam | ⏳ |
