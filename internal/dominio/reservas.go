@@ -340,7 +340,17 @@ func reservasDoPassageiro(e *Estado, passageiroID string, incluirCanceladas bool
 // Não marca a reserva como inativa — quem chama decide isso —, mas só deve ser
 // chamada junto com essa marcação, ou o assento seria devolvido duas vezes.
 func devolverAssentos(e *Estado, r *Reserva) {
-	for _, item := range r.Itens {
+	devolverItens(e, r.Itens)
+}
+
+// devolverItens devolve a capacidade consumida por uma lista de itens.
+//
+// É o laço que estava dentro de devolverAssentos, isolado porque o abort do
+// participante precisa exatamente dele (seção 7.2): liberar os assentos em
+// espera de uma participação, que tem itens mas não é uma Reserva. Uma segunda
+// cópia do laço seria uma segunda chance de errar o limite do trecho.
+func devolverItens(e *Estado, itens []ItemReserva) {
+	for _, item := range itens {
 		c, ok := e.caronas[item.CaronaID]
 		if !ok {
 			continue

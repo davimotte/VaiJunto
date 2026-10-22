@@ -1,6 +1,9 @@
 package dominio
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
 // Este arquivo é a camada 6 do PROJETO.md (seção 5.1) e o **único** lugar do
 // programa que adquire e.mu (D04, D05).
@@ -19,12 +22,13 @@ import "time"
 // CarregarEstado, que popula usuários e caronas a partir de dados/ (D02).
 func NovoEstado(empresa string) *Estado {
 	return &Estado{
-		empresa:  empresa,
-		usuarios: make(map[string]*Usuario),
-		caronas:  make(map[string]*Carona),
-		reservas: make(map[string]*Reserva),
-		log:      NovaLogMemoria(),
-		lamport:  relogioParado,
+		empresa:       empresa,
+		usuarios:      make(map[string]*Usuario),
+		caronas:       make(map[string]*Carona),
+		reservas:      make(map[string]*Reserva),
+		participacoes: make(map[string]*Participacao),
+		log:           NovaLogMemoria(),
+		lamport:       relogioParado,
 	}
 }
 
@@ -176,4 +180,81 @@ func (e *Estado) CancelarReserva(reservaID, passageiroID string, agora time.Time
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return cancelarReserva(e, reservaID, passageiroID, agora)
+}
+
+// Preparar é a fase 1 do 2PC pelo lado do dono dos assentos (D21;
+// PROJETO_P2.md, seção 7.2). Devolve os dados autoritativos das pernas, que
+// acompanham o voto SIM (D34).
+//
+// Este método é o coração de RD02, e por um motivo só: validação, consulta aos
+// contadores e desconto dos assentos acontecem entre este Lock e este Unlock.
+// Cinquenta PREPARAR pelo último assento de um trecho, vindos de quantos
+// coordenadores forem, enfileiram-se aqui, e só o primeiro encontra
+// Livres >= 1. A garantia não depende da rede nem de relógio: depende de cada
+// carona ter um único dono (seção 7.5).
+//
+// agora vem da borda, como em todas as operações do domínio, e arma o prazo de
+// dúvida da participação (seção 4.4).
+func (e *Estado) Preparar(p PedidoPreparacao, agora time.Time) ([]Perna, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return preparar(e, p, agora)
+}
+
+// Confirmar é a fase 2 com decisão de confirmar (seção 7.2; seção 4.4 da API).
+// Devolve a situação em que a participação ficou.
+func (e *Estado) Confirmar(txID string) (Situacao, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return confirmar(e, txID)
+}
+
+// Abortar é a fase 2 com decisão de abortar (seção 7.2; seção 4.5 da API).
+// Libera os assentos em espera e, para transação desconhecida, grava o veto da
+// D38.
+func (e *Estado) Abortar(txID string) (Situacao, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return abortar(e, txID)
+}
+
+// Participacao devolve uma cópia da participação de uma transação, se ela
+// existe. Serve à auditoria e ao teste; nenhuma decisão do protocolo a usa, e é
+// por isso que ela pode ler e soltar o lock sem risco.
+func (e *Estado) Participacao(txID string) (Participacao, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	pt, existe := e.participacoes[txID]
+	if !existe {
+		return Participacao{}, false
+	}
+	return pt.copia(), true
+}
+
+// Participacoes devolve cópias de todas as participações, ordenadas por txID.
+//
+// A ordem é explícita porque a iteração de mapa em Go é aleatória, e sem ela a
+// mesma consulta devolveria a lista em ordem diferente a cada chamada — o que
+// tornaria instável tanto o teste quanto a futura resposta de /auditoria.
+func (e *Estado) Participacoes() []Participacao {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	lista := make([]Participacao, 0, len(e.participacoes))
+	for _, pt := range e.participacoes {
+		lista = append(lista, pt.copia())
+	}
+	sort.Slice(lista, func(i, j int) bool { return lista[i].TxID < lista[j].TxID })
+	return lista
+}
+
+// Ocupacao devolve a conta de I-P2-1 por carona e trecho (seção 11.1).
+//
+// Uma chamada só, sob um único Lock, porque a invariante é uma relação **entre**
+// quatro números: lê-los em chamadas separadas deixaria uma transação
+// concorrente entrar no meio e o teste acusaria uma violação que nunca
+// existiu. É também a semente do GET /auditoria da fase 5 (seção 11.2).
+func (e *Estado) Ocupacao() []OcupacaoTrecho {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return ocupacao(e)
 }

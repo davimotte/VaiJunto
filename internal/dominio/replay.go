@@ -67,6 +67,88 @@ func reaplicar(e *Estado, registros [][]byte) (uint64, error) {
 				return 0, fmt.Errorf("dominio: log, registro %d (%s): carona %q não existe", n, r.Tipo, d.Carona)
 			}
 			c.Cancelada = true
+		case tipoPreparado:
+			var d dadosPreparado
+			if err := json.Unmarshal(r.Dados, &d); err != nil {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): dados ilegíveis: %w", n, r.Tipo, err)
+			}
+			if _, repetida := e.participacoes[d.Tx]; repetida {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): transação %q já tem participação", n, r.Tipo, d.Tx)
+			}
+			if len(d.Itens) == 0 {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): transação %q sem itens", n, r.Tipo, d.Tx)
+			}
+			// O PREPARADO só foi gravado depois de o passo 3 encontrar
+			// Livres >= 1 em todo trecho pedido (seção 7.2), então um log
+			// coerente nunca leva o contador abaixo de zero. Se levar, não é um
+			// fato do passado que o replay deva aceitar (D37, regra 2): é
+			// corrupção, e subir com Livres negativo quebraria I-P2-1 em
+			// silêncio.
+			itens := make([]ItemReserva, 0, len(d.Itens))
+			for _, item := range d.Itens {
+				c, existe := e.caronas[item.Carona]
+				if !existe {
+					return 0, fmt.Errorf("dominio: log, registro %d (%s): carona %q não existe", n, r.Tipo, item.Carona)
+				}
+				if item.De < 0 || item.De >= item.Ate || item.Ate > len(c.Rota)-1 {
+					return 0, fmt.Errorf("dominio: log, registro %d (%s): trecho [%d,%d) fora da rota de %q",
+						n, r.Tipo, item.De, item.Ate, item.Carona)
+				}
+				for t := item.De; t < item.Ate; t++ {
+					if c.Livres[t] < 1 {
+						return 0, fmt.Errorf("dominio: log, registro %d (%s): carona %q, trecho %d sem assento para descontar",
+							n, r.Tipo, item.Carona, t)
+					}
+					c.Livres[t]--
+				}
+				itens = append(itens, ItemReserva{CaronaID: item.Carona, De: item.De, Ate: item.Ate})
+			}
+			// PreparadaEm fica zerada: é instante local, não vai ao log, e o
+			// prazo de dúvida recomeça no boot (seção 4.4). Quem passa a armá-lo
+			// é a recuperação da fase 6A.
+			e.participacoes[d.Tx] = &Participacao{
+				TxID:          d.Tx,
+				Coordenador:   d.Coordenador,
+				Participantes: d.Participantes,
+				Itens:         itens,
+				Carimbo:       Carimbo{Lamport: d.Carimbo.Lamport, Empresa: d.Carimbo.Empresa},
+				Passageiro:    Passageiro{Ref: d.Passageiro.Ref, Nome: d.Passageiro.Nome},
+				Situacao:      SituacaoPreparado,
+			}
+
+		case tipoConfirmado:
+			var d dadosTransacao
+			if err := json.Unmarshal(r.Dados, &d); err != nil {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): dados ilegíveis: %w", n, r.Tipo, err)
+			}
+			// confirmar só grava a partir de PREPARADO (seção 7.2), então
+			// qualquer outra situação aqui — inclusive CONFIRMADO repetido —
+			// significa log corrompido. Os assentos continuam descontados: o em
+			// espera virou confirmado e a conta de I-P2-1 não muda.
+			pt, conhecida := e.participacoes[d.Tx]
+			if !conhecida || pt.Situacao != SituacaoPreparado {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): transação %q não está preparada", n, r.Tipo, d.Tx)
+			}
+			pt.Situacao = SituacaoConfirmado
+
+		case tipoAbortado:
+			var d dadosTransacao
+			if err := json.Unmarshal(r.Dados, &d); err != nil {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): dados ilegíveis: %w", n, r.Tipo, err)
+			}
+			pt, conhecida := e.participacoes[d.Tx]
+			switch {
+			case !conhecida:
+				// Veto (D38): ABORTADO sem PREPARADO antes. Não há assento a
+				// devolver, e a participação nasce abortada e sem itens.
+				e.participacoes[d.Tx] = &Participacao{TxID: d.Tx, Situacao: SituacaoAbortado}
+			case pt.Situacao == SituacaoPreparado:
+				devolverItens(e, pt.Itens)
+				pt.Situacao = SituacaoAbortado
+			default:
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): transação %q está em %s", n, r.Tipo, d.Tx, pt.Situacao)
+			}
+
 		default:
 			return 0, fmt.Errorf("dominio: log, registro %d: tipo desconhecido %q", n, r.Tipo)
 		}

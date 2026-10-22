@@ -57,6 +57,16 @@ var traducaoErros = map[error]erroTraduzido{
 	// D22: o registro não chegou ao disco e a operação não foi aplicada. Para o
 	// cliente é falha do servidor, e ele pode tentar de novo.
 	dominio.ErrFalhaNoLog: {protocolo.CodigoErroInterno, "Falha interna ao gravar o registro da operação; nada foi alterado."},
+	// Os quatro erros do participante do 2PC (fase 4) nascem de uma chamada de
+	// outra empresa, nunca de uma requisição de cliente, e são tratados pela
+	// tabela da borda REST (internal/federacao/erros.go). Entram aqui pelo
+	// mesmo critério de ErrEmpresaInvalida: se um dia vazarem para o TCP,
+	// aparecem como falha do servidor em vez de um código inventado por
+	// proximidade.
+	dominio.ErrPedidoInvalido:     {protocolo.CodigoErroInterno, "Falha interna: pedido de preparação inválido."},
+	dominio.ErrItemDeOutraEmpresa: {protocolo.CodigoErroInterno, "Falha interna: trecho de carona de outra empresa."},
+	dominio.ErrTransacaoAbortada:  {protocolo.CodigoErroInterno, "Falha interna: transação já abortada."},
+	dominio.ErrViolacaoProtocolo:  {protocolo.CodigoErroInterno, "Falha interna: violação de protocolo entre servidores."},
 }
 
 // respostaDeErroDeDominio monta a resposta de erro correspondente ao erro

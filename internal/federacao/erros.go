@@ -81,6 +81,9 @@ var traducaoErros = map[error]erroHTTP{
 	// CAMPO_INVALIDO; a API do consórcio não tem esse código, e inventar um
 	// seria divergir do documento.
 	dominio.ErrItemInvalido: {http.StatusOK, motivoItinerarioInvalido, "Índices do trecho fora da rota da carona."},
+	// A transação já foi abortada aqui, inclusive por veto (D38). É voto NÃO, e
+	// não erro: o participante processou o PREPARAR e respondeu que não vai dar.
+	dominio.ErrTransacaoAbortada: {http.StatusOK, motivoTransacaoAbortada, "A transação já foi abortada neste participante."},
 
 	// 2. Erros HTTP.
 	//
@@ -88,6 +91,16 @@ var traducaoErros = map[error]erroHTTP{
 	// Para o par é falha do servidor, e a política da seção 1.3 manda repetir.
 	dominio.ErrFalhaNoLog:  {http.StatusInternalServerError, codigoErroInterno, "Falha ao gravar o registro da operação; nada foi alterado."},
 	dominio.ErrGeracaoDeID: {http.StatusInternalServerError, codigoErroInterno, "Falha ao gerar o identificador."},
+	//
+	// Os dois 400 abaixo são erro de quem chama, e nenhuma repetição os
+	// conserta (seções 4.3 e 5.1 da API).
+	dominio.ErrPedidoInvalido:     {http.StatusBadRequest, codigoCorpoInvalido, "Pedido de preparação sem a forma da seção 4.3: confira coordenador, participantes, carimbo, passageiro e itens."},
+	dominio.ErrItemDeOutraEmpresa: {http.StatusBadRequest, codigoItemDeOutraEmpresa, "Algum item cita carona que não é desta empresa."},
+	//
+	// 409 encerra a repetição (seção 1.3): é transição impossível pela seção
+	// 7.4, que nenhuma retransmissão corrige. Quem recebe registra a violação e
+	// para.
+	dominio.ErrViolacaoProtocolo: {http.StatusConflict, codigoViolacaoProtocolo, "Transição impossível para esta transação."},
 
 	// 3. Sentinelas da borda TCP, que não atravessam o REST.
 	dominio.ErrCidadeDesconhecida:        {http.StatusInternalServerError, codigoErroInterno, "Falha inesperada: cidade não atendida."},

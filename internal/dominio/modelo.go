@@ -23,8 +23,12 @@ type Usuario struct {
 //
 // Rota e Horarios têm o mesmo comprimento; PrecoTrecho e Livres têm
 // len(Rota)-1, um valor por trecho entre cidades consecutivas da rota.
-// Livres começa igual a Assentos em cada posição e só é decrementado pela
-// confirmação de reserva (D07), nunca pela busca.
+// Livres começa igual a Assentos em cada posição e nunca é tocado pela busca.
+// A D07 foi revogada pela D21: desde o P2, Livres[t] desconta também os
+// assentos **em espera**, descontados no PREPARAR e devolvidos só por abort ou
+// cancelamento (D25, seção 4.3). A invariante mestra é I-P2-1:
+//
+//	Livres[t] + confirmados em t + em espera em t == Assentos
 type Carona struct {
 	ID          string
 	MotoristaID string
@@ -32,7 +36,7 @@ type Carona struct {
 	Horarios    []time.Time // len == len(Rota); informados pelo motorista, estritamente crescentes (D09, I6)
 	Assentos    int         // capacidade total do veículo
 	PrecoTrecho []int       // centavos; len == len(Rota)-1
-	Livres      []int       // len == len(Rota)-1; inicia com Assentos
+	Livres      []int       // len == len(Rota)-1; inicia com Assentos; desconta confirmados e em espera (D25)
 	Cancelada   bool
 }
 
@@ -69,6 +73,14 @@ type Estado struct {
 	usuarios map[string]*Usuario
 	caronas  map[string]*Carona
 	reservas map[string]*Reserva
+	// participacoes é a visão desta empresa das transações que usam assentos
+	// dela, por txID (D21, seção 4.4). Guarda só o que o participante precisa
+	// saber; de outra empresa, nada além da referência opaca do passageiro e do
+	// nome de exibição (D32, I-P2-4).
+	//
+	// Quem está em espera em cada trecho **não** é guardado aqui em paralelo:
+	// é derivado destas participações pela função portadores (seção 4.3).
+	participacoes map[string]*Participacao
 	// log recebe cada mudança ANTES de ela ser aplicada (D22, regra 3). Nunca
 	// é nil: os construtores começam com LogMemoria e o servidor troca por
 	// arquivo com UsarLog. seq numera os registros (seção 4.8).

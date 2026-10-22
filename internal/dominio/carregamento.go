@@ -115,11 +115,12 @@ func CarregarEstado(empresa string, usuariosJSON, caronasJSON []byte) (*Estado, 
 		return nil, err
 	}
 	return &Estado{
-		empresa:  empresa,
-		usuarios: usuarios,
-		caronas:  caronas,
-		reservas: make(map[string]*Reserva),
-		log:      NovaLogMemoria(),
-		lamport:  relogioParado,
+		empresa:       empresa,
+		usuarios:      usuarios,
+		caronas:       caronas,
+		reservas:      make(map[string]*Reserva),
+		participacoes: make(map[string]*Participacao),
+		log:           NovaLogMemoria(),
+		lamport:       relogioParado,
 	}, nil
 }

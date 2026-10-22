@@ -93,6 +93,32 @@ var (
 	// aplicada: sem write-ahead bem-sucedido o servidor não pode lembrar de
 	// algo que o log não guardou.
 	ErrFalhaNoLog = errors.New("dominio: falha ao gravar no log")
+
+	// ErrPedidoInvalido — o pedido de PREPARAR não tem a forma da seção 4.3 do
+	// API_CONSORCIO.md: txID que não combina com o coordenador, lista de
+	// participantes sem esta empresa, carimbo sem empresa, passageiro sem
+	// referência prefixada ou sem nome, nenhum item. É erro de quem chama, e
+	// nenhuma repetição o conserta.
+	ErrPedidoInvalido = errors.New("dominio: pedido de preparação inválido")
+
+	// ErrItemDeOutraEmpresa — um item do PREPARAR cita carona que não é desta
+	// empresa (D27). Não é voto NÃO: é erro do coordenador, que agrupou as
+	// pernas por dono errado.
+	ErrItemDeOutraEmpresa = errors.New("dominio: item de carona de outra empresa")
+
+	// ErrTransacaoAbortada — a transação já foi abortada neste participante,
+	// inclusive por veto (D38). Um PREPARAR que chegue depois disso é recusado,
+	// e é essa recusa que torna seguro abortar sem falar com o coordenador.
+	ErrTransacaoAbortada = errors.New("dominio: transação já abortada")
+
+	// ErrViolacaoProtocolo — transição impossível pela seção 7.4 do
+	// PROJETO_P2.md: CONFIRMAR de participação abortada ou desconhecida,
+	// ABORTAR de participação confirmada.
+	//
+	// Pelo argumento de atomicidade, ela **nunca** deveria acontecer. O erro
+	// existe para que, se acontecer, apareça registrada e verificável pelo
+	// teste, em vez de corromper o estado em silêncio.
+	ErrViolacaoProtocolo = errors.New("dominio: violação de protocolo do 2PC")
 )
 
 // TodosOsErros lista todos os sentinelas exportados do domínio.
@@ -124,6 +150,10 @@ func TodosOsErros() []error {
 		ErrEmpresaInvalida,
 		ErrIDSemEmpresa,
 		ErrFalhaNoLog,
+		ErrPedidoInvalido,
+		ErrItemDeOutraEmpresa,
+		ErrTransacaoAbortada,
+		ErrViolacaoProtocolo,
 	}
 }
 
