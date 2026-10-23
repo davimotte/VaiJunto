@@ -358,6 +358,214 @@ func TestAbortar_VetoERecusaDoPrepararAtrasado(t *testing.T) {
 	}
 }
 
+// --- CONSULTAR (seção 4.6) ---
+
+// consultaDaResposta decodifica o corpo de um consultar que respondeu 200.
+func consultaDaResposta(t *testing.T, rec *httptest.ResponseRecorder) respostaConsulta {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var corpo respostaConsulta
+	if err := json.Unmarshal(rec.Body.Bytes(), &corpo); err != nil {
+		t.Fatalf("decodificar consulta: %v (corpo: %s)", err, rec.Body)
+	}
+	return corpo
+}
+
+// A tabela do participante da seção 4.6 pela borda: o papel vem do prefixo do
+// txID, não de quem chamou, e a situação é a da participação.
+//
+// Aqui o dono é vaijunto e a transação é coordenada por rotacapixaba, então
+// vaijunto responde sempre como PARTICIPANTE.
+func TestConsultar_ParticipanteRespondeASuaSituacao(t *testing.T) {
+	for _, caso := range []struct {
+		nome        string
+		montar      func(Config)
+		querSituaca string
+	}{
+		{
+			nome: "preparado",
+			montar: func(cfg Config) {
+				pedirTransacao(cfg, "rotacapixaba", txDeTeste, "preparar",
+					corpoPreparar(itemDeFio("vaijunto:car-1", 0, 1)))
+			},
+			querSituaca: "PREPARADO",
+		},
+		{
+			nome: "confirmado",
+			montar: func(cfg Config) {
+				pedirTransacao(cfg, "rotacapixaba", txDeTeste, "preparar",
+					corpoPreparar(itemDeFio("vaijunto:car-1", 0, 1)))
+				pedirTransacao(cfg, "rotacapixaba", txDeTeste, "confirmar", map[string]any{})
+			},
+			querSituaca: "CONFIRMADO",
+		},
+		{
+			nome: "abortado",
+			montar: func(cfg Config) {
+				pedirTransacao(cfg, "rotacapixaba", txDeTeste, "preparar",
+					corpoPreparar(itemDeFio("vaijunto:car-1", 0, 1)))
+				pedirTransacao(cfg, "rotacapixaba", txDeTeste, "abortar", map[string]any{})
+			},
+			querSituaca: "ABORTADO",
+		},
+		{
+			nome:        "desconhecida, responde DESCONHECIDA",
+			montar:      func(Config) {},
+			querSituaca: "DESCONHECIDA",
+		},
+	} {
+		t.Run(caso.nome, func(t *testing.T) {
+			cfg := configDeTransacoes(parComUmaCarona(t, "vaijunto"))
+			caso.montar(cfg)
+
+			corpo := consultaDaResposta(t, pedirTransacao(cfg, "rotacapixaba", txDeTeste, "consultar", map[string]any{}))
+			if corpo.Papel != "PARTICIPANTE" {
+				t.Errorf("papel = %q, want PARTICIPANTE", corpo.Papel)
+			}
+			if corpo.Situacao != caso.querSituaca {
+				t.Errorf("situacao = %q, want %q", corpo.Situacao, caso.querSituaca)
+			}
+			// O corpo de um participante não leva decisao: os dois campos se
+			// excluem, e é o papel que diz qual ler (seção 4.6).
+			if corpo.Decisao != "" {
+				t.Errorf("decisao = %q num corpo de participante, want vazia", corpo.Decisao)
+			}
+		})
+	}
+}
+
+// A tabela do coordenador da seção 4.6 pela borda. Aqui a transação é
+// coordenada por vaijunto, que é a empresa deste servidor.
+//
+// A terceira linha é a mais importante: transação que nunca existiu responde
+// ABORTADA **e não grava nada**. É o abort presumido (D23) visto de fora, e é
+// o que a seção 7 do API_CONSORCIO.md demonstra com curl.
+func TestConsultar_CoordenadorRespondeADecisao(t *testing.T) {
+	const txLocal = "vaijunto:res-0000abcd"
+
+	for _, caso := range []struct {
+		nome    string
+		montar  func(*dominio.Estado)
+		querDec string
+	}{
+		{
+			nome:    "desconhecida, abort presumido",
+			montar:  func(*dominio.Estado) {},
+			querDec: "ABORTADA",
+		},
+		{
+			nome:    "em votacao",
+			montar:  func(e *dominio.Estado) { e.MarcarTransacaoEmVotacao(txLocal) },
+			querDec: "EM_ANDAMENTO",
+		},
+	} {
+		t.Run(caso.nome, func(t *testing.T) {
+			estado := parComUmaCarona(t, "vaijunto")
+			cfg := configDeTransacoes(estado)
+			caso.montar(estado)
+
+			corpo := consultaDaResposta(t, pedirTransacao(cfg, "rotacapixaba", txLocal, "consultar", map[string]any{}))
+			if corpo.Papel != "COORDENADOR" {
+				t.Errorf("papel = %q, want COORDENADOR", corpo.Papel)
+			}
+			if corpo.Decisao != caso.querDec {
+				t.Errorf("decisao = %q, want %q", corpo.Decisao, caso.querDec)
+			}
+			if corpo.Situacao != "" {
+				t.Errorf("situacao = %q num corpo de coordenador, want vazia", corpo.Situacao)
+			}
+			// Responder ABORTADA não cria participação nenhuma: o coordenador
+			// não grava nada antes de decidir (D23, D37, regra 1). Se gravasse,
+			// um PREPARAR legítimo que chegasse depois seria recusado por um
+			// veto que ninguém pediu.
+			if n := len(estado.Participacoes()); n != 0 {
+				t.Errorf("a consulta ao coordenador criou %d participação(ões), want 0", n)
+			}
+		})
+	}
+}
+
+// O veto da D38 pela borda: consultar uma transação desconhecida grava
+// ABORTADO antes de responder, e o preparar atrasado recebe NÃO.
+//
+// É o que torna a terminação segura, e é o passo que o diagrama da seção 6.3
+// da API mostra: a rotafluminense nunca recebeu o preparar, é consultada,
+// veta, e com isso autoriza quem perguntou a abortar.
+func TestConsultar_DesconhecidaVetaERecusaOPrepararAtrasado(t *testing.T) {
+	estado := parComUmaCarona(t, "vaijunto")
+	cfg := configDeTransacoes(estado)
+
+	corpo := consultaDaResposta(t, pedirTransacao(cfg, "rotacapixaba", txDeTeste, "consultar", map[string]any{}))
+	if corpo.Situacao != "DESCONHECIDA" {
+		t.Fatalf("situacao = %q, want DESCONHECIDA", corpo.Situacao)
+	}
+
+	pt, existe := estado.Participacao(txDeTeste)
+	if !existe || pt.Situacao != dominio.SituacaoAbortado || len(pt.Itens) != 0 {
+		t.Fatalf("veto = %+v (existe=%t), want ABORTADO sem itens", pt, existe)
+	}
+
+	voto := votoDaResposta(t, pedirTransacao(cfg, "rotacapixaba", txDeTeste, "preparar",
+		corpoPreparar(itemDeFio("vaijunto:car-1", 0, 1))))
+	if voto.Voto != "NAO" || voto.Motivo != motivoTransacaoAbortada {
+		t.Errorf("voto = %+v, want NAO/TRANSACAO_ABORTADA", voto)
+	}
+}
+
+// Consultar é o único recurso de transação aceito de **qualquer** empresa do
+// consórcio (seção 1.2), e não só do coordenador: quem é consultado sobre uma
+// transação desconhecida não tem como saber quem participa dela, logo não teria
+// como saber de quem aceitar a pergunta.
+//
+// O contraste com preparar/confirmar/abortar, que respondem 403 no mesmo
+// cenário, está em TestTransacoes_PapelInvalidoEm403.
+func TestConsultar_AceitoDeQualquerEmpresaDoConsorcio(t *testing.T) {
+	cfg := configDeTransacoes(parComUmaCarona(t, "vaijunto"))
+
+	// rotacapixaba pergunta sobre uma transação coordenada por rotafluminense:
+	// não é o coordenador e mesmo assim é atendida.
+	corpo := consultaDaResposta(t, pedirTransacao(cfg, "rotacapixaba", "rotafluminense:res-1", "consultar", map[string]any{}))
+	if corpo.Papel != "PARTICIPANTE" || corpo.Situacao != "DESCONHECIDA" {
+		t.Errorf("resposta = %+v, want PARTICIPANTE/DESCONHECIDA", corpo)
+	}
+}
+
+// A abertura é para o consórcio, não para o mundo: quem não está em --pares
+// continua recusado pelo middleware, como em qualquer outro recurso (D20).
+func TestConsultar_EmpresaForaDosParesEm403(t *testing.T) {
+	estado := parComUmaCarona(t, "vaijunto")
+	cfg := configDeTransacoes(estado)
+
+	rec := pedirTransacao(cfg, "intrusa", txDeTeste, "consultar", map[string]any{})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403: %s", rec.Code, rec.Body)
+	}
+	if got := codigoDoErro(t, rec); got != codigoEmpresaDesconhecida {
+		t.Errorf("codigo = %q, want %q", got, codigoEmpresaDesconhecida)
+	}
+	// E nada foi gravado: a recusa vem antes de o participante ser chamado,
+	// então um estranho não consegue vetar transações alheias.
+	if n := len(estado.Participacoes()); n != 0 {
+		t.Errorf("a consulta recusada gravou %d participação(ões), want 0", n)
+	}
+}
+
+// txID sem prefixo não tem papel a resolver: o caminho é malformado, e a
+// resposta é 400, não 403 (seção 5.1).
+func TestConsultar_TxSemPrefixoEm400(t *testing.T) {
+	cfg := configDeTransacoes(parComUmaCarona(t, "vaijunto"))
+
+	rec := pedirTransacao(cfg, "rotacapixaba", "res-sem-empresa", "consultar", map[string]any{})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+	if got := codigoDoErro(t, rec); got != codigoCorpoInvalido {
+		t.Errorf("codigo = %q, want %q", got, codigoCorpoInvalido)
+	}
+}
+
 // A violação de protocolo (seção 7.4) responde 409 e é registrada (seção 5.1).
 //
 // 409 é o único status que encerra a repetição (seção 1.3): nenhuma

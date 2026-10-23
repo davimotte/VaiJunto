@@ -61,3 +61,47 @@ func (p *Participante) Confirmar(txID string) (dominio.Situacao, error) {
 func (p *Participante) Abortar(txID string) (dominio.Situacao, error) {
 	return p.estado.Abortar(txID)
 }
+
+// Consultar responde a consulta da terminação cooperativa (seção 4.6 da API;
+// seção 9.4), no papel que o prefixo do txID dá a esta empresa.
+//
+// Está no Participante, apesar de uma das respostas ser a do coordenador,
+// porque esta é a porta única dos recursos de transação: a borda REST e a rede
+// em memória entregam aqui, e nenhuma das duas precisa saber de que lado da
+// transação esta empresa está. Quem decide o papel é o identificador, não quem
+// chamou — a seção 4.6 é explícita em que a empresa do prefixo responde sempre
+// como coordenadora, mesmo sendo também dona de algum trecho.
+//
+// Os dois lados são leituras diferentes do **mesmo** estado travado, e é por
+// isso que nenhum dos dois precisa consultar o Coordenador: a decisão de uma
+// transação é a reserva no log mais a marca de votação em memória, e as duas
+// moram no Estado (seção 4.6).
+//
+// O erro é sentinela do domínio, como nos outros três recursos: só o caminho
+// do participante pode falhar, e só porque o veto é uma **escrita** — se o
+// fsync não acontece, a resposta DESCONHECIDA não pode sair (D22, regra 3).
+func (p *Participante) Consultar(txID string) (RespostaConsulta, error) {
+	empresaDoTx, err := dominio.EmpresaDoID(txID)
+	if err != nil {
+		return RespostaConsulta{}, err
+	}
+
+	if empresaDoTx == p.estado.Empresa() {
+		// Somente leitura: o abort presumido não grava nada (D23).
+		return RespostaConsulta{
+			Papel:   PapelCoordenador,
+			Decisao: p.estado.DecisaoDaTransacao(txID),
+		}, nil
+	}
+
+	situacao, conhecida, err := p.estado.ConsultarParticipacao(txID)
+	if err != nil {
+		return RespostaConsulta{}, err
+	}
+	if !conhecida {
+		// O veto já está no log: quando ConsultarParticipacao retorna, o fsync
+		// aconteceu, e só então a resposta sai.
+		return RespostaConsulta{Papel: PapelParticipante, Situacao: SituacaoDesconhecida}, nil
+	}
+	return RespostaConsulta{Papel: PapelParticipante, Situacao: string(situacao)}, nil
+}

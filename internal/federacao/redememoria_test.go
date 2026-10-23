@@ -141,6 +141,54 @@ func TestRedeEmMemoria_RecusaQuemNaoEhCoordenador(t *testing.T) {
 	}
 }
 
+// Consultar é a exceção da tabela de papéis (seção 1.2 da API): aceita de
+// qualquer empresa do consórcio, e não só do coordenador.
+//
+// A rede em memória precisa ter a mesma abertura do servidor de verdade, ou a
+// terminação cooperativa ficaria intestável exatamente no caminho que ela usa
+// — um participante em dúvida pergunta a outro participante, e nenhum dos dois
+// é o coordenador.
+func TestRedeEmMemoria_ConsultarAceitoDeQualquerEmpresa(t *testing.T) {
+	hub, estado := hubDeTeste(t)
+
+	// rotafluminense pergunta a vaijunto sobre uma transação de rotacapixaba:
+	// três empresas, nenhuma delas o coordenador do lado de quem chama.
+	resposta, err := hub.De("rotafluminense").Consultar(context.Background(), "vaijunto", txDeTeste)
+	if err != nil {
+		t.Fatalf("Consultar: %v", err)
+	}
+	if resposta.Papel != transacao.PapelParticipante || resposta.Situacao != transacao.SituacaoDesconhecida {
+		t.Fatalf("resposta = %+v, want PARTICIPANTE/DESCONHECIDA", resposta)
+	}
+
+	// E a consulta vetou, como no caminho HTTP: é o efeito colateral que faz
+	// dela um POST (D38).
+	pt, existe := estado.Participacao(txDeTeste)
+	if !existe || pt.Situacao != dominio.SituacaoAbortado {
+		t.Errorf("veto = %+v (existe=%t), want ABORTADO", pt, existe)
+	}
+}
+
+// A mesma consulta, agora sobre uma transação que o destino conhece, responde
+// a situação guardada — igual ao que o handler HTTP devolve.
+func TestRedeEmMemoria_ConsultarDevolveASituacaoConhecida(t *testing.T) {
+	hub, _ := hubDeTeste(t)
+	rede := hub.De("rotacapixaba")
+	ctx := context.Background()
+
+	if _, err := rede.Preparar(ctx, "vaijunto", pedidoDeTeste(txDeTeste, dominio.ItemReserva{CaronaID: "vaijunto:car-1", De: 0, Ate: 2})); err != nil {
+		t.Fatalf("Preparar: %v", err)
+	}
+
+	resposta, err := rede.Consultar(ctx, "vaijunto", txDeTeste)
+	if err != nil {
+		t.Fatalf("Consultar: %v", err)
+	}
+	if resposta.Papel != transacao.PapelParticipante || resposta.Situacao != string(dominio.SituacaoPreparado) {
+		t.Errorf("resposta = %+v, want PARTICIPANTE/PREPARADO", resposta)
+	}
+}
+
 // Empresa não registrada é ErrParDesconhecido, como uma empresa fora de
 // --pares: erro de configuração nossa, que nenhuma repetição conserta (D20).
 func TestRedeEmMemoria_ParDesconhecido(t *testing.T) {

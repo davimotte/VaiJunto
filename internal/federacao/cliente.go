@@ -184,6 +184,49 @@ func (c *Cliente) Abortar(ctx context.Context, destino, txID string) (dominio.Si
 	return c.decidir(ctx, destino, txID, "abortar")
 }
 
+// Consultar pergunta a um par a situação de uma transação (seção 4.6 da API).
+//
+// Quem a chama é o Terminador de um participante em dúvida: primeiro o
+// coordenador e, sem resposta dele, os demais participantes (D38). Cada
+// chamada é uma só; a repetição de 3 em 3 s é de quem chama (seção 1.3).
+//
+// Resposta fora das duas formas da seção 4.6 é ErrRespostaInvalida, e não
+// falha de par, pelo mesmo critério do Preparar: alguém está no ar falando
+// outra língua, e repetir não ajuda. A validação é estrita de propósito —
+// agir sobre um papel ou uma decisão que não se entendeu é justamente como um
+// participante acabaria abortando algo confirmado.
+func (c *Cliente) Consultar(ctx context.Context, destino, txID string) (transacao.RespostaConsulta, error) {
+	var corpo respostaConsulta
+	if err := c.chamar(ctx, destino, http.MethodPost, caminhoDaTransacao(txID, "consultar"), struct{}{}, &corpo); err != nil {
+		return transacao.RespostaConsulta{}, err
+	}
+
+	switch transacao.Papel(corpo.Papel) {
+	case transacao.PapelCoordenador:
+		switch dominio.Decisao(corpo.Decisao) {
+		case dominio.DecisaoConfirmada, dominio.DecisaoEmAndamento, dominio.DecisaoAbortada:
+			return transacao.RespostaConsulta{
+				Papel:   transacao.PapelCoordenador,
+				Decisao: dominio.Decisao(corpo.Decisao),
+			}, nil
+		}
+		return transacao.RespostaConsulta{}, fmt.Errorf("%w: %s: decisão %q desconhecida", ErrRespostaInvalida, destino, corpo.Decisao)
+
+	case transacao.PapelParticipante:
+		switch corpo.Situacao {
+		case string(dominio.SituacaoPreparado), string(dominio.SituacaoConfirmado),
+			string(dominio.SituacaoAbortado), string(dominio.SituacaoCancelado),
+			transacao.SituacaoDesconhecida:
+			return transacao.RespostaConsulta{
+				Papel:    transacao.PapelParticipante,
+				Situacao: corpo.Situacao,
+			}, nil
+		}
+		return transacao.RespostaConsulta{}, fmt.Errorf("%w: %s: situação %q desconhecida", ErrRespostaInvalida, destino, corpo.Situacao)
+	}
+	return transacao.RespostaConsulta{}, fmt.Errorf("%w: %s: papel %q desconhecido", ErrRespostaInvalida, destino, corpo.Papel)
+}
+
 // decidir é o corpo comum dos dois recursos da fase 2: mesmo corpo vazio, mesma
 // resposta. O corpo é "{}", e não ausente, como manda a seção 1 da API.
 func (c *Cliente) decidir(ctx context.Context, destino, txID, recurso string) (dominio.Situacao, error) {

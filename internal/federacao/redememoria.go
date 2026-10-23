@@ -57,6 +57,7 @@ const (
 	OperacaoPreparar  = "preparar"
 	OperacaoConfirmar = "confirmar"
 	OperacaoAbortar   = "abortar"
+	OperacaoConsultar = "consultar"
 )
 
 // NovaRedeEmMemoria cria um hub vazio, sem falha nenhuma injetada.
@@ -138,7 +139,7 @@ var _ transacao.Rede = redeDe{}
 // Preparar entrega a fase 1 ao participante do destino e traduz o resultado
 // pela mesma tabela que o handler HTTP usa.
 func (r redeDe) Preparar(ctx context.Context, destino string, pedido dominio.PedidoPreparacao) (transacao.RespostaPreparar, error) {
-	p, err := r.entregar(ctx, destino, OperacaoPreparar, pedido.TxID)
+	p, err := r.entregar(ctx, destino, OperacaoPreparar, pedido.TxID, soDoCoordenador)
 	if err != nil {
 		return transacao.RespostaPreparar{}, err
 	}
@@ -160,8 +161,26 @@ func (r redeDe) Abortar(ctx context.Context, destino, txID string) (dominio.Situ
 	return r.decidir(ctx, destino, txID, OperacaoAbortar)
 }
 
+// Consultar entrega a consulta da terminação cooperativa (seção 4.6 da API).
+func (r redeDe) Consultar(ctx context.Context, destino, txID string) (transacao.RespostaConsulta, error) {
+	// deTodoOConsorcio: consultar é o único recurso de transação que não exige
+	// o papel de coordenador (seção 1.2 da API). Exigi-lo aqui faria a rede em
+	// memória recusar o que o servidor de verdade aceita, e a terminação
+	// cooperativa ficaria intestável justamente no caminho que ela usa.
+	p, err := r.entregar(ctx, destino, OperacaoConsultar, txID, deTodoOConsorcio)
+	if err != nil {
+		return transacao.RespostaConsulta{}, err
+	}
+
+	resposta, erroDominio := p.Consultar(txID)
+	if erroDominio != nil {
+		return transacao.RespostaConsulta{}, erroDeBorda(erroHTTPDeDominio(erroDominio))
+	}
+	return resposta, nil
+}
+
 func (r redeDe) decidir(ctx context.Context, destino, txID, operacao string) (dominio.Situacao, error) {
-	p, err := r.entregar(ctx, destino, operacao, txID)
+	p, err := r.entregar(ctx, destino, operacao, txID, soDoCoordenador)
 	if err != nil {
 		return "", err
 	}
@@ -177,6 +196,23 @@ func (r redeDe) decidir(ctx context.Context, destino, txID, operacao string) (do
 	return situacao, nil
 }
 
+// exigenciaDePapel diz qual das duas linhas da tabela da seção 1.2 da API vale
+// para a operação que está sendo entregue.
+//
+// É parâmetro, e não um if sobre o nome da operação dentro do entregar, para
+// que acrescentar um recurso obrigue quem o escreve a dizer qual é o papel
+// dele — que é exatamente a decisão fácil de esquecer.
+type exigenciaDePapel bool
+
+const (
+	// soDoCoordenador: preparar, confirmar e abortar. Quem chama tem de ser a
+	// empresa do prefixo do txID.
+	soDoCoordenador exigenciaDePapel = false
+	// deTodoOConsorcio: consultar. Quem é consultado sobre uma transação
+	// desconhecida não tem como saber quem participa dela.
+	deTodoOConsorcio exigenciaDePapel = true
+)
+
 // entregar aplica os botões de falha e devolve o participante do destino.
 //
 // A ordem reproduz a de uma rede: primeiro não existe rota (par desconhecido),
@@ -187,7 +223,7 @@ func (r redeDe) decidir(ctx context.Context, destino, txID, operacao string) (do
 // Nada é feito com o mutex preso além de ler e atualizar os contadores: a
 // espera do atraso e a chamada ao participante acontecem fora dele, pelo mesmo
 // motivo da regra 2 do CLAUDE.md.
-func (r redeDe) entregar(ctx context.Context, destino, operacao, txID string) (*transacao.Participante, error) {
+func (r redeDe) entregar(ctx context.Context, destino, operacao, txID string, papel exigenciaDePapel) (*transacao.Participante, error) {
 	r.hub.mu.Lock()
 	p, conhecido := r.hub.participantes[destino]
 	cortada := r.hub.particoes[parDeEmpresas{r.empresa, destino}]
@@ -221,16 +257,16 @@ func (r redeDe) entregar(ctx context.Context, destino, operacao, txID string) (*
 		return nil, fmt.Errorf("%w: %s: %v", ErrParIndisponivel, destino, err)
 	}
 
-	// Mesma verificação de papel da borda REST (seção 1.2): preparar, confirmar
-	// e abortar só são aceitos do coordenador, que é a empresa do prefixo do
-	// txID. Conferi-la aqui também é o que impede um teste de passar por um
-	// caminho que o servidor de verdade recusaria.
+	// Mesma verificação de papel da borda REST (seção 1.2), que é o que impede
+	// um teste de passar por um caminho que o servidor de verdade recusaria. O
+	// prefixo é conferido em toda operação; a exigência de **ser** o
+	// coordenador vale para todas menos consultar.
 	coordenador, err := dominio.EmpresaDoID(txID)
 	if err != nil {
 		return nil, erroDeBorda(erroHTTP{http.StatusBadRequest, codigoCorpoInvalido,
 			"O identificador de transação precisa do prefixo da empresa coordenadora."})
 	}
-	if coordenador != r.empresa {
+	if papel == soDoCoordenador && coordenador != r.empresa {
 		return nil, erroDeBorda(erroHTTP{http.StatusForbidden, codigoPapelInvalido,
 			"Só o coordenador da transação pode decidi-la."})
 	}

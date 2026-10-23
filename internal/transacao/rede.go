@@ -27,9 +27,9 @@ import (
 // identificador da empresa, nunca uma URL: quem resolve empresa → endereço é a
 // implementação, com a lista estática da D20.
 //
-// consultar (fase 6A) e cancelar (fase 8) entram aqui quando houver quem as
-// chame. Declará-las antes obrigaria as duas implementações a devolver "não
-// implementado", que é um estado que nenhum teste sabe interpretar.
+// cancelar (fase 8) entra aqui quando houver quem a chame. Declará-la antes
+// obrigaria as duas implementações a devolver "não implementado", que é um
+// estado que nenhum teste sabe interpretar.
 type Rede interface {
 	// Preparar é a fase 1 do 2PC (seção 4.3 da API). O txID vai dentro do
 	// pedido; é a implementação HTTP que o põe no caminho da URL.
@@ -40,6 +40,57 @@ type Rede interface {
 
 	// Abortar é a fase 2 com decisão de abortar (seção 4.5 da API).
 	Abortar(ctx context.Context, destino, txID string) (dominio.Situacao, error)
+
+	// Consultar pergunta a situação de uma transação (seção 4.6 da API), que é
+	// a base da terminação cooperativa (D38). Quem a chama é o Terminador, não
+	// o coordenador: é o participante em dúvida que precisa descobrir a
+	// decisão, e não o contrário.
+	//
+	// É a única operação de transação aceita de qualquer empresa do consórcio
+	// (seção 1.2 da API), porque quem é consultado sobre uma transação
+	// desconhecida não tem como saber quem participa dela.
+	Consultar(ctx context.Context, destino, txID string) (RespostaConsulta, error)
+}
+
+// Papel diz em que qualidade um servidor respondeu à consulta (seção 4.6 da
+// API). A empresa do prefixo do txID responde **sempre** como COORDENADOR,
+// mesmo quando também é dona de algum trecho: é o papel que decide o destino
+// da transação, e é esse que importa a quem perguntou.
+type Papel string
+
+const (
+	PapelCoordenador  Papel = "COORDENADOR"
+	PapelParticipante Papel = "PARTICIPANTE"
+)
+
+// SituacaoDesconhecida é o que um participante responde sobre uma transação
+// que ele não guarda — depois de gravar o veto (D38).
+//
+// É string solta, e não uma constante de dominio.Situacao, de propósito: ela
+// não é uma situação **guardada**, e sim uma resposta de protocolo. Nenhuma
+// máquina de estados da seção 7.3 a produz, e inventá-la no domínio criaria um
+// valor que o log nunca poderia conter.
+const SituacaoDesconhecida = "DESCONHECIDA"
+
+// RespostaConsulta é o que volta de um POST /transacoes/{tx}/consultar
+// (seção 4.6 da API), já na forma em que o Terminador a consome.
+//
+// Os dois campos de conteúdo se excluem, e qual deles vale é dito pelo Papel:
+// um coordenador preenche Decisao, um participante preenche Situacao. Ter os
+// dois numa struct só, em vez de dois tipos, é o que permite ao Terminador
+// fazer uma chamada e decidir depois — ele nem sempre sabe de antemão em que
+// papel o destino vai responder.
+type RespostaConsulta struct {
+	Papel Papel
+
+	// Decisao é o destino da transação, só quando Papel é COORDENADOR
+	// (CONFIRMADA, EM_ANDAMENTO ou ABORTADA).
+	Decisao dominio.Decisao
+
+	// Situacao é a situação da participação, só quando Papel é PARTICIPANTE.
+	// Vale SituacaoDesconhecida quando o destino não conhecia a transação e
+	// acabou de vetá-la.
+	Situacao string
 }
 
 // Voto é a resposta de um participante ao PREPARAR (seção 4.3 da API).

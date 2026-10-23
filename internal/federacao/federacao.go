@@ -134,6 +134,12 @@ func NovoHandler(cfg Config) http.Handler {
 	mux.HandleFunc("POST /transacoes/{tx}/abortar", func(w http.ResponseWriter, r *http.Request) {
 		tratarAbortar(w, r, cfg.Participante)
 	})
+	// Único recurso de transação aceito de qualquer empresa do consórcio
+	// (seção 1.2 da API), e único que pode gravar sem ser o coordenador quem
+	// pediu: a consulta de uma transação desconhecida grava o veto da D38.
+	mux.HandleFunc("POST /transacoes/{tx}/consultar", func(w http.ResponseWriter, r *http.Request) {
+		tratarConsultar(w, r, cfg.Participante)
+	})
 	// Só existe com a flag (seção 4.9 da API). Sem ela, o caminho cai no "/" e
 	// responde 404 RECURSO_INEXISTENTE, que é exatamente o que o documento
 	// manda — e é o que o teste do middleware verifica.

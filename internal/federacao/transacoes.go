@@ -90,6 +90,20 @@ type respostaSituacao struct {
 	Situacao string `json:"situacao"`
 }
 
+// respostaConsulta é o corpo 200 do consultar, nas suas duas formas
+// (seção 4.6): o coordenador manda papel e decisao, o participante manda papel
+// e situacao.
+//
+// Os dois campos de conteúdo são omitempty porque cada resposta traz um só, e
+// mandar `"decisao":""` num corpo de participante faria o outro lado precisar
+// distinguir campo vazio de campo ausente para saber quem falou. O papel, que
+// é quem diz qual dos dois ler, está sempre presente.
+type respostaConsulta struct {
+	Papel    string `json:"papel"`
+	Decisao  string `json:"decisao,omitempty"`
+	Situacao string `json:"situacao,omitempty"`
+}
+
 // tratarPreparar responde POST /transacoes/{tx}/preparar: a fase 1 do 2PC.
 func tratarPreparar(w http.ResponseWriter, r *http.Request, p *transacao.Participante) {
 	txID, erro := txDoCoordenador(r)
@@ -188,6 +202,61 @@ func tratarDecisao(w http.ResponseWriter, r *http.Request, operacao string, apli
 	responderJSON(w, http.StatusOK, respostaSituacao{Situacao: string(situacao)})
 }
 
+// tratarConsultar responde POST /transacoes/{tx}/consultar: a base da
+// terminação cooperativa (seção 4.6; D38).
+//
+// É POST, e não GET, porque consultar uma transação desconhecida **grava um
+// veto**. Em REST, GET não pode ter efeito colateral, e um intermediário que
+// repetisse um GET por conta própria estaria gravando vetos sem que ninguém
+// pedisse.
+//
+// Diferente dos outros três recursos, não chama txDoCoordenador: consultar é
+// aceito de qualquer empresa do consórcio (seção 1.2), porque quem é
+// consultado sobre uma transação desconhecida não tem como saber quem participa
+// dela. Quem barra uma empresa de fora continua sendo o middleware, com
+// 403 EMPRESA_DESCONHECIDA — a abertura é para o consórcio, não para o mundo.
+func tratarConsultar(w http.ResponseWriter, r *http.Request, p *transacao.Participante) {
+	txID, erro := txDoCaminho(r)
+	if erro != nil {
+		responderErro(w, *erro)
+		return
+	}
+
+	resposta, err := p.Consultar(txID)
+	if err != nil {
+		traducao := erroHTTPDeDominio(err)
+		anotar(w, "tx=%s CONSULTAR erro=%s", txID, traducao.Codigo)
+		responderErro(w, traducao)
+		return
+	}
+
+	corpo := respostaConsulta{Papel: string(resposta.Papel)}
+	if resposta.Papel == transacao.PapelCoordenador {
+		corpo.Decisao = string(resposta.Decisao)
+		anotar(w, "tx=%s CONSULTAR papel=%s decisao=%s", txID, corpo.Papel, corpo.Decisao)
+	} else {
+		corpo.Situacao = resposta.Situacao
+		anotar(w, "tx=%s CONSULTAR papel=%s situacao=%s", txID, corpo.Papel, corpo.Situacao)
+	}
+	responderJSON(w, http.StatusOK, corpo)
+}
+
+// txDoCaminho extrai o txID do caminho e confere **só** a forma: o prefixo da
+// empresa coordenadora (D27). Sem ele não há papel nenhum a resolver, e o
+// caminho é malformado.
+//
+// É a metade de txDoCoordenador que vale para consultar, e existe separada
+// justamente porque a outra metade — exigir que quem chama seja o coordenador
+// — não vale lá (seção 1.2).
+func txDoCaminho(r *http.Request) (string, *erroHTTP) {
+	txID := r.PathValue("tx")
+	if _, err := dominio.EmpresaDoID(txID); err != nil {
+		return "", &erroHTTP{http.StatusBadRequest, codigoCorpoInvalido,
+			"O identificador de transação precisa do prefixo da empresa coordenadora."}
+	}
+	return txID, nil
+}
+
 // txDoCoordenador extrai o txID do caminho e confere o papel de quem chama
 // (seção 1.2 da API): preparar, confirmar e abortar só são aceitos do
 // coordenador, que é a empresa do prefixo do txID (D27).
@@ -200,12 +269,11 @@ func tratarDecisao(w http.ResponseWriter, r *http.Request, operacao string, apli
 // O prefixo é o que responde quem coordena, sem consultar ninguém. Sem
 // prefixo não há papel a comparar, e o caminho é malformado.
 func txDoCoordenador(r *http.Request) (string, *erroHTTP) {
-	txID := r.PathValue("tx")
-	coordenador, err := dominio.EmpresaDoID(txID)
-	if err != nil {
-		return "", &erroHTTP{http.StatusBadRequest, codigoCorpoInvalido,
-			"O identificador de transação precisa do prefixo da empresa coordenadora."}
+	txID, erro := txDoCaminho(r)
+	if erro != nil {
+		return "", erro
 	}
+	coordenador, _ := dominio.EmpresaDoID(txID)
 	if quemChama := r.Header.Get(cabecalhoEmpresa); quemChama != coordenador {
 		return "", &erroHTTP{http.StatusForbidden, codigoPapelInvalido,
 			"Só o coordenador da transação pode decidi-la."}
