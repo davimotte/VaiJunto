@@ -176,19 +176,51 @@ func esperarQuiescencia(t *testing.T, consorcio map[string]*empresa) {
 	t.Fatalf("quiescência não alcançada em %s: %s", prazoDeQuiescencia, pendente)
 }
 
-// verificarInvariantesP2 confere I-P2-1, I-P2-2, I-P2-4 e I-P2-5 sobre os
+// verificarInvariantesP2 confere as cinco invariantes da seção 11.1 sobre os
 // retratos das empresas.
 //
-// A I-P2-3 (nenhum PREPARADO e outbox vazio) fica de fora porque ela vale
-// "após recuperação e quiescência", e a recuperação é a fase 6: aqui ela seria
-// uma afirmação sobre código que ainda não existe. A espera por quiescência já
-// cobre a parte dela que esta fase pode garantir.
+// A I-P2-3 entrou com a fase 6A. Antes dela, afirmá-la seria afirmar algo
+// sobre código que não existia: sem a terminação cooperativa, uma participação
+// em PREPARADO cujo coordenador sumiu não tinha caminho de volta nenhum, e a
+// invariante vale justamente "após recuperação e quiescência".
 func verificarInvariantesP2(t *testing.T, todas map[string]auditoria) {
 	t.Helper()
 	verificarIP21(t, todas)
 	verificarIP22(t, todas)
+	verificarIP23(t, todas)
 	verificarIP24(t, todas)
 	verificarIP25(t, todas)
+}
+
+// verificarIP23 confere que nenhum assento ficou preso: nenhuma participação
+// em PREPARADO e outbox vazio, em todas as empresas.
+//
+// É a metade da RD04 que a I-P2-1 não cobre. A I-P2-1 limita por cima — nada
+// passa da capacidade —, e esta garante que o que saiu da conta dos livres
+// volta: um assento em espera é um assento que ninguém pode comprar e que
+// ninguém pagou, e deixá-lo assim para sempre é exatamente o que o enunciado
+// proíbe.
+//
+// Só vale **após recuperação e quiescência**, e por isso toda chamada a
+// verificarInvariantesP2 vem depois de esperarQuiescencia: enquanto a fase 2
+// está no ar, PREPARADO é um estado legítimo e transitório.
+//
+// O outbox sai sempre vazio nesta fase, porque ele nasce com os cancelamentos
+// da D39, na fase 8. A verificação já está escrita para que a fase 8 não
+// precise lembrar de acrescentá-la.
+func verificarIP23(t *testing.T, todas map[string]auditoria) {
+	t.Helper()
+	for nome, a := range todas {
+		for _, pt := range a.Participacoes {
+			if pt.Situacao == string(dominio.SituacaoPreparado) {
+				t.Errorf("I-P2-3: %s ainda tem a participação %s em PREPARADO após a quiescência: o assento continua preso",
+					nome, pt.Tx)
+			}
+		}
+		if len(a.Outbox) != 0 {
+			t.Errorf("I-P2-3: %s tem %d aviso(s) no outbox após a quiescência", nome, len(a.Outbox))
+		}
+	}
 }
 
 // verificarIP21 é a invariante mestra local: em cada dono, para toda carona e

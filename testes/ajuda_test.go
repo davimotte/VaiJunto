@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,6 +67,12 @@ type opcoesConsorcio struct {
 	// de um prazo curto para provar que ele decide algo.
 	prazoChamada time.Duration
 	prazoVotacao time.Duration
+	// prazoDuvida e prazoConsulta são os da terminação cooperativa (D41,
+	// seção 9.4). Nos testes vão para a casa dos milissegundos: os 10 s e 3 s
+	// de produção existem para que, num sistema saudável, consulta nenhuma
+	// chegue a acontecer — e um teste que os respeitasse levaria minutos.
+	prazoDuvida   time.Duration
+	prazoConsulta time.Duration
 }
 
 // empresa é uma empresa do consórcio no ar, com as peças que o boot liga
@@ -76,12 +83,27 @@ type empresa struct {
 	estado       *dominio.Estado
 	participante *transacao.Participante
 	coordenador  *transacao.Coordenador
+	terminador   *transacao.Terminador
 	rede         transacao.Rede // o cliente HTTP desta empresa
 	rest         *federacao.Servidor
+	tcp          *servidor.Servidor // nil quando a porta dos clientes não sobe
 	pares        map[string]string
 	registro     *saidaSegura
 	wal          *persistencia.Arquivo // nil quando o log é só em memória
 	relogio      *transacao.Relogio
+
+	// O que um religamento precisa repetir: o endereço, que é fixo porque a
+	// lista de pares é estática (D20), e a semente, que é carregada antes do
+	// log em todo boot (D37, regra 3).
+	enderecoPares string
+	usuariosJSON  []byte
+	caronasJSON   []byte
+
+	// caida evita derrubar duas vezes a mesma instância. O caso normal de um
+	// teste é derrubar, observar o consórcio sem ela e religar — e o
+	// religamento começa derrubando, para que também sirva a quem ainda não
+	// derrubou. Uma queda é uma queda: repeti-la não é erro, é nada.
+	caida bool
 }
 
 // urlBase é o endereço base da porta dos pares desta empresa.
@@ -97,107 +119,240 @@ func subirConsorcioP2(t *testing.T, op opcoesConsorcio) map[string]*empresa {
 		t.Fatalf("ler usuários do fixture: %v", err)
 	}
 
-	prazoChamada := op.prazoChamada
-	if prazoChamada == 0 {
-		prazoChamada = prazoNosTestes
-	}
-
 	consorcio := make(map[string]*empresa, len(op.caronas))
-	configs := make(map[string]federacao.Config, len(op.caronas))
-
 	for nome, caronas := range op.caronas {
-		// Os arquivos de usuários das empresas são o mesmo: os nomes de usuário
-		// são únicos **dentro** da empresa (seção 12.1), então maria pode
-		// existir nas três sem conflito, e é a empresa a que ela se conecta que
-		// a autentica.
-		estado, err := dominio.CarregarEstado(nome, usuarios, caronas)
-		if err != nil {
-			t.Fatalf("empresa %s: carga inicial: %v", nome, err)
-		}
-
-		e := &empresa{
-			nome:         nome,
-			estado:       estado,
-			participante: transacao.NovoParticipante(estado),
-			pares:        make(map[string]string),
-			registro:     &saidaSegura{},
-			relogio:      transacao.NovoRelogio(),
-		}
-		estado.UsarRelogio(e.relogio.Agora)
-		if op.dirLogs != "" {
-			e.wal = instalarWAL(t, estado, filepath.Join(op.dirLogs, nome+".wal"))
-		}
-		for outra, url := range op.paresExtra {
-			e.pares[outra] = url
-		}
-
-		cfg := federacao.Config{
-			Empresa:      nome,
-			Pares:        e.pares,
-			Relogio:      e.relogio,
-			Registro:     federacao.NovoRegistro(e.registro, nome),
-			Estado:       estado,
-			Participante: e.participante,
-			PrazoChamada: prazoChamada,
-			PrazoBusca:   prazoBuscaNosTestes,
-			Auditoria:    op.auditoria,
-		}
-
-		rest, err := federacao.Escutar("127.0.0.1:0", cfg)
-		if err != nil {
-			t.Fatalf("empresa %s: escutar porta dos pares: %v", nome, err)
-		}
-		e.rest = rest
-		consorcio[nome] = e
-		configs[nome] = cfg
+		// Porta 0: o endereço efetivo só existe depois do Escutar, e é por isso
+		// que as listas de pares só podem ser cruzadas na segunda passada.
+		consorcio[nome] = montarEmpresa(t, nome, usuarios, caronas, op, "127.0.0.1:0")
 	}
 
 	// Segunda passada: agora que todos os endereços existem, cruza os pares e
 	// só então começa a servir.
-	for nome, e := range consorcio {
-		for outro, o := range consorcio {
-			if outro != nome {
-				e.pares[outro] = o.urlBase()
-			}
-		}
-
-		rest := e.rest
-		go func() { _ = rest.Servir() }()
-		t.Cleanup(func() { _ = rest.Fechar() })
-
-		cliente := federacao.NovoCliente(configs[nome])
-		e.rede = cliente
-		e.coordenador = transacao.NovoCoordenador(transacao.ConfigCoordenador{
-			Empresa:      nome,
-			Estado:       e.estado,
-			Relogio:      e.relogio,
-			Rede:         cliente,
-			Participante: federacao.NovoVotanteLocal(e.participante),
-			Consorcio:    empresasDe(consorcio, op.paresExtra),
-			Registro:     configs[nome].Registro,
-			PrazoVotacao: op.prazoVotacao,
-		})
-		// Antes de fechar os servidores: as tarefas de segundo plano repetem a
-		// cada 2 s sem limite (D41), e sem isto continuariam batendo em portas
-		// já fechadas depois do fim do teste.
-		coordenador := e.coordenador
-		t.Cleanup(coordenador.Parar)
-
-		if op.tcp {
-			var busca servidor.BuscaFederada = buscaQueNaoAcha{}
-			if op.busca {
-				busca = federacao.NovaBusca(configs[nome], cliente)
-			}
-			s, err := servidor.Escutar("127.0.0.1:0", e.estado, busca, e.coordenador)
-			if err != nil {
-				t.Fatalf("empresa %s: escutar porta dos clientes: %v", nome, err)
-			}
-			e.endereco = s.Endereco()
-			go func() { _ = s.Aceitar() }()
-			t.Cleanup(func() { _ = s.Fechar() })
-		}
+	for _, e := range consorcio {
+		ligarEmpresa(t, e, consorcio, op)
 	}
 	return consorcio
+}
+
+// montarEmpresa é a metade do boot que acontece antes de uma empresa conhecer
+// as outras: semente, relógio, log com replay, participante e a porta dos
+// pares aberta (cmd/servidor/main.go, até o Escutar).
+//
+// É função à parte, e não código solto dentro do laço, porque o religamento da
+// seção 9.3 precisa repetir exatamente estes passos — e repeti-los **na mesma
+// ordem** é metade do que a fase 6A entrega: semente, depois log, e só então o
+// arquivo instalado como destino (D37).
+//
+// endereco é "127.0.0.1:0" na subida normal e o endereço anterior no
+// religamento, porque a lista de pares é estática (D20): uma empresa que volta
+// noutra porta simplesmente não é mais encontrada pelos pares.
+func montarEmpresa(t *testing.T, nome string, usuarios, caronas []byte, op opcoesConsorcio, endereco string) *empresa {
+	t.Helper()
+
+	// Os arquivos de usuários das empresas são o mesmo: os nomes de usuário
+	// são únicos **dentro** da empresa (seção 12.1), então maria pode existir
+	// nas três sem conflito, e é a empresa a que ela se conecta que a
+	// autentica.
+	estado, err := dominio.CarregarEstado(nome, usuarios, caronas)
+	if err != nil {
+		t.Fatalf("empresa %s: carga inicial: %v", nome, err)
+	}
+
+	e := &empresa{
+		nome:         nome,
+		estado:       estado,
+		participante: transacao.NovoParticipante(estado),
+		pares:        make(map[string]string),
+		registro:     &saidaSegura{},
+		relogio:      transacao.NovoRelogio(),
+		usuariosJSON: usuarios,
+		caronasJSON:  caronas,
+	}
+	estado.UsarRelogio(e.relogio.Agora)
+	if op.dirLogs != "" {
+		e.wal = instalarWAL(t, estado, filepath.Join(op.dirLogs, nome+".wal"))
+	}
+
+	rest, err := escutarPares(t, nome, endereco, e.configREST(op))
+	if err != nil {
+		t.Fatalf("empresa %s: escutar porta dos pares: %v", nome, err)
+	}
+	e.rest = rest
+	e.enderecoPares = rest.Endereco()
+	return e
+}
+
+// configREST monta a Config desta empresa. O mapa de pares vai por referência,
+// e é preenchido por ligarEmpresa antes de qualquer Servir.
+func (e *empresa) configREST(op opcoesConsorcio) federacao.Config {
+	prazoChamada := op.prazoChamada
+	if prazoChamada == 0 {
+		prazoChamada = prazoNosTestes
+	}
+	return federacao.Config{
+		Empresa:      e.nome,
+		Pares:        e.pares,
+		Relogio:      e.relogio,
+		Registro:     federacao.NovoRegistro(e.registro, e.nome),
+		Estado:       e.estado,
+		Participante: e.participante,
+		PrazoChamada: prazoChamada,
+		PrazoBusca:   prazoBuscaNosTestes,
+		Auditoria:    op.auditoria,
+	}
+}
+
+// escutarPares abre a porta dos pares, insistindo por um instante quando o
+// endereço é fixo.
+//
+// A insistência é só para o religamento: o Fechar anterior já derrubou o
+// listener e as conexões, mas o sistema operacional pode levar alguns
+// milissegundos para liberar o bind, e o teste falharia por um detalhe que
+// nada tem a ver com o que ele afirma.
+func escutarPares(t *testing.T, nome, endereco string, cfg federacao.Config) (*federacao.Servidor, error) {
+	t.Helper()
+	limite := time.Now().Add(2 * time.Second)
+	for {
+		rest, err := federacao.Escutar(endereco, cfg)
+		if err == nil || strings.HasSuffix(endereco, ":0") || !time.Now().Before(limite) {
+			return rest, err
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// ligarEmpresa é a metade do boot que depende de a empresa conhecer as outras:
+// lista de pares, cliente, coordenador, terminador, as portas servindo e as
+// tarefas de recuperação da seção 9.3.
+//
+// A lista de pares é preenchida **antes** do Servir de propósito: o mapa é
+// compartilhado por referência com a Config, e escrevê-lo depois de a goroutine
+// do servidor começar a lê-lo é corrida de verdade, que o -race acusa.
+func ligarEmpresa(t *testing.T, e *empresa, consorcio map[string]*empresa, op opcoesConsorcio) {
+	t.Helper()
+
+	for outro, o := range consorcio {
+		if outro != e.nome {
+			e.pares[outro] = o.urlBase()
+		}
+	}
+	for outra, url := range op.paresExtra {
+		e.pares[outra] = url
+	}
+
+	cfg := e.configREST(op)
+	rest := e.rest
+	go func() { _ = rest.Servir() }()
+	t.Cleanup(func() { _ = rest.Fechar() })
+
+	cliente := federacao.NovoCliente(cfg)
+	e.rede = cliente
+	e.coordenador = transacao.NovoCoordenador(transacao.ConfigCoordenador{
+		Empresa:      e.nome,
+		Estado:       e.estado,
+		Relogio:      e.relogio,
+		Rede:         cliente,
+		Participante: federacao.NovoVotanteLocal(e.participante),
+		Consorcio:    empresasDe(consorcio, op.paresExtra),
+		Registro:     cfg.Registro,
+		PrazoVotacao: op.prazoVotacao,
+	})
+	e.terminador = transacao.NovoTerminador(transacao.ConfigTerminador{
+		Empresa:       e.nome,
+		Estado:        e.estado,
+		Rede:          cliente,
+		Registro:      cfg.Registro,
+		PrazoDuvida:   op.prazoDuvida,
+		PrazoConsulta: op.prazoConsulta,
+	})
+	// Antes de fechar os servidores: as tarefas de segundo plano repetem sem
+	// limite (D41), e sem isto continuariam batendo em portas já fechadas
+	// depois do fim do teste.
+	coordenador, terminador := e.coordenador, e.terminador
+	t.Cleanup(coordenador.Parar)
+	t.Cleanup(terminador.Parar)
+
+	if op.tcp {
+		var busca servidor.BuscaFederada = buscaQueNaoAcha{}
+		if op.busca {
+			busca = federacao.NovaBusca(cfg, cliente)
+		}
+		s, err := servidor.Escutar("127.0.0.1:0", e.estado, busca, e.coordenador)
+		if err != nil {
+			t.Fatalf("empresa %s: escutar porta dos clientes: %v", e.nome, err)
+		}
+		e.tcp = s
+		e.endereco = s.Endereco()
+		go func() { _ = s.Aceitar() }()
+		t.Cleanup(func() { _ = s.Fechar() })
+	}
+
+	// Passo 5 da seção 9.2: as tarefas de recuperação da seção 9.3 vêm depois
+	// de as portas estarem no ar, porque as duas falam com os pares. Numa
+	// subida limpa as duas listas vêm vazias; é o religamento que lhes dá
+	// trabalho.
+	e.coordenador.Recuperar()
+	e.terminador.Recuperar()
+}
+
+// derrubarEmpresa simula a queda de uma empresa: as portas param de responder,
+// as tarefas de segundo plano morrem e o arquivo de log é fechado.
+//
+// Para os pares é indistinguível de um `docker kill`: a conexão passa a ser
+// recusada, que é o que a D30 trata por timeout. O que **não** acontece é
+// desligamento limpo: o servidor não tem rotina de desligamento (seção 9.1), e
+// nada aqui avisa ninguém nem termina transação alguma.
+//
+// O estado em memória é abandonado de propósito, sem ser zerado: o que
+// sobrevive é só o que está no log, e é dele que o religamento parte.
+func derrubarEmpresa(t *testing.T, e *empresa) {
+	t.Helper()
+	if e.caida {
+		return
+	}
+	e.caida = true
+	e.coordenador.Parar()
+	e.terminador.Parar()
+	if e.tcp != nil {
+		_ = e.tcp.Fechar()
+	}
+	if err := e.rest.Fechar(); err != nil {
+		t.Fatalf("empresa %s: fechar porta dos pares: %v", e.nome, err)
+	}
+	if e.wal != nil {
+		if err := e.wal.Fechar(); err != nil {
+			t.Fatalf("empresa %s: fechar log: %v", e.nome, err)
+		}
+	}
+}
+
+// religarEmpresa derruba uma empresa e a reabre a partir do mesmo log, no
+// mesmo endereço, pelo caminho completo do boot (seção 9.2).
+//
+// É a ferramenta de queda que a fase 6B vai reutilizar com os pontos de
+// FALHAR_EM: lá o que muda é **quando** a queda acontece, não o que acontece
+// depois dela. Substitui a entrada do consórcio, porque tudo é novo — estado,
+// participante, coordenador, terminador e cliente —, exatamente como num
+// processo que reinicia.
+//
+// Um detalhe que vale conhecer ao ler um teste que usa isto: logo depois do
+// religamento, a primeira chamada de um par pode falhar, porque o http.Client
+// dele ainda tem no pool uma conexão para a porta antiga e o net/http não
+// repete POST por conta própria. O protocolo se cura sozinho — a consulta
+// repete a cada PrazoConsulta e o CONFIRMAR a cada PrazoFase2 —, e é
+// justamente essa cura que os testes desta fase observam.
+func religarEmpresa(t *testing.T, consorcio map[string]*empresa, nome string, op opcoesConsorcio) *empresa {
+	t.Helper()
+	antiga, existe := consorcio[nome]
+	if !existe {
+		t.Fatalf("religarEmpresa: %q não está no consórcio", nome)
+	}
+	derrubarEmpresa(t, antiga)
+
+	nova := montarEmpresa(t, nome, antiga.usuariosJSON, antiga.caronasJSON, op, antiga.enderecoPares)
+	consorcio[nome] = nova
+	ligarEmpresa(t, nova, consorcio, op)
+	return nova
 }
 
 // empresasDe lista as empresas que o coordenador reconhece: as que subiram mais
