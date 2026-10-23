@@ -89,6 +89,18 @@ type Config struct {
 	// limita uma chamada, este limita o leque inteiro, de modo que três pares
 	// lentos não somem três prazos na espera do passageiro.
 	PrazoBusca time.Duration
+
+	// Auditoria liga GET /auditoria, o estado completo desta empresa para o
+	// verificador de invariantes (seção 11.2; flag --auditoria).
+	//
+	// Desligada por padrão, e é importante que seja: a auditoria expõe de uma
+	// vez tudo o que a empresa sabe, inclusive as participações, que nenhum par
+	// tem o direito de ver (D32). Ela existe para o teste, não para o
+	// consórcio.
+	//
+	// Não é componente central: não participa de nenhuma decisão e é somente
+	// leitura. É instrumento de observação, como o -race.
+	Auditoria bool
 }
 
 // NovoHandler monta o roteador REST com o middleware único (seção 1 da API).
@@ -122,6 +134,14 @@ func NovoHandler(cfg Config) http.Handler {
 	mux.HandleFunc("POST /transacoes/{tx}/abortar", func(w http.ResponseWriter, r *http.Request) {
 		tratarAbortar(w, r, cfg.Participante)
 	})
+	// Só existe com a flag (seção 4.9 da API). Sem ela, o caminho cai no "/" e
+	// responde 404 RECURSO_INEXISTENTE, que é exatamente o que o documento
+	// manda — e é o que o teste do middleware verifica.
+	if cfg.Auditoria {
+		mux.HandleFunc("GET /auditoria", func(w http.ResponseWriter, r *http.Request) {
+			responderJSON(w, http.StatusOK, auditoriaDeFio(cfg.Estado.Auditoria()))
+		})
+	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		responderErro(w, erroHTTP{http.StatusNotFound, codigoRecursoInexistente, "Recurso inexistente."})
 	})

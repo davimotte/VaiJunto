@@ -147,9 +147,17 @@ func TestMiddleware_SaudeSemCabecalhos(t *testing.T) {
 	}
 }
 
-// /auditoria é isento de cabeçalho (seção 1.1), mas não existe nesta fase:
-// 404, e não 400. Fixa a regra da isenção antes de o recurso nascer.
-func TestMiddleware_AuditoriaIsentaMasInexistente(t *testing.T) {
+// /auditoria é isento de cabeçalho (seção 1.1) e **só existe com a flag**
+// (seção 4.9): sem ela, 404, e não 400.
+//
+// A isenção e a ausência são duas regras diferentes, e este teste prova as
+// duas de uma vez: a requisição chega sem X-VaiJunto-Empresa e, ainda assim, a
+// recusa é por o recurso não existir — não por cabeçalho faltando.
+//
+// O padrão desligado importa: a auditoria expõe de uma vez tudo o que a empresa
+// sabe, inclusive as participações, que nenhum par tem o direito de ver (D32).
+// Ela é instrumento de teste, não parte da API do consórcio.
+func TestMiddleware_AuditoriaIsentaMasDesligadaPorPadrao(t *testing.T) {
 	rec := pedir(configDeTeste(), httptest.NewRequest(http.MethodGet, "/auditoria", nil))
 
 	if rec.Code != http.StatusNotFound {
@@ -157,6 +165,19 @@ func TestMiddleware_AuditoriaIsentaMasInexistente(t *testing.T) {
 	}
 	if got := codigoDoErro(t, rec); got != codigoRecursoInexistente {
 		t.Errorf("codigo = %q, want %q", got, codigoRecursoInexistente)
+	}
+}
+
+// Com a flag, o recurso responde 200 e continua isento de cabeçalho: o
+// verificador não é um par do consórcio e não tem empresa para declarar.
+func TestMiddleware_AuditoriaComAFlagResponde(t *testing.T) {
+	cfg := configDeTeste()
+	cfg.Auditoria = true
+
+	rec := pedir(cfg, httptest.NewRequest(http.MethodGet, "/auditoria", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (corpo: %s)", rec.Code, rec.Body)
 	}
 }
 

@@ -10,6 +10,13 @@
 #
 # Entre conteineres, os pares se encontram pelo nome do servico
 # (http://rotacapixaba:8080) e usam a porta 8080 interna, nao a publicada.
+#
+# As tres sobem com --auditoria, que expoe GET /auditoria com o estado completo
+# da empresa (secao 11.2). E instrumento de observacao, como o -race: nao
+# participa de nenhuma decisao, e com ele a demonstracao pode conferir os
+# contadores das tres empresas com um curl. Em producao a flag fica desligada:
+# a auditoria mostra tambem as participacoes, que nenhum par tem o direito de
+# ver (D32).
 
 x-servidor: &servidor
   build:
@@ -33,6 +40,7 @@ services:
       - "--dados=/dados"
       - "--log=/estado/vaijunto.wal"
       - "--pares=rotacapixaba=http://rotacapixaba:8080,rotafluminense=http://rotafluminense:8080"
+      - "--auditoria"
     ports:
       - "9001:9000"
       - "8081:8080"
@@ -49,6 +57,7 @@ services:
       - "--dados=/dados"
       - "--log=/estado/rotacapixaba.wal"
       - "--pares=vaijunto=http://vaijunto:8080,rotafluminense=http://rotafluminense:8080"
+      - "--auditoria"
     ports:
       - "9002:9000"
       - "8082:8080"
@@ -65,6 +74,7 @@ services:
       - "--dados=/dados"
       - "--log=/estado/rotafluminense.wal"
       - "--pares=vaijunto=http://vaijunto:8080,rotacapixaba=http://rotacapixaba:8080"
+      - "--auditoria"
     ports:
       - "9003:9000"
       - "8083:8080"
