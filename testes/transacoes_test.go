@@ -12,7 +12,6 @@ import (
 
 	"vaijunto/internal/dominio"
 	"vaijunto/internal/federacao"
-	"vaijunto/internal/persistencia"
 	"vaijunto/internal/transacao"
 )
 
@@ -27,116 +26,15 @@ import (
 // cliente, HTTP, middleware, handler, participante, domínio, log — produz o
 // resultado certo, inclusive sob disputa.
 
-// prazoNosTestes é o prazo de cada chamada a um par (D41) encurtado para os
-// testes, mas largo o bastante para 50 chamadas simultâneas num processo
-// carregado pelo -race.
-const prazoNosTestes = 2 * time.Second
-
-// empresaDeTransacoes é uma empresa do consórcio com a porta dos pares no ar e
-// o participante do 2PC montado, como no boot (cmd/servidor/main.go).
-type empresaDeTransacoes struct {
-	nome         string
-	estado       *dominio.Estado
-	participante *transacao.Participante
-	rede         transacao.Rede // o cliente HTTP desta empresa
-	rest         *federacao.Servidor
-	pares        map[string]string
-	registro     *saidaSegura
-	wal          *persistencia.Arquivo // nil quando o log é só em memória
-}
-
-// subirConsorcioDeTransacoes sobe uma empresa por entrada de caronasPorEmpresa,
-// com estado, participante, porta HTTP e cliente dos pares.
+// subirConsorcioDeTransacoes sobe o consórcio sem a porta dos clientes: os
+// testes deste arquivo exercitam o participante do 2PC chamando-o pela rede ou
+// direto, e não pelo PROTOCOL.md.
 //
-// É o subirConsorcioDeBusca sem a porta TCP: esta fase não mexe no RESERVAR do
-// cliente, e abrir uma porta que nenhum teste usa só tornaria a falha mais
-// difícil de ler.
-//
-// dirLogs vazio deixa o log em memória. Com diretório, cada empresa ganha o seu
-// arquivo e passa pelo caminho completo do boot — semente, abrir, replay e só
-// então instalar o arquivo (D37) —, que é o que o teste de reinício precisa.
-//
-// Os endereços HTTP só existem depois do Escutar com porta 0, e por isso as
-// listas de pares são preenchidas depois, antes de qualquer Servir: assim
-// nenhuma goroutine lê o mapa enquanto ele é escrito.
-func subirConsorcioDeTransacoes(t *testing.T, caronasPorEmpresa map[string][]byte, dirLogs string) map[string]*empresaDeTransacoes {
+// dirLogs vazio deixa o log em memória; com diretório, cada empresa passa pelo
+// caminho completo do boot (D37), que é o que o teste de reinício precisa.
+func subirConsorcioDeTransacoes(t *testing.T, caronasPorEmpresa map[string][]byte, dirLogs string) map[string]*empresa {
 	t.Helper()
-
-	usuarios, err := os.ReadFile(filepath.Join(diretorioSemente, "usuarios.json"))
-	if err != nil {
-		t.Fatalf("ler usuários do fixture: %v", err)
-	}
-
-	consorcio := make(map[string]*empresaDeTransacoes, len(caronasPorEmpresa))
-	configs := make(map[string]federacao.Config, len(caronasPorEmpresa))
-
-	for nome, caronas := range caronasPorEmpresa {
-		estado, err := dominio.CarregarEstado(nome, usuarios, caronas)
-		if err != nil {
-			t.Fatalf("empresa %s: carga inicial: %v", nome, err)
-		}
-
-		e := &empresaDeTransacoes{
-			nome:         nome,
-			estado:       estado,
-			participante: transacao.NovoParticipante(estado),
-			pares:        make(map[string]string),
-			registro:     &saidaSegura{},
-		}
-		if dirLogs != "" {
-			e.wal = instalarWAL(t, estado, filepath.Join(dirLogs, nome+".wal"))
-		}
-
-		cfg := federacao.Config{
-			Empresa:      nome,
-			Pares:        e.pares,
-			Relogio:      transacao.NovoRelogio(),
-			Registro:     federacao.NovoRegistro(e.registro, nome),
-			Estado:       estado,
-			Participante: e.participante,
-			PrazoChamada: prazoNosTestes,
-			PrazoBusca:   prazoNosTestes,
-		}
-
-		rest, err := federacao.Escutar("127.0.0.1:0", cfg)
-		if err != nil {
-			t.Fatalf("empresa %s: escutar porta dos pares: %v", nome, err)
-		}
-		e.rest = rest
-		consorcio[nome] = e
-		configs[nome] = cfg
-	}
-
-	for nome, e := range consorcio {
-		for outro, o := range consorcio {
-			if outro != nome {
-				e.pares[outro] = "http://" + o.rest.Endereco()
-			}
-		}
-
-		rest := e.rest
-		go func() { _ = rest.Servir() }()
-		t.Cleanup(func() { _ = rest.Fechar() })
-
-		e.rede = federacao.NovoCliente(configs[nome])
-	}
-	return consorcio
-}
-
-// instalarWAL repete o caminho do boot: abre o arquivo, reaplica o que está
-// nele e só então o instala como destino do log, para que a reaplicação nunca
-// grave de volta o que está lendo (D37).
-func instalarWAL(t *testing.T, estado *dominio.Estado, caminho string) *persistencia.Arquivo {
-	t.Helper()
-	arquivo, registros, err := persistencia.Abrir(caminho)
-	if err != nil {
-		t.Fatalf("abrir %s: %v", caminho, err)
-	}
-	if _, err := estado.Reaplicar(registros); err != nil {
-		t.Fatalf("replay de %s: %v", caminho, err)
-	}
-	estado.UsarLog(arquivo)
-	return arquivo
+	return subirConsorcioP2(t, opcoesConsorcio{caronas: caronasPorEmpresa, dirLogs: dirLogs})
 }
 
 // caronasDe devolve o JSON de carga de uma empresa com uma única carona de
@@ -167,7 +65,7 @@ func pedidoPara(coordenador, txID, caronaID string) dominio.PedidoPreparacao {
 
 // conferirIP21Em verifica a invariante mestra em todas as empresas do consórcio
 // (seção 11.1).
-func conferirIP21Em(t *testing.T, consorcio map[string]*empresaDeTransacoes) {
+func conferirIP21Em(t *testing.T, consorcio map[string]*empresa) {
 	t.Helper()
 	for nome, e := range consorcio {
 		for _, o := range e.estado.Ocupacao() {

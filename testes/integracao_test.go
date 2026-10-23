@@ -16,13 +16,13 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"vaijunto/internal/protocolo"
-	"vaijunto/internal/servidor"
 )
 
 const (
@@ -61,24 +61,32 @@ func TestMain(m *testing.M) {
 // exatamente o caminho do P1 (PROJETO_P2.md, seção 6), e é por isso que a
 // regressão inteira continua valendo sem subir consórcio. O consórcio de três
 // empresas é o subirConsorcioDeBusca, em busca_test.go.
+//
+// A partir da fase 5 a empresa sobe com coordenador do 2PC, porque a reserva
+// local do P1 não existe mais (D07 revogada). Com um participante só, o 2PC
+// degenera no caso simples — a própria empresa vota, confirma e grava, tudo por
+// chamada direta, sem rede — e os cenários T1 a T8 do P1 passam a exercitá-lo
+// sem mudar uma asserção.
 func subirServidor(t *testing.T) string {
 	t.Helper()
+	return servidorDaEmpresa(t, umaEmpresaDoFixture(t))["vaijunto"].endereco
+}
 
-	estado, err := servidor.CarregarSemente("vaijunto", diretorioSemente)
+// umaEmpresaDoFixture lê as caronas do fixture do P1 para a vaijunto, no formato
+// que subirConsorcioP2 espera.
+func umaEmpresaDoFixture(t *testing.T) map[string][]byte {
+	t.Helper()
+	caronas, err := os.ReadFile(filepath.Join(diretorioSemente, "caronas.json"))
 	if err != nil {
-		t.Fatalf("carga inicial: %v", err)
+		t.Fatalf("ler caronas do fixture: %v", err)
 	}
-	s, err := servidor.Escutar("127.0.0.1:0", estado, buscaDe(t, "vaijunto", estado, nil, nil, 0))
-	if err != nil {
-		t.Fatalf("escutar: %v", err)
-	}
+	return map[string][]byte{"vaijunto": caronas}
+}
 
-	// Aceitar só retorna quando o listener fecha; o erro daí é o fechamento
-	// em si, esperado no fim do teste.
-	go func() { _ = s.Aceitar() }()
-	t.Cleanup(func() { _ = s.Fechar() })
-
-	return s.Endereco()
+// servidorDaEmpresa sobe o consórcio com as duas portas e a busca ligada.
+func servidorDaEmpresa(t *testing.T, caronas map[string][]byte) map[string]*empresa {
+	t.Helper()
+	return subirConsorcioP2(t, opcoesConsorcio{caronas: caronas, tcp: true, busca: true})
 }
 
 // cliente é uma conexão TCP falando o protocolo, do jeito que um cliente

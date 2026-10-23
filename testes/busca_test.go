@@ -26,14 +26,6 @@ import (
 // exercitado pela porta por onde o passageiro entra, falando o protocolo: é a
 // única forma de provar que o resultado parcial chega até ele.
 
-// prazoBuscaNosTestes é o prazo único da rodada de pares (D41) nos testes.
-//
-// Curto de propósito: o TB2 derruba uma empresa e mede quanto a busca leva para
-// desistir dela, e com os 2 s do padrão cada execução desse teste custaria 2 s.
-// A D41 existe justamente para que o prazo seja configurável e os testes rodem
-// em milissegundos.
-const prazoBuscaNosTestes = 300 * time.Millisecond
-
 // donoNoTB1 distribui as oito caronas do fixture do P1 entre as três empresas,
 // conforme a seção 12.4 do PROJETO_P2.md.
 //
@@ -53,102 +45,21 @@ var donoNoTB1 = map[string]string{
 	"car-8": "rotafluminense",
 }
 
-// empresaDoConsorcio é uma empresa com as duas portas no ar: a TCP dos
-// clientes e a HTTP dos pares.
-type empresaDoConsorcio struct {
-	nome     string
-	endereco string // porta TCP, onde o passageiro se conecta
-	estado   *dominio.Estado
-	rest     *federacao.Servidor
-	pares    map[string]string
-	registro *saidaSegura
-}
-
-// subirConsorcioDeBusca sobe uma empresa por entrada de caronasPorEmpresa, cada
-// uma com o seu estado, a sua porta HTTP e a sua porta TCP, e cruza as listas de
-// pares com os endereços efetivos.
+// subirConsorcioDeBusca sobe o consórcio com as duas portas e a busca federada
+// ligada, que é o que os testes de busca exercitam.
 //
-// É o subirConsorcio de federacao_test.go com as duas portas e o estado: lá só
-// a pilha REST importava, aqui a busca precisa de caronas para achar e de uma
-// porta de cliente para ser pedida.
-//
-// paresExtra entra na lista de pares de todas as empresas sem subir servidor
-// nenhum: é como o teste do passo 5 põe um par falso no consórcio.
-//
-// Os endereços HTTP só existem depois do Escutar com porta 0, e por isso as
-// listas de pares são preenchidas depois — antes de qualquer Servir, de modo que
-// nenhuma goroutine leia o mapa enquanto ele é escrito.
-func subirConsorcioDeBusca(t *testing.T, caronasPorEmpresa map[string][]byte, paresExtra map[string]string) map[string]*empresaDoConsorcio {
+// É um nome próprio sobre subirConsorcioP2 (ajuda_test.go) porque os testes
+// deste arquivo falam de busca, e ler "subirConsorcioDeBusca" diz o que a
+// empresa está pronta para fazer.
+func subirConsorcioDeBusca(t *testing.T, caronasPorEmpresa map[string][]byte, paresExtra map[string]string) map[string]*empresa {
 	t.Helper()
-
-	usuarios, err := os.ReadFile(filepath.Join(diretorioSemente, "usuarios.json"))
-	if err != nil {
-		t.Fatalf("ler usuários do fixture: %v", err)
-	}
-
-	consorcio := make(map[string]*empresaDoConsorcio, len(caronasPorEmpresa))
-	configs := make(map[string]federacao.Config, len(caronasPorEmpresa))
-
-	for nome, caronas := range caronasPorEmpresa {
-		// Os três arquivos de usuários são o mesmo: os nomes de usuário são
-		// únicos **dentro** da empresa (seção 12.1), então maria pode existir
-		// nas três sem conflito, e é a empresa a que ela se conecta que a
-		// autentica.
-		estado, err := dominio.CarregarEstado(nome, usuarios, caronas)
-		if err != nil {
-			t.Fatalf("empresa %s: carga inicial: %v", nome, err)
-		}
-
-		e := &empresaDoConsorcio{
-			nome:     nome,
-			estado:   estado,
-			pares:    make(map[string]string),
-			registro: &saidaSegura{},
-		}
-		for empresa, url := range paresExtra {
-			e.pares[empresa] = url
-		}
-
-		cfg := federacao.Config{
-			Empresa:      nome,
-			Pares:        e.pares,
-			Relogio:      transacao.NovoRelogio(),
-			Registro:     federacao.NovoRegistro(e.registro, nome),
-			Estado:       estado,
-			PrazoChamada: prazoBuscaNosTestes,
-			PrazoBusca:   prazoBuscaNosTestes,
-		}
-
-		rest, err := federacao.Escutar("127.0.0.1:0", cfg)
-		if err != nil {
-			t.Fatalf("empresa %s: escutar porta dos pares: %v", nome, err)
-		}
-		e.rest = rest
-		consorcio[nome] = e
-		configs[nome] = cfg
-	}
-
-	for nome, e := range consorcio {
-		for outro, o := range consorcio {
-			if outro != nome {
-				e.pares[outro] = "http://" + o.rest.Endereco()
-			}
-		}
-
-		rest := e.rest
-		go func() { _ = rest.Servir() }()
-		t.Cleanup(func() { _ = rest.Fechar() })
-
-		busca := federacao.NovaBusca(configs[nome], federacao.NovoCliente(configs[nome]))
-		s, err := servidor.Escutar("127.0.0.1:0", e.estado, busca)
-		if err != nil {
-			t.Fatalf("empresa %s: escutar porta dos clientes: %v", nome, err)
-		}
-		e.endereco = s.Endereco()
-		go func() { _ = s.Aceitar() }()
-		t.Cleanup(func() { _ = s.Fechar() })
-	}
-	return consorcio
+	return subirConsorcioP2(t, opcoesConsorcio{
+		caronas:      caronasPorEmpresa,
+		tcp:          true,
+		busca:        true,
+		paresExtra:   paresExtra,
+		prazoChamada: prazoBuscaNosTestes,
+	})
 }
 
 // buscaDe monta uma busca federada com a mesma Config das outras pontas da

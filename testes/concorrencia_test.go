@@ -556,7 +556,16 @@ func duracaoDoAmbiente(t *testing.T, variavel string, padrao time.Duration) time
 // Haver mais passageiros que assentos é o que dá valor ao teste: as recusas
 // por SEM_ASSENTO se intercalam com os cancelamentos, e é nessa intercalação
 // que um contador mal sincronizado se perderia.
+//
+// **Suspenso na fase 5.** O laço depende de CANCELAR_RESERVA, que responde
+// recusa provisória até a fase 8 (D39): sem cancelamento não há o que devolver,
+// e o laço viraria uma sequência de SEM_ASSENTO. O teste fica inteiro, com o
+// Skip a mais, porque é a regressão que a fase 8 precisa reativar — e ele é o
+// teste que mais valor tem sobre o outbox, por rodar reserva e cancelamento em
+// disputa por segundos seguidos.
 func TestT4ReservarECancelarEmLacoDevolveTudo(t *testing.T) {
+	t.Skip("o laço depende do cancelamento de reserva, que chega na fase 8 (D39)")
+
 	endereco := subirServidor(t)
 	duracao := duracaoT4(t)
 
@@ -665,7 +674,14 @@ func TestT4ReservarECancelarEmLacoDevolveTudo(t *testing.T) {
 // O prazo de uma hora do passageiro não entra aqui: ele não se aplica à
 // cascata (D13). Se aplicasse, cancelar uma carona a menos de uma hora da
 // partida travaria as reservas dos passageiros de um veículo que não vai sair.
+//
+// **Suspenso na fase 5.** A cascata atravessa empresas e depende do outbox da
+// D39 (fase 8): cancelar a carona só nas pernas locais deixaria as outras
+// vendidas, contra a D29. Até lá, CANCELAR_CARONA de carona com reserva é
+// recusado, e é o TestCancelarCarona_Provisorio que verifica a recusa.
 func TestT5CancelamentoEmCascataSobConcorrencia(t *testing.T) {
+	t.Skip("cascata entre empresas chega na fase 8 (D29, D39)")
+
 	endereco := subirServidor(t)
 
 	const assentos, antes, durante = 20, 8, 12
@@ -971,8 +987,24 @@ func TestT7RajadaDeMensagensMalformadas(t *testing.T) {
 //
 // Cada passageiro abre duas conexões e dispara, no mesmo instante, duas
 // reservas de itinerários que partem à mesma hora em veículos diferentes.
-// Exatamente uma pode passar; a outra tem que receber CONFLITO_HORARIO — e não
-// SEM_ASSENTO, que seria a resposta errada pelo motivo certo.
+// Exatamente uma pode passar.
+//
+// **No P2 a recusa pode vir por dois caminhos**, e é o próprio documento que o
+// diz: este cenário é o TR5 da seção 11.3 ("Mesmo passageiro, dois RESERVAR
+// simultâneos → um recebe RESERVA_EM_ANDAMENTO; a sobreposição nunca é furada.
+// É o T8 do P1").
+//
+//   - RESERVA_EM_ANDAMENTO, quando a segunda tentativa chega enquanto a
+//     primeira ainda está votando (D35). É o caso comum aqui, porque as duas
+//     partem no mesmo instante;
+//   - CONFLITO_HORARIO, quando a primeira já confirmou e a segunda valida a
+//     sobreposição contra ela (D14).
+//
+// Os dois são respostas certas, e a D35 existe justamente porque o segundo
+// caminho deixou de ser suficiente: entre a votação e a decisão passa-se tempo
+// de rede, e sem a marca as duas tentativas poderiam passar na checagem de
+// sobreposição. O que o teste não pode aceitar é SEM_ASSENTO — resposta errada
+// pelo motivo certo — nem duas confirmações.
 //
 // Os dois veículos são publicados com folga de assentos justamente para isso:
 // com sessenta lugares para vinte e cinco passageiros, o único motivo possível
@@ -1016,9 +1048,10 @@ func TestT8ReservasSobrepostasDoMesmoPassageiro(t *testing.T) {
 		if oks != 1 {
 			t.Errorf("%s: %d confirmações, want 1 (códigos: %v)", p.usuario, oks, porCodigo)
 		}
-		if porCodigo[protocolo.CodigoConflitoHorario] != 1 {
-			t.Errorf("%s: CONFLITO_HORARIO = %d, want 1 (códigos: %v)",
-				p.usuario, porCodigo[protocolo.CodigoConflitoHorario], porCodigo)
+		recusas := porCodigo[protocolo.CodigoConflitoHorario] + porCodigo[protocolo.CodigoReservaEmAndamento]
+		if recusas != 1 {
+			t.Errorf("%s: recusas por sobreposição = %d, want 1 (códigos: %v)",
+				p.usuario, recusas, porCodigo)
 		}
 	}
 

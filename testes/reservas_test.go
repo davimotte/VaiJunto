@@ -114,6 +114,43 @@ func TestSessaoCompletaDoPassageiro(t *testing.T) {
 		t.Errorf("trecho sem nome de motorista: %+v", guardada.Trechos[0])
 	}
 
+	// Cada perna informa a empresa dona (seção 5.6), que vem da cópia guardada
+	// na reserva (D42) e não de uma consulta ao dono — é o que fará a listagem
+	// funcionar com um par fora do ar.
+	for i, trecho := range guardada.Trechos {
+		if trecho.Empresa == "" {
+			t.Errorf("trecho %d sem empresa: %+v", i, trecho)
+		}
+	}
+
+	// O cancelamento do passageiro fecharia a sessão aqui, mas na fase 5 ele
+	// responde recusa provisória: a devolução dos assentos atravessa empresas e
+	// depende do outbox da D39 (fase 8). O resto da sessão — login, busca,
+	// reserva e listagem — é o que esta fase precisa provar de ponta a ponta.
+	recusa := c.enviar(protocolo.TipoCancelarReserva,
+		protocolo.CancelarReservaRequisicao{ReservaID: confirmada.ReservaID})
+	if recusa.Codigo != protocolo.CodigoOperacaoIndisponivel {
+		t.Fatalf("CANCELAR_RESERVA: codigo = %q, want %s (mensagem: %q)",
+			recusa.Codigo, protocolo.CodigoOperacaoIndisponivel, recusa.Mensagem)
+	}
+}
+
+// TestSessaoCompletaDoPassageiro_Cancelamento é a parte da sessão que a fase 8
+// reativa: cancelar a reserva, vê-la sair da listagem padrão e reaparecer
+// inativa com incluir_canceladas.
+// Está escrito por inteiro e só com o Skip a mais: a fase 8 tira a linha do
+// Skip e o teste roda. Deixá-lo pronto é o que impede que a regressão se perca
+// no caminho.
+func TestSessaoCompletaDoPassageiro_Cancelamento(t *testing.T) {
+	t.Skip("cancelamento de reserva chega na fase 8 (D39)")
+
+	endereco := subirServidor(t)
+	c := conectar(t, endereco)
+	c.entrar("maria", "abcd")
+
+	var confirmada protocolo.ReservarResposta
+	c.exigirOK(protocolo.TipoReservar, reserva(trecho("vaijunto:car-1", 0, 1)), &confirmada)
+
 	var cancelada protocolo.CancelarReservaResposta
 	c.exigirOK(protocolo.TipoCancelarReserva,
 		protocolo.CancelarReservaRequisicao{ReservaID: confirmada.ReservaID}, &cancelada)
@@ -123,6 +160,7 @@ func TestSessaoCompletaDoPassageiro(t *testing.T) {
 
 	// Depois de cancelada, some da listagem padrão e reaparece inativa quando
 	// pedida com incluir_canceladas.
+	var listadas protocolo.ListarMinhasReservasResposta
 	c.exigirOK(protocolo.TipoListarMinhasReservas, protocolo.ListarMinhasReservasRequisicao{}, &listadas)
 	if len(listadas.Reservas) != 0 {
 		t.Errorf("reserva cancelada continua na listagem padrão: %+v", listadas.Reservas)
@@ -241,7 +279,63 @@ func TestPrazosDeCancelamentoSaoAssimetricos(t *testing.T) {
 		t.Errorf("partida no dados = %v, want %v", dados.Partida, partidaA)
 	}
 
-	// O do motorista, não: ele vai até a partida.
+	// O do motorista, não: o prazo dele vai até a partida, e ele ainda está
+	// dentro dele. O que o barra na fase 5 é outra coisa — a cascata entre
+	// empresas, que chega na fase 8 —, e a diferença entre os dois códigos é a
+	// própria prova da assimetria: o passageiro perdeu o prazo, o motorista
+	// não.
+	motorista := conectar(t, endereco)
+	motorista.entrar(dono.usuario, dono.senha)
+
+	cancelamento := motorista.enviar(protocolo.TipoCancelarCarona,
+		protocolo.CancelarCaronaRequisicao{CaronaID: primeira})
+	if cancelamento.Codigo != protocolo.CodigoOperacaoIndisponivel {
+		t.Fatalf("CANCELAR_CARONA: codigo = %q, want %s — o prazo do motorista não expirou (mensagem: %q)",
+			cancelamento.Codigo, protocolo.CodigoOperacaoIndisponivel, cancelamento.Mensagem)
+	}
+
+	// As duas recusas não mexeram em nada: a reserva segue ativa e os assentos,
+	// descontados nas duas caronas.
+	var listadas protocolo.ListarMinhasReservasResposta
+	passageiro.exigirOK(protocolo.TipoListarMinhasReservas, protocolo.ListarMinhasReservasRequisicao{}, &listadas)
+	if len(listadas.Reservas) != 1 {
+		t.Errorf("as recusas mexeram na reserva: maria tem %d ativa(s), want 1", len(listadas.Reservas))
+	}
+
+	caronas := observarCaronas(t, endereco)
+	if livres := caronas[segunda].livres[0]; livres != 1 {
+		t.Errorf("carona vizinha: livres = %d, want 1 — uma recusa devolveu assento", livres)
+	}
+	verificarInvariantes(t, endereco)
+}
+
+// TestCascataDoMotoristaIgnoraOPrazoDoPassageiro é a outra metade da
+// assimetria, que a fase 8 reativa: dentro do prazo do motorista, cancelar a
+// carona derruba a reserva do passageiro mesmo que ele já não pudesse mais
+// desistir, e devolve o assento da carona vizinha.
+//
+// Escrito por inteiro e só com o Skip a mais, como o
+// TestSessaoCompletaDoPassageiro_Cancelamento.
+func TestCascataDoMotoristaIgnoraOPrazoDoPassageiro(t *testing.T) {
+	t.Skip("cascata entre empresas chega na fase 8 (D29, D39)")
+
+	endereco := subirServidor(t)
+
+	partidaA := time.Now().In(time.FixedZone("-03:00", -3*60*60)).Add(30 * time.Minute).Truncate(time.Second)
+	partidaB := partidaA.Add(3 * time.Hour)
+
+	dono := credencial{"joao", "1234"}
+	primeira := publicarComo(t, endereco, dono, 2, []int{3000},
+		parada("Salvador", partidaA), parada("Feira de Santana", partidaA.Add(2*time.Hour)))
+	segunda := publicarComo(t, endereco, credencial{"carlos", "1234"}, 2, []int{4500},
+		parada("Feira de Santana", partidaB), parada("Jequié", partidaB.Add(3*time.Hour)))
+
+	passageiro := conectar(t, endereco)
+	passageiro.entrar("maria", "abcd")
+	var confirmada protocolo.ReservarResposta
+	passageiro.exigirOK(protocolo.TipoReservar,
+		reserva(trecho(primeira, 0, 1), trecho(segunda, 0, 1)), &confirmada)
+
 	motorista := conectar(t, endereco)
 	motorista.entrar(dono.usuario, dono.senha)
 
@@ -286,8 +380,16 @@ func TestRecusasDeReserva(t *testing.T) {
 		{"de ausente", map[string]any{"trechos": []any{map[string]any{"carona_id": "vaijunto:car-1", "ate": 1}}}, protocolo.CodigoCampoInvalido},
 		{"carona_id vazio", reserva(trecho("", 0, 1)), protocolo.CodigoCampoInvalido},
 		{"de igual a ate", reserva(trecho("vaijunto:car-1", 1, 1)), protocolo.CodigoCampoInvalido},
-		{"ate além da rota", reserva(trecho("vaijunto:car-1", 0, 3)), protocolo.CodigoCampoInvalido},
-		{"carona inexistente", reserva(trecho("car-99", 0, 1)), protocolo.CodigoCaronaNaoEncontrada},
+		// Índices fora da rota passam a ser ITINERARIO_INVALIDO, e não
+		// CAMPO_INVALIDO: quem descobre é o **dono** da carona ao avaliar o
+		// PREPARAR, porque só ele conhece a rota, e a seção 5.2 da API fixa
+		// esse motivo para "índices fora da rota ou de ≥ ate". O que a borda
+		// ainda recusa sozinha, sem transação, é a forma do pedido.
+		{"ate além da rota", reserva(trecho("vaijunto:car-1", 0, 3)), protocolo.CodigoItinerarioInvalido},
+		// Sem prefixo de empresa não há a quem pedir o assento (D27), e a
+		// recusa é da forma do pedido.
+		{"identificador sem empresa", reserva(trecho("car-99", 0, 1)), protocolo.CodigoCampoInvalido},
+		{"carona inexistente", reserva(trecho("vaijunto:car-99", 0, 1)), protocolo.CodigoCaronaNaoEncontrada},
 		{"mesma carona duas vezes", reserva(trecho("vaijunto:car-1", 0, 1), trecho("vaijunto:car-1", 1, 2)), protocolo.CodigoItinerarioInvalido},
 		{"não encadeia no espaço", reserva(trecho("vaijunto:car-1", 0, 1), trecho("vaijunto:car-2", 0, 1)), protocolo.CodigoItinerarioInvalido},
 		{"folga abaixo da margem", reserva(trecho("vaijunto:car-1", 0, 2), trecho("vaijunto:car-6", 0, 1)), protocolo.CodigoItinerarioInvalido},
@@ -331,10 +433,11 @@ func TestRecusasDeCancelamento(t *testing.T) {
 	pedro.exigirErro(protocolo.TipoCancelarReserva,
 		protocolo.CancelarReservaRequisicao{ReservaID: confirmada.ReservaID}, protocolo.CodigoNaoEDono)
 
-	maria.exigirOK(protocolo.TipoCancelarReserva,
-		protocolo.CancelarReservaRequisicao{ReservaID: confirmada.ReservaID}, nil)
+	// A dona e o prazo conferidos, o que resta é a recusa provisória da fase 5
+	// (D39 chega na fase 8). ReservaJaCancelada só é alcançável depois de um
+	// cancelamento de verdade, e por isso volta com ele.
 	maria.exigirErro(protocolo.TipoCancelarReserva,
-		protocolo.CancelarReservaRequisicao{ReservaID: confirmada.ReservaID}, protocolo.CodigoReservaJaCancelada)
+		protocolo.CancelarReservaRequisicao{ReservaID: confirmada.ReservaID}, protocolo.CodigoOperacaoIndisponivel)
 
 	joao := conectar(t, endereco)
 	joao.entrar("joao", "1234")
@@ -344,13 +447,21 @@ func TestRecusasDeCancelamento(t *testing.T) {
 		protocolo.CancelarCaronaRequisicao{CaronaID: doCarlos}, protocolo.CodigoNaoEDono)
 	joao.exigirErro(protocolo.TipoCancelarCarona, vazio, protocolo.CodigoCampoInvalido)
 
-	joao.exigirOK(protocolo.TipoCancelarCarona,
-		protocolo.CancelarCaronaRequisicao{CaronaID: doJoao}, nil)
+	// doJoao tem a reserva da maria, então o cancelamento é recusado. doCarlos
+	// não tem reserva nenhuma, e o caminho normal continua valendo — inclusive
+	// a recusa do segundo cancelamento e a da reserva em carona cancelada.
 	joao.exigirErro(protocolo.TipoCancelarCarona,
-		protocolo.CancelarCaronaRequisicao{CaronaID: doJoao}, protocolo.CodigoCaronaCancelada)
+		protocolo.CancelarCaronaRequisicao{CaronaID: doJoao}, protocolo.CodigoOperacaoIndisponivel)
 
-	// Reservar em carona cancelada reprova, mesmo com o assento devolvido.
-	pedro.exigirErro(protocolo.TipoReservar, reserva(trecho(doJoao, 0, 1)), protocolo.CodigoCaronaCancelada)
+	carlos := conectar(t, endereco)
+	carlos.entrar("carlos", "1234")
+	carlos.exigirOK(protocolo.TipoCancelarCarona,
+		protocolo.CancelarCaronaRequisicao{CaronaID: doCarlos}, nil)
+	carlos.exigirErro(protocolo.TipoCancelarCarona,
+		protocolo.CancelarCaronaRequisicao{CaronaID: doCarlos}, protocolo.CodigoCaronaCancelada)
+
+	// Reservar em carona cancelada reprova.
+	pedro.exigirErro(protocolo.TipoReservar, reserva(trecho(doCarlos, 0, 1)), protocolo.CodigoCaronaCancelada)
 }
 
 // TestPerfisDasNovasOperacoes confere a tabela da seção 5: as três operações de

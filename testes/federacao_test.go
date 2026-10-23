@@ -56,6 +56,13 @@ type empresaREST struct {
 // Os endereços só existem depois do Escutar (porta 0), e por isso as listas de
 // pares são preenchidas depois — antes de qualquer Servir, de modo que nenhuma
 // goroutine leia o mapa enquanto ele é escrito.
+//
+// **Não** é o subirConsorcioP2 de ajuda_test.go, e a diferença é deliberada:
+// este consórcio sobe sem Estado nenhum, porque os testes deste arquivo
+// exercitam só a pilha REST — cabeçalhos, relógio e detecção de par fora do ar.
+// Montar domínio, participante e coordenador aqui faria uma falha de
+// enquadramento HTTP aparecer como falha do 2PC. Quem precisa das peças de
+// cima usa o helper compartilhado.
 func subirConsorcio(t *testing.T, nomes ...string) map[string]*empresaREST {
 	t.Helper()
 
