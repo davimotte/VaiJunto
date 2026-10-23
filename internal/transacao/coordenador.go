@@ -219,6 +219,19 @@ func (c *Coordenador) tentar(ctx context.Context, txID string, carimbo dominio.C
 	// instáveis.
 	sort.Strings(participantes)
 
+	// A transação passa a existir na memória do coordenador (seção 4.6), e é
+	// isto que faz a consulta da seção 4.6 da API responder EM_ANDAMENTO
+	// enquanto não há decisão. A marca sai em qualquer saída daqui para baixo,
+	// e sempre **depois** do ponto de commit: assim nunca existe um instante em
+	// que a transação não esteja nem em votação nem decidida, que é o instante
+	// em que um participante em dúvida ouviria ABORTADA sobre algo confirmado.
+	//
+	// Não sobrevive a um reboot, de propósito: é exatamente o que o abort
+	// presumido assume (D23) e o que a seção 9.3 registra como "transação em
+	// andamento: não existe, estava só na memória".
+	c.estado.MarcarTransacaoEmVotacao(txID)
+	defer c.estado.LiberarTransacaoEmVotacao(txID)
+
 	// Passo 5 — votação.
 	votos, falta := c.votar(ctx, txID, carimbo, passageiro, participantes, porEmpresa)
 
@@ -387,6 +400,28 @@ func (c *Coordenador) preparar(ctx context.Context, empresa string, pedido domin
 		return c.participante.Preparar(pedido)
 	}
 	return c.rede.Preparar(ctx, empresa, pedido)
+}
+
+// Recuperar é a segunda tarefa da seção 9.3: "reserva confirmada e não
+// concluída → retoma a fase 2". O boot a chama depois do replay e depois de
+// abrir as portas (seção 9.2, passo 5). Devolve quantas reservas retomou.
+//
+// É o passo 4 do argumento de atomicidade da seção 7.4 — "decisão gravada
+// sempre chega" — estendido à queda do próprio coordenador. Sem isto, um
+// coordenador que grava DECISAO_CONFIRMAR e cai antes de mandar o CONFIRMAR
+// deixaria os participantes em PREPARADO sem que ninguém mais fosse levar a
+// decisão a eles.
+//
+// Reaproveita confirmarTodos, que é o mesmo laço da fase 2 normal: a retomada
+// não é um caminho novo, é o caminho de sempre recomeçado. Repetir um
+// CONFIRMAR para quem já confirmou é idempotente (D28, regra 6), e quem já
+// concluiu nem entra na lista.
+func (c *Coordenador) Recuperar() int {
+	pendentes := c.estado.ReservasNaoConcluidas()
+	for _, r := range pendentes {
+		go c.confirmarTodos(r.ID, r.Participantes)
+	}
+	return len(pendentes)
 }
 
 // confirmarTodos é a fase 2 (passo 9): CONFIRMAR a todos os participantes,

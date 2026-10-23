@@ -30,6 +30,8 @@ func main() {
 	prazoVotacao := flag.Duration("prazo-votacao", 5*time.Second, "prazo da votação do coordenador, incluindo as esperas do wait-die (D41); vale para o leque inteiro de PREPARAR")
 	prazoAguarde := flag.Duration("prazo-aguarde", 200*time.Millisecond, "intervalo entre repetições do PREPARAR após um voto AGUARDE (D41)")
 	prazoFase2 := flag.Duration("prazo-fase2", 2*time.Second, "intervalo entre repetições de CONFIRMAR e de ABORTAR na fase 2 do 2PC (D41)")
+	prazoDuvida := flag.Duration("prazo-duvida", 10*time.Second, "tempo em PREPARADO antes de o participante consultar o coordenador (D41, seção 9.4)")
+	prazoConsulta := flag.Duration("prazo-consulta", 3*time.Second, "intervalo entre as consultas de um participante em dúvida (D41, seção 9.4)")
 	auditoria := flag.Bool("auditoria", false, "expõe GET /auditoria com o estado completo desta empresa (seção 11.2); só para os testes, desligada por padrão")
 	flag.Parse()
 
@@ -142,6 +144,18 @@ func main() {
 		PrazoFase2:   *prazoFase2,
 	})
 
+	// O terminador é o lado em dúvida do 2PC (D38, seção 9.4): o que devolve um
+	// assento cujo coordenador nunca mandou a decisão. Recebe a mesma rede do
+	// coordenador, porque a consulta é uma chamada a par como as outras.
+	terminador := transacao.NovoTerminador(transacao.ConfigTerminador{
+		Empresa:       *empresa,
+		Estado:        estado,
+		Rede:          cliente,
+		Registro:      cfgREST.Registro,
+		PrazoDuvida:   *prazoDuvida,
+		PrazoConsulta: *prazoConsulta,
+	})
+
 	// As duas portas são abertas antes de qualquer uma ser atendida: porta
 	// ocupada vira falha de boot com mensagem clara, em vez de aparecer depois
 	// numa goroutine já solta, com o servidor meio no ar.
@@ -166,6 +180,19 @@ func main() {
 	}
 	log.Printf("servidor: empresa %s atendendo clientes em %s e pares em %s (pares: %d, registro de operações: %t)",
 		*empresa, s.Endereco(), rest.Endereco(), len(pares), *logOperacoes)
+
+	// Passo 5 da seção 9.2: abrir as portas **e** disparar as tarefas de
+	// recuperação da seção 9.3. Nesta ordem, e não antes das portas: as duas
+	// tarefas falam com os pares, e um par que nos responda precisa nos
+	// encontrar no ar — se perguntarmos antes de atender, o outro lado
+	// perguntaria de volta e não acharia ninguém.
+	//
+	// Todo boot passa por aqui, porque todo boot é uma recuperação (seção 9.1):
+	// num servidor que parou limpo as duas listas vêm vazias e nada acontece.
+	retomadas := coordenador.Recuperar()
+	emDuvida := terminador.Recuperar()
+	log.Printf("servidor: recuperação: %d reserva(s) com a fase 2 a retomar, %d participação(ões) em PREPARADO com o prazo de dúvida armado",
+		retomadas, emDuvida)
 
 	// A porta dos pares roda em sua própria goroutine, e a dos clientes
 	// continua na principal. Se a porta dos pares cai, o processo cai: um
