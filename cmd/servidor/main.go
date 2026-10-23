@@ -27,6 +27,10 @@ func main() {
 	logOperacoes := flag.Bool("log-operacoes", true, "registra no terminal cada conexão e cada operação atendida, dos clientes e dos pares; desligue ao medir carga")
 	prazoChamada := flag.Duration("prazo-chamada", 2*time.Second, "prazo de cada chamada HTTP a um par (D41)")
 	prazoBusca := flag.Duration("prazo-busca", 2*time.Second, "prazo único da rodada de pares de uma busca federada (D41); vale para o leque inteiro, não por par")
+	prazoVotacao := flag.Duration("prazo-votacao", 5*time.Second, "prazo da votação do coordenador, incluindo as esperas do wait-die (D41); vale para o leque inteiro de PREPARAR")
+	prazoAguarde := flag.Duration("prazo-aguarde", 200*time.Millisecond, "intervalo entre repetições do PREPARAR após um voto AGUARDE (D41)")
+	prazoFase2 := flag.Duration("prazo-fase2", 2*time.Second, "intervalo entre repetições de CONFIRMAR e de ABORTAR na fase 2 do 2PC (D41)")
+	auditoria := flag.Bool("auditoria", false, "expõe GET /auditoria com o estado completo desta empresa (seção 11.2); só para os testes, desligada por padrão")
 	flag.Parse()
 
 	// Sem default de propósito: uma empresa que sobe com o nome de outra
@@ -91,6 +95,12 @@ func main() {
 	// cliente da federação e a busca de uma empresa compartilham
 	// obrigatoriamente o mesmo relógio e a mesma lista de pares. Dois relógios
 	// no mesmo processo quebrariam a ordem total da seção 8.1.
+	// O participante é montado antes da Config porque o coordenador também
+	// precisa dele: a mesma instância atende os pares pela borda REST e a
+	// chamada local do coordenador quando esta empresa é dona de algum trecho
+	// (D21; seção 7.1, passo 5).
+	participante := transacao.NovoParticipante(estado)
+
 	cfgREST := federacao.Config{
 		Empresa: *empresa,
 		Pares:   pares,
@@ -100,18 +110,37 @@ func main() {
 		// ele que passam tanto as chamadas dos pares quanto, a partir da fase
 		// 5, o coordenador local quando esta empresa também é dona de um
 		// trecho (seção 7.1, passo 5).
-		Participante: transacao.NovoParticipante(estado),
+		Participante: participante,
 		PrazoChamada: *prazoChamada,
 		PrazoBusca:   *prazoBusca,
+		Auditoria:    *auditoria,
 	}
 	if *logOperacoes {
 		cfgREST.Registro = federacao.NovoRegistro(os.Stderr, *empresa)
 	}
 
-	// O cliente dos pares ganha aqui o seu primeiro chamador de verdade: a
-	// busca federada (D26). Até a fase 3A ele existia e era testado, mas
-	// --prazo-chamada não decidia nada em execução.
-	busca := federacao.NovaBusca(cfgREST, federacao.NovoCliente(cfgREST))
+	// O cliente dos pares é construído uma vez e compartilhado pelos seus dois
+	// chamadores: a busca federada (D26) e o coordenador do 2PC (D21). Dois
+	// clientes funcionariam, mas teriam dois http.Client e, com eles, dois
+	// pools de conexão para os mesmos pares.
+	cliente := federacao.NovoCliente(cfgREST)
+	busca := federacao.NovaBusca(cfgREST, cliente)
+
+	// O coordenador é o lado que decide do 2PC (seção 7.1). Recebe a rede para
+	// falar com os pares e o votante local para a própria empresa, que é
+	// chamada direto, sem HTTP contra si mesma.
+	coordenador := transacao.NovoCoordenador(transacao.ConfigCoordenador{
+		Empresa:      *empresa,
+		Estado:       estado,
+		Relogio:      relogio,
+		Rede:         cliente,
+		Participante: federacao.NovoVotanteLocal(participante),
+		Consorcio:    empresasDoConsorcio(*empresa, pares),
+		Registro:     cfgREST.Registro,
+		PrazoVotacao: *prazoVotacao,
+		PrazoAguarde: *prazoAguarde,
+		PrazoFase2:   *prazoFase2,
+	})
 
 	// As duas portas são abertas antes de qualquer uma ser atendida: porta
 	// ocupada vira falha de boot com mensagem clara, em vez de aparecer depois
@@ -121,7 +150,7 @@ func main() {
 		log.Fatalf("servidor: não foi possível escutar em %s (porta dos pares): %v", *enderecoPares, err)
 	}
 
-	s, err := servidor.Escutar(*endereco, estado, busca)
+	s, err := servidor.Escutar(*endereco, estado, busca, coordenador)
 	if err != nil {
 		log.Fatalf("servidor: não foi possível escutar em %s: %v", *endereco, err)
 	}
@@ -152,4 +181,18 @@ func main() {
 	if err := s.Aceitar(); err != nil {
 		log.Fatalf("servidor: loop de aceitação encerrado: %v", err)
 	}
+}
+
+// empresasDoConsorcio junta a própria empresa às dos pares (D20).
+//
+// O coordenador usa a lista para recusar, no passo 1, uma carona cujo prefixo
+// não seja de ninguém do consórcio — antes de criar transação e antes de falar
+// com qualquer um.
+func empresasDoConsorcio(propria string, pares map[string]string) []string {
+	lista := make([]string, 0, len(pares)+1)
+	lista = append(lista, propria)
+	for empresa := range pares {
+		lista = append(lista, empresa)
+	}
+	return lista
 }

@@ -38,7 +38,7 @@ func rotear(req protocolo.Requisicao, n *nucleo, s *sessao) protocolo.Resposta {
 	case protocolo.TipoBuscarItinerarios:
 		return tratarBuscarItinerarios(req, n, s)
 	case protocolo.TipoReservar:
-		return tratarReservar(req, n.estado, s)
+		return tratarReservar(req, n, s)
 	case protocolo.TipoListarMinhasReservas:
 		return tratarListarMinhasReservas(req, n.estado, s)
 	case protocolo.TipoCancelarReserva:

@@ -1,6 +1,7 @@
 package servidor
 
 import (
+	"context"
 	"encoding/json"
 	"strconv"
 	"time"
@@ -35,15 +36,20 @@ type itemReservaPedido struct {
 }
 
 // tratarReservar confirma um itinerário de forma atômica (PROTOCOL.md, seção
-// 5.9).
+// 5.9), delegando ao coordenador do 2PC (D21; PROJETO_P2.md, seção 7.1).
 //
 // O cliente devolve os mesmos campos carona_id, de e ate que recebeu da busca,
 // sem que nada disso apareça na tela do passageiro (D15). Nada é conferido
 // contra o resultado daquela busca, e é assim de propósito: a busca não
-// reservou nem prometeu nada (D07), então o único estado que conta é o que o
-// domínio encontrar sob o lock, agora. Uma opção que existia na consulta e
-// sumiu no meio do caminho vira SEM_ASSENTO, que é a resposta honesta.
-func tratarReservar(req protocolo.Requisicao, estado *dominio.Estado, s *sessao) protocolo.Resposta {
+// reservou nem prometeu nada (D26), então o que conta é o que cada **dono**
+// encontrar sob o seu lock, agora, ao avaliar o PREPARAR. Uma opção que existia
+// na consulta e sumiu no meio do caminho vira SEM_ASSENTO, que é a resposta
+// honesta.
+//
+// O que mudou do P1: a reserva local da D07 não existe mais. As caronas podem
+// ser de três empresas, e nenhum mutex abrange as três — a atomicidade passa a
+// vir do two-phase commit, e esta função só traduz pedido e resposta.
+func tratarReservar(req protocolo.Requisicao, n *nucleo, s *sessao) protocolo.Resposta {
 	var pedido reservarPedido
 	if err := json.Unmarshal(req.Dados, &pedido); err != nil {
 		return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "Algum campo veio com o tipo errado.")
@@ -69,9 +75,22 @@ func tratarReservar(req protocolo.Requisicao, estado *dominio.Estado, s *sessao)
 		})
 	}
 
-	// O relógio é lido na borda e entregue ao domínio, como em
-	// PUBLICAR_CARONA: as regras não consultam time.Now() por conta própria.
-	reserva, itinerario, err := estado.Reservar(s.usuario.Usuario, itens, time.Now().In(dominio.FusoDasCidades()))
+	// O passageiro atravessa a transação como referência opaca mais nome de
+	// exibição, e nada além disso (D32, I-P2-4). A referência leva o prefixo da
+	// empresa porque "maria" só é única **dentro** de uma empresa: vaijunto:maria
+	// e rotacapixaba:maria são pessoas diferentes (seção 12.1).
+	//
+	// O login cru também segue, separado, porque é a chave das reservas e da
+	// marca da D35 aqui dentro: para a própria empresa, o passageiro é o
+	// usuário local, e não a referência global.
+	passageiro := dominio.Passageiro{
+		Ref:  n.estado.Empresa() + ":" + s.usuario.Usuario,
+		Nome: s.usuario.Nome,
+	}
+
+	// O prazo de votação é do coordenador (D41), não da conexão: um ctx sem
+	// prazo aqui deixa a camada 5 decidir, que é quem conhece os prazos.
+	reserva, itinerario, err := n.coordenador.Reservar(context.Background(), passageiro, s.usuario.Usuario, itens)
 	if err != nil {
 		return respostaDeErroDeDominio(req.ID, err)
 	}
@@ -104,6 +123,7 @@ func tratarListarMinhasReservas(req protocolo.Requisicao, estado *dominio.Estado
 		for _, p := range r.Itinerario.Pernas {
 			trechos = append(trechos, protocolo.TrechoReserva{
 				CaronaID:      p.CaronaID,
+				Empresa:       p.Empresa,
 				Motorista:     p.Motorista,
 				Origem:        p.Origem,
 				Destino:       p.Destino,

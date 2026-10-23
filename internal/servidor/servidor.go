@@ -16,6 +16,7 @@ import (
 	"vaijunto/internal/dominio"
 	"vaijunto/internal/federacao"
 	"vaijunto/internal/protocolo"
+	"vaijunto/internal/transacao"
 )
 
 // prazoEscrita limita a entrega de cada resposta ao cliente (D17).
@@ -46,8 +47,9 @@ type BuscaFederada interface {
 // fases: o coordenador do 2PC entra aqui na fase 5, sem mexer de novo na
 // assinatura de atenderConexao nem de rotear.
 type nucleo struct {
-	estado *dominio.Estado
-	busca  BuscaFederada
+	estado      *dominio.Estado
+	busca       BuscaFederada
+	coordenador *transacao.Coordenador
 }
 
 // Servidor aceita conexões TCP e despacha cada uma para sua própria
@@ -62,18 +64,23 @@ type Servidor struct {
 }
 
 // Escutar abre o listener TCP no endereço informado (ex.: "0.0.0.0:9000") e o
-// associa ao estado de domínio e à busca federada que as conexões vão
-// compartilhar.
+// associa ao estado de domínio, à busca federada e ao coordenador do 2PC que as
+// conexões vão compartilhar.
 //
-// A busca é um parâmetro, e não algo montado aqui dentro, porque quem a
-// constrói é o boot: ela precisa da mesma Config da pilha REST, para que o
-// relógio de Lamport e a lista de pares sejam os mesmos das duas pontas.
-func Escutar(endereco string, estado *dominio.Estado, busca BuscaFederada) (*Servidor, error) {
+// A busca e o coordenador são parâmetros, e não algo montado aqui dentro,
+// porque quem os constrói é o boot: os dois precisam da mesma Config da pilha
+// REST, para que o relógio de Lamport e a lista de pares sejam os mesmos das
+// duas pontas.
+//
+// O coordenador é obrigatório, e não opcional como o registro de operações:
+// sem ele o RESERVAR não tem como funcionar, e é melhor o compilador exigir um
+// de cada chamador do que descobrir isso com um pânico na primeira reserva.
+func Escutar(endereco string, estado *dominio.Estado, busca BuscaFederada, coordenador *transacao.Coordenador) (*Servidor, error) {
 	l, err := net.Listen("tcp", endereco)
 	if err != nil {
 		return nil, err
 	}
-	return &Servidor{listener: l, nucleo: &nucleo{estado: estado, busca: busca}}, nil
+	return &Servidor{listener: l, nucleo: &nucleo{estado: estado, busca: busca, coordenador: coordenador}}, nil
 }
 
 // Endereco devolve o endereço em que o servidor está escutando.

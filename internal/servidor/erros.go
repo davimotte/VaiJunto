@@ -53,7 +53,11 @@ var traducaoErros = map[error]erroTraduzido{
 	// tabela só para a cobertura da seção 5.3 e, se um dia vazarem, virarem
 	// ERRO_INTERNO em vez de um código inventado.
 	dominio.ErrEmpresaInvalida: {protocolo.CodigoErroInterno, "Falha interna de configuração da empresa."},
-	dominio.ErrIDSemEmpresa:    {protocolo.CodigoErroInterno, "Falha interna: identificador sem empresa."},
+	// Até a fase 4 nenhuma entrada de cliente alcançava este sentinela, e ele
+	// era falha interna. Com o coordenador, o carona_id do RESERVAR passa pelo
+	// ValidarItens, e um identificador sem prefixo de empresa é exatamente um
+	// campo malformado vindo do cliente (D27).
+	dominio.ErrIDSemEmpresa: {protocolo.CodigoCampoInvalido, "O carona_id precisa vir com o prefixo da empresa, como \"vaijunto:car-1\"."},
 	// D22: o registro não chegou ao disco e a operação não foi aplicada. Para o
 	// cliente é falha do servidor, e ele pode tentar de novo.
 	dominio.ErrFalhaNoLog: {protocolo.CodigoErroInterno, "Falha interna ao gravar o registro da operação; nada foi alterado."},
@@ -67,6 +71,14 @@ var traducaoErros = map[error]erroTraduzido{
 	dominio.ErrItemDeOutraEmpresa: {protocolo.CodigoErroInterno, "Falha interna: trecho de carona de outra empresa."},
 	dominio.ErrTransacaoAbortada:  {protocolo.CodigoErroInterno, "Falha interna: transação já abortada."},
 	dominio.ErrViolacaoProtocolo:  {protocolo.CodigoErroInterno, "Falha interna: violação de protocolo entre servidores."},
+	// Os erros que o coordenador produz, e que são respostas legítimas ao
+	// passageiro (seção 5.6 do PROJETO_P2.md).
+	dominio.ErrReservaEmAndamento: {protocolo.CodigoReservaEmAndamento, "Você já tem uma reserva em andamento; aguarde o resultado dela."},
+	// D30: algum dono não respondeu no prazo de votação. Nenhum assento fica
+	// preso — o coordenador abortou a transação (D23).
+	dominio.ErrEmpresaIndisponivel: {protocolo.CodigoEmpresaIndisponivel, "Uma das empresas do itinerário não respondeu; nenhum assento foi reservado."},
+	// Provisório, da fase 5 à 7 (D39 chega na fase 8).
+	dominio.ErrOperacaoIndisponivel: {protocolo.CodigoOperacaoIndisponivel, "Operação ainda não disponível nesta versão."},
 }
 
 // respostaDeErroDeDominio monta a resposta de erro correspondente ao erro

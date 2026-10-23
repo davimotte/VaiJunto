@@ -318,7 +318,8 @@ func TestAceitar_FalhaTransitoriaNaoEncerra(t *testing.T) {
 // um listener real, Fechar ainda encerra o laço, em vez de fazê-lo tentar de
 // novo para sempre.
 func TestAceitar_RetornaQuandoOListenerFecha(t *testing.T) {
-	s, err := Escutar("127.0.0.1:0", dominio.NovoEstado("vaijunto"), buscaVazia{})
+	estado := dominio.NovoEstado("vaijunto")
+	s, err := Escutar("127.0.0.1:0", estado, buscaVazia{}, coordenadorDeTeste(estado))
 	if err != nil {
 		t.Fatalf("escutar: %v", err)
 	}

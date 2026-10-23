@@ -47,6 +47,10 @@ func TestTraducaoUsaCodigosDoProtocolo(t *testing.T) {
 		protocolo.CodigoConflitoHorario: true, protocolo.CodigoReservaNaoEncontrada: true,
 		protocolo.CodigoReservaJaCancelada: true, protocolo.CodigoPrazoCancelamentoExpirado: true,
 		protocolo.CodigoErroInterno: true,
+		// Códigos do P2 (seção 5.6 do PROJETO_P2.md), documentados na seção 6.
+		protocolo.CodigoReservaEmAndamento: true, protocolo.CodigoEmpresaIndisponivel: true,
+		// Provisório, da fase 5 à 7.
+		protocolo.CodigoOperacaoIndisponivel: true,
 	}
 	for sentinela, traducao := range traducaoErros {
 		if !conhecidos[traducao.Codigo] {
