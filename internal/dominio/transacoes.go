@@ -39,6 +39,23 @@ const (
 	SituacaoCancelado  Situacao = "CANCELADO"
 )
 
+// Decisao é o que o **coordenador** responde quando é consultado sobre uma
+// transação (seção 9.4; seções 3.6 e 4.6 do API_CONSORCIO.md).
+//
+// Mora aqui, ao lado de Situacao, pelo mesmo motivo que ela: os valores são os
+// que trafegam na API, e não há tradução na borda. A diferença entre as duas é
+// de quem fala — Situacao é a visão do dono dos assentos sobre a sua
+// participação, Decisao é a visão do coordenador sobre o destino da transação
+// inteira. Um servidor que seja os dois ao mesmo tempo responde pelo papel que
+// o prefixo do txID lhe dá (seção 4.6 da API).
+type Decisao string
+
+const (
+	DecisaoConfirmada  Decisao = "CONFIRMADA"
+	DecisaoEmAndamento Decisao = "EM_ANDAMENTO"
+	DecisaoAbortada    Decisao = "ABORTADA"
+)
+
 // Carimbo é a prioridade de uma transação na disputa por assentos (D24,
 // seção 8.1).
 //
@@ -317,6 +334,131 @@ func abortar(e *Estado, txID string) (Situacao, error) {
 	default: // SituacaoConfirmado, SituacaoCancelado
 		return "", fmt.Errorf("%w: ABORTAR de transação em %s: %q", ErrViolacaoProtocolo, pt.Situacao, txID)
 	}
+}
+
+// decisaoDaTransacao responde a consulta pelo lado do **coordenador**
+// (seção 9.4; tabela da seção 4.6 da API).
+//
+// **Não grava nada**, e é esse o conteúdo do abort presumido (D23): transação
+// sem decisão no log e sem votação na memória já está abortada, então gravar o
+// abort seria gravar o padrão. Como a função não escreve, ela também não pode
+// falhar — daí não devolver erro.
+//
+// Reserva inativa continua respondendo CONFIRMADA: a pergunta é sobre a
+// **decisão** da transação, e um cancelamento posterior não a desfaz. O
+// cancelamento chega ao participante pelo recurso próprio (seção 4.7 da API).
+//
+// A ordem dos dois testes importa pouco, porque os dois mapas são lidos sob o
+// mesmo lock e não há instante em que a transação esteja fora dos dois depois
+// de confirmada. A reserva vem primeiro só porque é a resposta definitiva: a
+// marca de votação sai logo depois do commit, e responder EM_ANDAMENTO para
+// algo já gravado faria o perguntador esperar mais um prazo à toa.
+func decisaoDaTransacao(e *Estado, txID string) Decisao {
+	if _, confirmada := e.reservas[txID]; confirmada {
+		return DecisaoConfirmada
+	}
+	if e.transacoesEmVotacao[txID] {
+		return DecisaoEmAndamento
+	}
+	return DecisaoAbortada
+}
+
+// consultarParticipacao responde a consulta pelo lado do **participante**
+// (seção 9.4; tabela da seção 4.6 da API). O segundo retorno é falso quando a
+// transação é desconhecida, caso em que o veto já foi gravado.
+//
+// O veto (D38) sai de abortar, que é o único lugar do programa que o escreve:
+// uma participação ABORTADO sem itens, gravada **antes** de responder. É ela
+// que torna a terminação segura — um PREPARAR que chegue atrasado depois disso
+// recebe NÃO, o coordenador nunca obtém unanimidade, e quem perguntou pode
+// abortar sem risco de contradizer uma decisão de confirmar.
+//
+// O bool existe porque DESCONHECIDA **não** é um valor de Situacao: ela é
+// resposta de protocolo para uma transação que este servidor não guarda, e não
+// um estado guardado (seção 3.6 da API). Inventá-la como constante de Situacao
+// criaria uma situação que nenhuma máquina de estados da seção 7.3 produz.
+func consultarParticipacao(e *Estado, txID string) (Situacao, bool, error) {
+	if pt, conhecida := e.participacoes[txID]; conhecida {
+		return pt.Situacao, true, nil
+	}
+	if _, err := abortar(e, txID); err != nil {
+		return "", false, err
+	}
+	return "", false, nil
+}
+
+// participacoesEmDuvida devolve as participações em PREPARADO cujo prazo de
+// dúvida já venceu (D41; seção 9.4), isto é, as que precisam da terminação
+// cooperativa.
+//
+// O filtro é feito aqui dentro, e não por quem chama, porque o varredor da
+// camada 5 roda a cada repetição da consulta: copiar todas as participações a
+// cada tique para descartar quase todas seria trabalho sob o lock sem motivo.
+//
+// A comparação usa a aritmética monotônica de time.Time. PreparadaEm vem de um
+// time.Now() cru, sem In() (participante.go), justamente para preservar a
+// leitura monotônica: assim o prazo é imune a ajuste do relógio de parede, que
+// poderia tanto vencer a dúvida cedo demais quanto nunca.
+//
+// Participação com PreparadaEm zerada não entra: é a que o replay acabou de
+// recriar e que armarPrazosDeDuvida ainda não armou (seção 4.4).
+func participacoesEmDuvida(e *Estado, agora time.Time, prazo time.Duration) []Participacao {
+	var lista []Participacao
+	for _, pt := range e.participacoes {
+		if pt.Situacao != SituacaoPreparado || pt.PreparadaEm.IsZero() {
+			continue
+		}
+		if pt.PreparadaEm.Add(prazo).After(agora) {
+			continue
+		}
+		lista = append(lista, pt.copia())
+	}
+	sort.Slice(lista, func(i, j int) bool { return lista[i].TxID < lista[j].TxID })
+	return lista
+}
+
+// armarPrazosDeDuvida é a primeira tarefa de recuperação da seção 9.3:
+// "participação em PREPARADO → arma o prazo de dúvida". Devolve quantas armou,
+// para a linha de registro do boot.
+//
+// É preciso porque PreparadaEm não vai ao log (seção 4.4): o instante é local e
+// monotônico, e o valor de antes da queda não significa nada no processo novo.
+// O prazo recomeça no boot, e isso é conservador — espera-se um prazo de dúvida
+// inteiro antes de perguntar, mesmo que a participação seja antiga.
+//
+// Não grava nada e não pode falhar: PreparadaEm é memória pura.
+func armarPrazosDeDuvida(e *Estado, agora time.Time) int {
+	n := 0
+	for _, pt := range e.participacoes {
+		if pt.Situacao == SituacaoPreparado && pt.PreparadaEm.IsZero() {
+			pt.PreparadaEm = agora
+			n++
+		}
+	}
+	return n
+}
+
+// reservasNaoConcluidas devolve as reservas cuja fase 2 não terminou, para a
+// segunda tarefa de recuperação da seção 9.3: "reserva confirmada e não
+// concluída → retoma a fase 2".
+//
+// O critério é só Concluida, e não Ativa: uma reserva cancelada que nunca
+// concluiu a fase 2 também precisa que o CONFIRMAR chegue a todos, porque o
+// cancelamento da D39 pressupõe participações CONFIRMADO para cancelar
+// (seção 7.3). Nesta fase ainda não há cancelamento, mas o critério já é o
+// certo.
+//
+// Ordenada por ID pelo mesmo motivo de sempre: a iteração de mapa em Go é
+// aleatória, e o boot deve fazer o mesmo trabalho na mesma ordem a cada vez.
+func reservasNaoConcluidas(e *Estado) []Reserva {
+	var lista []Reserva
+	for _, r := range e.reservas {
+		if !r.Concluida {
+			lista = append(lista, r.copia())
+		}
+	}
+	sort.Slice(lista, func(i, j int) bool { return lista[i].ID < lista[j].ID })
+	return lista
 }
 
 // validarPedido é o passo 2 do PREPARAR (D34) e devolve as caronas resolvidas,

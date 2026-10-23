@@ -115,6 +115,23 @@ type Estado struct {
 	// coordenação e não estado da empresa, ficam em variáveis locais da
 	// goroutine que atende o RESERVAR (seção 4.6).
 	emAndamento map[string]bool
+	// transacoesEmVotacao são os txID que o coordenador desta empresa está
+	// votando agora, entre o primeiro PREPARAR e a decisão (seção 4.6). É o
+	// que a consulta da seção 4.6 da API responde como EM_ANDAMENTO.
+	//
+	// **Nunca vai ao log**, pelo mesmo motivo do emAndamento acima: o
+	// coordenador não grava nada antes de decidir (D23). Após um reboot o mapa
+	// volta vazio, e a seção 9.3 diz exatamente isso — "Transação em andamento:
+	// não existe, estava só na memória. Abort presumido".
+	//
+	// Mora aqui, e não num mapa do próprio Coordenador, por uma razão concreta:
+	// a consulta precisa olhar as reservas e as transações em votação no
+	// **mesmo** retrato. Em dois mapas com dois locks, uma transação que acabou
+	// de confirmar poderia ser lida depois de sair deste mapa e antes de
+	// aparecer nas reservas, e a resposta seria ABORTADA para uma transação
+	// confirmada — o pior erro possível no 2PC. Sob um lock só, esse instante
+	// não existe.
+	transacoesEmVotacao map[string]bool
 	// log recebe cada mudança ANTES de ela ser aplicada (D22, regra 3). Nunca
 	// é nil: os construtores começam com LogMemoria e o servidor troca por
 	// arquivo com UsarLog. seq numera os registros (seção 4.8).

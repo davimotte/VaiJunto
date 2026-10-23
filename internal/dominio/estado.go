@@ -22,14 +22,15 @@ import (
 // CarregarEstado, que popula usuários e caronas a partir de dados/ (D02).
 func NovoEstado(empresa string) *Estado {
 	return &Estado{
-		empresa:       empresa,
-		usuarios:      make(map[string]*Usuario),
-		caronas:       make(map[string]*Carona),
-		reservas:      make(map[string]*Reserva),
-		participacoes: make(map[string]*Participacao),
-		emAndamento:   make(map[string]bool),
-		log:           NovaLogMemoria(),
-		lamport:       relogioParado,
+		empresa:             empresa,
+		usuarios:            make(map[string]*Usuario),
+		caronas:             make(map[string]*Carona),
+		reservas:            make(map[string]*Reserva),
+		participacoes:       make(map[string]*Participacao),
+		emAndamento:         make(map[string]bool),
+		transacoesEmVotacao: make(map[string]bool),
+		log:                 NovaLogMemoria(),
+		lamport:             relogioParado,
 	}
 }
 
@@ -272,6 +273,76 @@ func (e *Estado) Abortar(txID string) (Situacao, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return abortar(e, txID)
+}
+
+// MarcarTransacaoEmVotacao anota que o coordenador desta empresa começou a
+// votar uma transação (seção 4.6). É o que faz a consulta responder
+// EM_ANDAMENTO enquanto a decisão não existe.
+//
+// Seção crítica curtíssima, como a da D35 e pelo mesmo motivo: ela **não**
+// cobre a votação, que faz E/S de rede e não pode acontecer com o lock preso
+// (regra 2).
+func (e *Estado) MarcarTransacaoEmVotacao(txID string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.transacoesEmVotacao[txID] = true
+}
+
+// LiberarTransacaoEmVotacao retira a marca. O coordenador a chama num defer,
+// para que ela saia em qualquer saída da tentativa — e sempre **depois** do
+// ponto de commit, para que a transação nunca fique sem resposta: ou está em
+// votação, ou tem a decisão gravada, ou foi abortada por presunção.
+func (e *Estado) LiberarTransacaoEmVotacao(txID string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.transacoesEmVotacao, txID)
+}
+
+// DecisaoDaTransacao responde a consulta pelo lado do coordenador (seção 9.4;
+// seção 4.6 da API). Somente leitura: o abort presumido não grava nada (D23).
+//
+// Lê as reservas e as transações em votação sob um Lock só, de propósito: em
+// duas chamadas, uma transação que acabou de confirmar poderia ser vista fora
+// das duas listas, e a resposta seria ABORTADA para algo confirmado.
+func (e *Estado) DecisaoDaTransacao(txID string) Decisao {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return decisaoDaTransacao(e, txID)
+}
+
+// ConsultarParticipacao responde a consulta pelo lado do participante
+// (seção 9.4; seção 4.6 da API). O segundo retorno é falso para transação
+// desconhecida, caso em que o veto da D38 **já foi gravado com fsync** quando
+// esta função retorna — antes, portanto, de a resposta DESCONHECIDA sair.
+func (e *Estado) ConsultarParticipacao(txID string) (Situacao, bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return consultarParticipacao(e, txID)
+}
+
+// ParticipacoesEmDuvida devolve as participações em PREPARADO cujo prazo de
+// dúvida venceu (D41), que é o gatilho da terminação cooperativa (seção 9.4).
+func (e *Estado) ParticipacoesEmDuvida(agora time.Time, prazo time.Duration) []Participacao {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return participacoesEmDuvida(e, agora, prazo)
+}
+
+// ArmarPrazosDeDuvida é a tarefa de recuperação da seção 9.3 para as
+// participações em PREPARADO que vieram do replay sem PreparadaEm. Devolve
+// quantas foram armadas.
+func (e *Estado) ArmarPrazosDeDuvida(agora time.Time) int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return armarPrazosDeDuvida(e, agora)
+}
+
+// ReservasNaoConcluidas devolve as reservas cuja fase 2 não terminou, para o
+// boot retomá-la (seção 9.3).
+func (e *Estado) ReservasNaoConcluidas() []Reserva {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return reservasNaoConcluidas(e)
 }
 
 // Participacao devolve uma cópia da participação de uma transação, se ela

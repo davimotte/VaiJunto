@@ -673,6 +673,297 @@ func TestAbortar_VetoRecusaPrepararAtrasado(t *testing.T) {
 	conferirIP21(t, e)
 }
 
+// --- Consulta e recuperação (D23, D38; seções 9.3 e 9.4; seção 4.6 da API) ---
+
+// A tabela do coordenador da seção 4.6, pelo lado do domínio. As três linhas,
+// e a afirmação que sustenta o abort presumido: responder ABORTADA **não grava
+// nada**, então a resposta não compromete o servidor e pode sair sem fsync.
+func TestDecisaoDaTransacao_TabelaDoCoordenador(t *testing.T) {
+	for _, caso := range []struct {
+		nome    string
+		montar  func(*testing.T, *Estado) string
+		querDec Decisao
+		querLog []string
+	}{
+		{
+			// Linha 1: DECISAO_CONFIRMAR no log.
+			nome: "decisao de confirmar gravada",
+			montar: func(t *testing.T, e *Estado) string {
+				return reservarNoCenario(t, e, "maria", item("vaijunto:car-1", 0, 1)).ID
+			},
+			querDec: DecisaoConfirmada,
+			querLog: []string{"PREPARADO", "DECISAO_CONFIRMAR", "CONFIRMADO"},
+		},
+		{
+			// Linha 1, variante da nota da seção 4.6: a pergunta é sobre a
+			// DECISÃO, e um cancelamento posterior não a desfaz.
+			nome: "reserva confirmada e depois cancelada",
+			montar: func(t *testing.T, e *Estado) string {
+				r := reservarNoCenario(t, e, "maria", item("vaijunto:car-1", 0, 1))
+				desativarReservaNoTeste(t, e, r.ID)
+				return r.ID
+			},
+			querDec: DecisaoConfirmada,
+			querLog: []string{"PREPARADO", "DECISAO_CONFIRMAR", "CONFIRMADO"},
+		},
+		{
+			// Linha 2: a transação está na memória, ainda votando.
+			nome: "transacao em votacao",
+			montar: func(t *testing.T, e *Estado) string {
+				e.MarcarTransacaoEmVotacao("vaijunto:res-0000abcd")
+				return "vaijunto:res-0000abcd"
+			},
+			querDec: DecisaoEmAndamento,
+		},
+		{
+			// Linha 3: nem uma coisa nem outra. É o abort presumido (D23), e é
+			// o caminho de volta que a seção 7 do API_CONSORCIO.md demonstra
+			// com curl, sem derrubar servidor nenhum.
+			nome:    "desconhecida, abort presumido",
+			montar:  func(*testing.T, *Estado) string { return "vaijunto:res-0000abcd" },
+			querDec: DecisaoAbortada,
+		},
+		{
+			// A marca sai no fim da tentativa, e depois dela a transação volta
+			// a ser desconhecida: é o que acontece quando o coordenador aborta.
+			nome: "votacao encerrada sem decisao",
+			montar: func(t *testing.T, e *Estado) string {
+				e.MarcarTransacaoEmVotacao("vaijunto:res-0000abcd")
+				e.LiberarTransacaoEmVotacao("vaijunto:res-0000abcd")
+				return "vaijunto:res-0000abcd"
+			},
+			querDec: DecisaoAbortada,
+		},
+	} {
+		t.Run(caso.nome, func(t *testing.T) {
+			e := estadoDoCenario(t)
+			txID := caso.montar(t, e)
+			antes := tiposNoLog(t, e)
+
+			if dec := e.DecisaoDaTransacao(txID); dec != caso.querDec {
+				t.Errorf("decisão = %q, want %q", dec, caso.querDec)
+			}
+			// A consulta ao coordenador é somente leitura em TODAS as linhas,
+			// inclusive na do abort presumido: o coordenador não grava nada
+			// antes de decidir (D23; D37, regra 1).
+			depois := tiposNoLog(t, e)
+			if strings.Join(antes, ",") != strings.Join(depois, ",") {
+				t.Errorf("a consulta gravou: log era %v, virou %v", antes, depois)
+			}
+			if caso.querLog != nil && strings.Join(depois, ",") != strings.Join(caso.querLog, ",") {
+				t.Errorf("registros = %v, want %v", depois, caso.querLog)
+			}
+			conferirIP21(t, e)
+		})
+	}
+}
+
+// A tabela do participante da seção 4.6: quem conhece a transação responde a
+// própria situação, e quem não conhece grava o veto e responde DESCONHECIDA.
+func TestConsultarParticipacao_TabelaDoParticipante(t *testing.T) {
+	for _, caso := range []struct {
+		nome        string
+		montar      func(*testing.T, *Estado)
+		querSituaca Situacao
+		querConheci bool
+	}{
+		{
+			nome: "preparado",
+			montar: func(t *testing.T, e *Estado) {
+				prepararNoCenario(t, e, txDeTeste, item("vaijunto:car-1", 0, 1))
+			},
+			querSituaca: SituacaoPreparado,
+			querConheci: true,
+		},
+		{
+			nome: "confirmado",
+			montar: func(t *testing.T, e *Estado) {
+				prepararNoCenario(t, e, txDeTeste, item("vaijunto:car-1", 0, 1))
+				if _, err := e.Confirmar(txDeTeste); err != nil {
+					t.Fatalf("Confirmar: %v", err)
+				}
+			},
+			querSituaca: SituacaoConfirmado,
+			querConheci: true,
+		},
+		{
+			nome: "abortado",
+			montar: func(t *testing.T, e *Estado) {
+				prepararNoCenario(t, e, txDeTeste, item("vaijunto:car-1", 0, 1))
+				if _, err := e.Abortar(txDeTeste); err != nil {
+					t.Fatalf("Abortar: %v", err)
+				}
+			},
+			querSituaca: SituacaoAbortado,
+			querConheci: true,
+		},
+		{
+			// Um veto já gravado é uma participação como outra qualquer: a
+			// consulta seguinte responde ABORTADO e não grava de novo.
+			nome: "abortado por veto anterior",
+			montar: func(t *testing.T, e *Estado) {
+				if _, err := e.Abortar(txDeTeste); err != nil {
+					t.Fatalf("Abortar: %v", err)
+				}
+			},
+			querSituaca: SituacaoAbortado,
+			querConheci: true,
+		},
+		{
+			nome: "cancelado",
+			montar: func(t *testing.T, e *Estado) {
+				prepararNoCenario(t, e, txDeTeste, item("vaijunto:car-1", 0, 1))
+				if _, err := e.Confirmar(txDeTeste); err != nil {
+					t.Fatalf("Confirmar: %v", err)
+				}
+				cancelarParticipacaoNoTeste(t, e, txDeTeste)
+			},
+			querSituaca: SituacaoCancelado,
+			querConheci: true,
+		},
+		{
+			nome:        "desconhecida, grava o veto",
+			montar:      func(*testing.T, *Estado) {},
+			querConheci: false,
+		},
+	} {
+		t.Run(caso.nome, func(t *testing.T) {
+			e := estadoDoCenario(t)
+			caso.montar(t, e)
+
+			situacao, conhecida, err := e.ConsultarParticipacao(txDeTeste)
+			if err != nil {
+				t.Fatalf("ConsultarParticipacao: %v", err)
+			}
+			if conhecida != caso.querConheci {
+				t.Fatalf("conhecida = %t, want %t", conhecida, caso.querConheci)
+			}
+			if conhecida && situacao != caso.querSituaca {
+				t.Errorf("situação = %q, want %q", situacao, caso.querSituaca)
+			}
+			conferirIP21(t, e)
+		})
+	}
+}
+
+// O coração da D38: consultar uma transação desconhecida **grava o veto antes
+// de responder**, e o veto recusa um PREPARAR atrasado.
+//
+// Sem ele, a terminação não seria segura: quem perguntou abortaria com base
+// numa resposta que não impede o coordenador de obter unanimidade depois, e o
+// mesmo itinerário poderia acabar confirmado num dono e abortado no outro. É
+// este teste que fecha o passo 3 do argumento da seção 7.4.
+func TestConsultarParticipacao_DesconhecidaGravaVetoERecusaPrepararAtrasado(t *testing.T) {
+	e := estadoDoCenario(t)
+
+	situacao, conhecida, err := e.ConsultarParticipacao(txDeTeste)
+	if err != nil || conhecida || situacao != "" {
+		t.Fatalf("ConsultarParticipacao = (%q, %t, %v), want (vazia, false, nil)", situacao, conhecida, err)
+	}
+
+	// O veto está no log ANTES de a resposta DESCONHECIDA poder sair: quando a
+	// função retorna, o fsync já aconteceu (D22, regra 3).
+	if tipos := tiposNoLog(t, e); len(tipos) != 1 || tipos[0] != "ABORTADO" {
+		t.Fatalf("registros = %v, want [ABORTADO]", tipos)
+	}
+	pt, existe := e.Participacao(txDeTeste)
+	if !existe || pt.Situacao != SituacaoAbortado || len(pt.Itens) != 0 {
+		t.Fatalf("veto = %+v (existe=%t), want ABORTADO sem itens", pt, existe)
+	}
+
+	_, err = e.Preparar(pedido(txDeTeste, item("vaijunto:car-1", 0, 1)), aoPreparar())
+	if !errors.Is(err, ErrTransacaoAbortada) {
+		t.Fatalf("PREPARAR atrasado: err = %v, want ErrTransacaoAbortada", err)
+	}
+	if o := ocupacaoDe(t, e, "vaijunto:car-1", 0); o.Livres != 3 {
+		t.Errorf("o PREPARAR recusado pelo veto descontou assento: livres = %d", o.Livres)
+	}
+	conferirIP21(t, e)
+}
+
+// O prazo de dúvida (D41) separa quem acabou de votar SIM de quem está em
+// PREPARADO tempo demais. Só o segundo entra na terminação cooperativa.
+func TestParticipacoesEmDuvida_SoAsQueVenceramOPrazo(t *testing.T) {
+	e := estadoDoCenario(t)
+	prepararNoCenario(t, e, txDeTeste, item("vaijunto:car-1", 0, 1))
+
+	const prazo = 10 * time.Second
+	if emDuvida := e.ParticipacoesEmDuvida(aoPreparar().Add(prazo-time.Second), prazo); len(emDuvida) != 0 {
+		t.Errorf("antes do prazo: %d em dúvida, want 0", len(emDuvida))
+	}
+	emDuvida := e.ParticipacoesEmDuvida(aoPreparar().Add(prazo), prazo)
+	if len(emDuvida) != 1 || emDuvida[0].TxID != txDeTeste {
+		t.Fatalf("no prazo: %+v, want só %s", emDuvida, txDeTeste)
+	}
+
+	// Decidida não está mais em dúvida, por mais tempo que passe: só PREPARADO
+	// tem assento em espera a devolver.
+	if _, err := e.Confirmar(txDeTeste); err != nil {
+		t.Fatalf("Confirmar: %v", err)
+	}
+	if emDuvida := e.ParticipacoesEmDuvida(aoPreparar().Add(time.Hour), prazo); len(emDuvida) != 0 {
+		t.Errorf("depois de CONFIRMADO: %d em dúvida, want 0", len(emDuvida))
+	}
+}
+
+// Primeira tarefa da seção 9.3. Como PreparadaEm não vai ao log (seção 4.4), o
+// replay devolve a participação com o instante zerado, e ela ficaria invisível
+// para o varredor da terminação — isto é, o assento nunca voltaria, que é
+// exatamente o que a RD04 proíbe. O boot rearma o prazo.
+func TestArmarPrazosDeDuvida_RecuperaOInstanteQueOLogNaoGuarda(t *testing.T) {
+	antes := estadoDoCenario(t)
+	prepararNoCenario(t, antes, txDeTeste, item("vaijunto:car-1", 0, 1))
+
+	depois := estadoDoCenario(t)
+	if _, err := depois.Reaplicar(antes.log.(*LogMemoria).Registros()); err != nil {
+		t.Fatalf("Reaplicar: %v", err)
+	}
+
+	// Antes de armar, o varredor não a enxerga, por mais tempo que passe.
+	if emDuvida := depois.ParticipacoesEmDuvida(as(23, 0), 10*time.Second); len(emDuvida) != 0 {
+		t.Fatalf("participação do replay já em dúvida sem ter sido armada: %+v", emDuvida)
+	}
+
+	if n := depois.ArmarPrazosDeDuvida(as(1, 0)); n != 1 {
+		t.Fatalf("ArmarPrazosDeDuvida = %d, want 1", n)
+	}
+	emDuvida := depois.ParticipacoesEmDuvida(as(1, 0).Add(10*time.Second), 10*time.Second)
+	if len(emDuvida) != 1 || emDuvida[0].TxID != txDeTeste {
+		t.Fatalf("após armar: %+v, want só %s", emDuvida, txDeTeste)
+	}
+
+	// Idempotente: uma segunda chamada não reinicia o prazo de quem já foi
+	// armada, e com isso nenhuma participação escapa da terminação.
+	if n := depois.ArmarPrazosDeDuvida(as(2, 0)); n != 0 {
+		t.Errorf("ArmarPrazosDeDuvida repetida = %d, want 0", n)
+	}
+}
+
+// Segunda tarefa da seção 9.3: o boot precisa achar as reservas cuja fase 2
+// não terminou, que são as que o CONFIRMAR ainda tem de alcançar (passo 4 do
+// argumento de atomicidade da seção 7.4).
+func TestReservasNaoConcluidas_SaoAsQueAFase2NaoTerminou(t *testing.T) {
+	e := estadoDoCenario(t)
+	pendente := reservarNoCenario(t, e, "maria", item("vaijunto:car-1", 0, 1))
+	concluida := reservarNoCenario(t, e, "joao", item("vaijunto:car-3", 0, 1))
+	if err := e.ConcluirReserva(concluida.ID); err != nil {
+		t.Fatalf("ConcluirReserva: %v", err)
+	}
+
+	naoConcluidas := e.ReservasNaoConcluidas()
+	if len(naoConcluidas) != 1 || naoConcluidas[0].ID != pendente.ID {
+		t.Fatalf("ReservasNaoConcluidas = %+v, want só %s", naoConcluidas, pendente.ID)
+	}
+
+	// Cancelada e não concluída continua na lista: o cancelamento da D39
+	// pressupõe participações CONFIRMADO para cancelar (seção 7.3), então o
+	// CONFIRMAR ainda precisa chegar.
+	desativarReservaNoTeste(t, e, pendente.ID)
+	if n := len(e.ReservasNaoConcluidas()); n != 1 {
+		t.Errorf("reserva inativa e não concluída sumiu da lista: %d, want 1", n)
+	}
+}
+
 // --- Portadores e ocupação (seções 4.3 e 11.1) ---
 
 // Quem está em espera num trecho é derivado das participações em PREPARADO, e
