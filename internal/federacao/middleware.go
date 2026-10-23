@@ -191,6 +191,15 @@ func (r *respostaObservada) WriteHeader(status int) {
 	r.ResponseWriter.WriteHeader(status)
 }
 
+// Unwrap entrega a ResponseWriter de verdade ao http.ResponseController.
+//
+// Faz falta porque embutir uma **interface** só promove os métodos dela: sem
+// isto, o embrulho esconde o Flush do net/http, e o flush de responderJSON
+// viraria um erro silencioso justamente no caminho servido de verdade.
+func (r *respostaObservada) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
 // anotar guarda o detalhe da operação para a linha do registro.
 //
 // Aceita qualquer ResponseWriter e ignora quem não for a nossa: um teste de

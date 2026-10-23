@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"vaijunto/internal/dominio"
 	"vaijunto/internal/transacao"
@@ -167,16 +168,32 @@ func responderErro(w http.ResponseWriter, e erroHTTP) {
 // responderJSON serializa o corpo antes de escrever o status: assim uma falha
 // de serialização ainda pode virar 500, em vez de deixar uma resposta 200 com
 // corpo truncado, que o par leria como JSON inválido.
+//
+// O corpo inteiro já está em memória quando a resposta começa, então
+// Content-Length é declarado e a resposta sai do buffer do net/http aqui mesmo,
+// antes de o handler retornar. Duas consequências:
+//
+//   - o par recebe sempre um corpo de tamanho declarado, em vez de chunked;
+//   - um ponto de falha (D31) colocado depois de responder cai com a resposta
+//     **já no fio**. Sem isto, o part-apos-responder da seção 9.5 derrubaria o
+//     servidor com o voto SIM ainda no buffer, e o ponto "voto SIM enviado"
+//     passaria a significar o contrário do que o nome diz.
 func responderJSON(w http.ResponseWriter, status int, corpo any) {
 	bruto, err := json.Marshal(corpo)
 	if err != nil {
 		bruto = []byte(`{"codigo":"ERRO_INTERNO","mensagem":"Falha ao serializar a resposta."}`)
 		status = http.StatusInternalServerError
 	}
+	bruto = append(bruto, '\n')
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(bruto)))
 	w.WriteHeader(status)
 	// Resposta parcialmente escrita não tem conserto: o status já foi enviado.
 	// Quem perceber a falha é o par, pelo JSON incompleto, e a política de
 	// repetição da seção 1.3 resolve.
-	_, _ = w.Write(append(bruto, '\n'))
+	_, _ = w.Write(bruto)
+	// Um ResponseWriter sem Flush devolve erro, e aqui ele é inofensivo: a
+	// resposta está escrita, e quem não sabe esvaziar o buffer é o
+	// httptest.Recorder de um teste de unidade, que não tem fio nenhum.
+	_ = http.NewResponseController(w).Flush()
 }
