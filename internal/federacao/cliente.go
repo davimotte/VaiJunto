@@ -52,6 +52,13 @@ func (e *ErroHTTP) Error() string {
 	return fmt.Sprintf("federacao: par respondeu %d %s: %s", e.Status, e.Codigo, e.Mensagem)
 }
 
+// StatusHTTP satisfaz a interface que o coordenador declara para decidir a
+// política de repetição da seção 1.3 — em particular, parar no 409.
+//
+// Existe como método, e não como leitura direta do campo, porque quem decide
+// está em internal/transacao, que não importa este pacote (seção 5.3).
+func (e *ErroHTTP) StatusHTTP() int { return e.Status }
+
 // limiteResposta é o teto do corpo de resposta que o cliente aceita ler.
 //
 // A API limita o corpo da requisição a 64 KB, mas não o da resposta: a lista

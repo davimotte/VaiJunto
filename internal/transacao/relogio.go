@@ -40,6 +40,25 @@ func (r *Relogio) Agora() uint64 {
 	return r.l
 }
 
+// AoCriarTransacao incrementa L e devolve o novo valor, para o carimbo de uma
+// transação que nasce aqui (D24; seção 7.1, passo 3).
+//
+// É a outra metade da regra da seção 8.1, cuja primeira metade é AoReceber:
+// incrementa-se ao receber **e ao criar uma transação**. Sem o incremento aqui,
+// duas transações criadas em sequência no mesmo servidor sairiam com o mesmo
+// carimbo, e a ordem total que o wait-die precisa (fase 7) deixaria de ser
+// total — o desempate por empresa não resolve, porque a empresa é a mesma.
+//
+// O carimbo é fixado uma vez por reserva, e não por tentativa: as três
+// tentativas da D36 compartilham o mesmo, para que a transação fique
+// relativamente mais velha a cada disputa e não haja inanição (seção 8.5).
+func (r *Relogio) AoCriarTransacao() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.l++
+	return r.l
+}
+
 // AoReceber incorpora o valor que veio de outro servidor: L ← max(L, recebido) + 1,
 // e devolve o novo L.
 //

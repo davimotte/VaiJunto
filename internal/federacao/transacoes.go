@@ -348,3 +348,47 @@ func pedidoDeFio(p dominio.PedidoPreparacao) pedidoPreparar {
 		Itens:         &itens,
 	}
 }
+
+// VotanteLocal liga o participante desta empresa ao coordenador dela, para o
+// caso em que a empresa do passageiro também é dona de algum trecho (D21).
+//
+// A chamada é direta, sem rede: uma empresa não faz HTTP contra si mesma, e
+// fazê-lo acrescentaria uma serialização, uma porta e um prazo de rede a uma
+// chamada de função. O que ela **não** encurta é a tradução: o voto sai de
+// votoDoParticipante, a mesma função que o handler HTTP e a rede em memória
+// usam, para que os três caminhos tragam o mesmo motivo para o mesmo erro
+// (seções 5.4 e 5.5).
+//
+// Mora aqui, e não em internal/transacao, porque é nesta camada que vive a
+// tabela de tradução da borda. O coordenador a recebe pela interface
+// transacao.Votante, que ele próprio declara.
+type VotanteLocal struct {
+	p *transacao.Participante
+}
+
+func NovoVotanteLocal(p *transacao.Participante) *VotanteLocal {
+	return &VotanteLocal{p: p}
+}
+
+var _ transacao.Votante = (*VotanteLocal)(nil)
+
+// Preparar avalia o PREPARAR no participante local e devolve o voto.
+//
+// Um erro aqui é o que seria um status diferente de 200 no caminho HTTP: falha
+// de verdade, como o log não ter conseguido gravar. Recusa de negócio não é
+// erro — volta como voto NÃO, com o motivo da seção 5.2.
+func (v *VotanteLocal) Preparar(pedido dominio.PedidoPreparacao) (transacao.RespostaPreparar, error) {
+	voto, falha := votoDoParticipante(v.p.Preparar(pedido))
+	if falha != nil {
+		return transacao.RespostaPreparar{}, erroDeBorda(*falha)
+	}
+	return voto, nil
+}
+
+func (v *VotanteLocal) Confirmar(txID string) (dominio.Situacao, error) {
+	return v.p.Confirmar(txID)
+}
+
+func (v *VotanteLocal) Abortar(txID string) (dominio.Situacao, error) {
+	return v.p.Abortar(txID)
+}

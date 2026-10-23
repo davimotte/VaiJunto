@@ -2,6 +2,7 @@ package transacao
 
 import (
 	"context"
+	"errors"
 
 	"vaijunto/internal/dominio"
 )
@@ -56,15 +57,30 @@ const (
 	VotoAguarde Voto = "AGUARDE"
 )
 
+// Motivos do voto NÃO (seção 5.2 da API), na forma em que o coordenador os
+// consome.
+//
+// Nascem aqui, e não na borda, porque é o coordenador quem **decide** a partir
+// deles: PRECEDENCIA manda tentar de novo com o mesmo carimbo (D36), e os
+// demais mandam responder ao passageiro. A borda de internal/federacao usa
+// estas mesmas constantes, para que não existam duas listas do mesmo
+// vocabulário que possam divergir.
+const (
+	MotivoSemAssento          = "SEM_ASSENTO"
+	MotivoPrecedencia         = "PRECEDENCIA"
+	MotivoCaronaNaoEncontrada = "CARONA_NAO_ENCONTRADA"
+	MotivoCaronaCancelada     = "CARONA_CANCELADA"
+	MotivoItinerarioInvalido  = "ITINERARIO_INVALIDO"
+	MotivoTransacaoAbortada   = "TRANSACAO_ABORTADA"
+)
+
 // RespostaPreparar é o voto de um participante, já na forma em que o
 // coordenador o consome.
 //
-// Motivo é o código da seção 5.2 da API. Ele é string, e não um tipo desta
-// camada, porque quem o produz é a borda: a tradução de erro de domínio para
-// vocabulário de protocolo acontece numa tabela única em internal/federacao
-// (seção 5.5), e as duas implementações da Rede passam por ela. Quando o
-// coordenador da fase 5 precisar distinguir PRECEDENCIA das demais recusas para
-// decidir nova tentativa (D36), a constante correspondente nasce aqui.
+// Motivo é um dos códigos acima, da seção 5.2 da API. É string, e não tipo
+// próprio, porque atravessa o fio como string e a borda o traduz de sentinela
+// de domínio numa tabela única (seção 5.5), pela qual as duas implementações da
+// Rede passam.
 //
 // CaronaID e Trecho acompanham SEM_ASSENTO, PRECEDENCIA e AGUARDE, indicando o
 // primeiro trecho esgotado. Servem ao diagnóstico e ao registro de operações.
@@ -74,4 +90,47 @@ type RespostaPreparar struct {
 	Motivo   string          // só no NÃO
 	CaronaID string
 	Trecho   int
+}
+
+// Votante é o participante local visto pelo coordenador: a empresa que também
+// é dona de algum trecho da transação que ela coordena (D21).
+//
+// Existe para que o participante local seja chamado **direto**, sem passar pela
+// rede — uma empresa não faz HTTP contra si mesma —, mas ainda assim pelo mesmo
+// código e, principalmente, pela mesma tradução de erro em voto. Quem a
+// implementa é internal/federacao, onde mora a tabela única da seção 5.5: se o
+// caminho local traduzisse por conta própria, haveria duas tabelas, e elas
+// divergiriam justamente na distinção que o coordenador mais precisa acertar —
+// recusa legítima contra falha de comunicação.
+//
+// As assinaturas são as da Rede sem ctx e sem destino: não há rede, logo não há
+// prazo de chamada nem par a resolver.
+type Votante interface {
+	Preparar(pedido dominio.PedidoPreparacao) (RespostaPreparar, error)
+	Confirmar(txID string) (dominio.Situacao, error)
+	Abortar(txID string) (dominio.Situacao, error)
+}
+
+// erroComStatus é implementado pelos erros que trazem o status HTTP com que um
+// par respondeu.
+//
+// Declarada aqui, no consumidor, pelo mesmo motivo da Rede: o tipo concreto
+// (federacao.ErroHTTP) está na camada que importa esta, e recebê-lo inverteria
+// a dependência. O coordenador só precisa do número para aplicar a política de
+// repetição da seção 1.3 da API.
+type erroComStatus interface {
+	StatusHTTP() int
+}
+
+// ehViolacao responde se o erro é o 409 VIOLACAO_PROTOCOLO.
+//
+// É o único status que **encerra** a repetição (seção 1.3 da API): ele indica
+// transição impossível pela seção 7.4, que nenhuma repetição corrige. Repetir
+// um 409 seria insistir num pedido que o outro lado já provou ser incoerente.
+func ehViolacao(err error) bool {
+	var comStatus erroComStatus
+	if errors.As(err, &comStatus) {
+		return comStatus.StatusHTTP() == 409
+	}
+	return errors.Is(err, dominio.ErrViolacaoProtocolo)
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"vaijunto/internal/dominio"
+	"vaijunto/internal/transacao"
 )
 
 // Códigos de erro HTTP da seção 5.1 do API_CONSORCIO.md. São constantes pelo
@@ -27,15 +28,15 @@ const (
 
 // Motivos do voto NÃO da seção 5.2. Não são erros HTTP: vão no corpo de uma
 // resposta 200, porque "o participante processou e respondeu" (seção 2 da
-// API). Quem os usa é o participante, na fase 4; aqui eles existem porque a
-// tabela abaixo é a única tradução de sentinela da borda REST.
+// API). O vocabulário é o da camada 5 (transacao), de onde o coordenador
+// decide; aqui a borda só o reexporta para a tabela de tradução abaixo.
 const (
-	motivoSemAssento          = "SEM_ASSENTO"
-	motivoPrecedencia         = "PRECEDENCIA"
-	motivoCaronaNaoEncontrada = "CARONA_NAO_ENCONTRADA"
-	motivoCaronaCancelada     = "CARONA_CANCELADA"
-	motivoItinerarioInvalido  = "ITINERARIO_INVALIDO"
-	motivoTransacaoAbortada   = "TRANSACAO_ABORTADA"
+	motivoSemAssento          = transacao.MotivoSemAssento
+	motivoPrecedencia         = transacao.MotivoPrecedencia
+	motivoCaronaNaoEncontrada = transacao.MotivoCaronaNaoEncontrada
+	motivoCaronaCancelada     = transacao.MotivoCaronaCancelada
+	motivoItinerarioInvalido  = transacao.MotivoItinerarioInvalido
+	motivoTransacaoAbortada   = transacao.MotivoTransacaoAbortada
 )
 
 // erroHTTP é o destino de um erro na borda REST: o status e o código que vão
@@ -116,6 +117,12 @@ var traducaoErros = map[error]erroHTTP{
 	dominio.ErrPrazoCancelamentoExpirado: {http.StatusInternalServerError, codigoErroInterno, "Falha inesperada: prazo de cancelamento é decidido pelo coordenador."},
 	dominio.ErrEmpresaInvalida:           {http.StatusInternalServerError, codigoErroInterno, "Falha inesperada de configuração da empresa."},
 	dominio.ErrIDSemEmpresa:              {http.StatusInternalServerError, codigoErroInterno, "Falha inesperada: identificador sem empresa."},
+	// Os três do coordenador: decididos na empresa do passageiro, na borda TCP,
+	// e por isso nunca atravessam esta borda. Entram pelo mesmo critério dos
+	// demais deste grupo, para a cobertura do teste.
+	dominio.ErrReservaEmAndamento:   {http.StatusInternalServerError, codigoErroInterno, "Falha inesperada: exclusividade de reserva é do coordenador."},
+	dominio.ErrEmpresaIndisponivel:  {http.StatusInternalServerError, codigoErroInterno, "Falha inesperada: disponibilidade de par é do coordenador."},
+	dominio.ErrOperacaoIndisponivel: {http.StatusInternalServerError, codigoErroInterno, "Falha inesperada: operação indisponível nesta versão."},
 }
 
 // erroHTTPDeDominio traduz um erro do domínio para a resposta da borda REST.

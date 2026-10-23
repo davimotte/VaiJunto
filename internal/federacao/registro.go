@@ -144,3 +144,26 @@ func (r *Registro) escrever(texto string) {
 	instante := time.Now().In(dominio.FusoDasCidades()).Format("2006/01/02 15:04:05.000")
 	r.saida.Print(instante + " " + texto)
 }
+
+// Decisao registra a decisão do coordenador sobre uma transação (D19; formato
+// da seção 5.2 do PROJETO_P2.md):
+//
+//	2026/11/05 08:15:02.437 [vaijunto] DECISAO tx=vaijunto:res-3f0b11c4 → CONFIRMAR
+//
+// Não leva seta de sentido nem duração: não é uma mensagem trocada com um par,
+// e sim o ponto em que esta empresa decidiu. É a linha que, lida junto com os
+// "← PREPARAR … → SIM" dos participantes, torna o 2PC visível na arguição.
+//
+// É exportada porque quem a chama é o coordenador, em internal/transacao, pela
+// interface RegistroDecisao que ele próprio declara — a federação importa a
+// camada 5, nunca o contrário (seção 5.3).
+//
+// O txID vem do nosso próprio gerador, mas sai pelo mesmo caminho dos demais
+// identificadores por disciplina: nada que vá para uma linha de registro é
+// escrito sem passar pela montagem desta função.
+func (r *Registro) Decisao(txID, decisao string) {
+	if r == nil {
+		return
+	}
+	r.escrever(fmt.Sprintf("[%s] DECISAO tx=%s → %s", r.empresa, strconv.Quote(txID), decisao))
+}
