@@ -1447,7 +1447,7 @@ sessão. Os critérios de pronto são os que a fase precisa demonstrar, com
 | 3B | Busca federada | Seção 6. TB1 e TB2 passam | ✅ |
 | 4 | Participante do 2PC | `preparar`, `confirmar` e `abortar` com idempotência, **no-wait** (NÃO imediato quando falta assento) e verificação de papéis (seção 1.2); rede em memória | ✅ |
 | 5 | Coordenador do 2PC | Seção 7.1, ainda com no-wait; `/auditoria` e verificador de invariantes. TR1, TR2 e TR5 passam | ✅ |
-| 6A | Recuperação | Seções 9.3 e 9.4: retomada, `consultar`, veto e terminação. TF9 e TF10 passam | ⏳ |
+| 6A | Recuperação | Seções 9.3 e 9.4: retomada, `consultar`, veto e terminação. TF9 e TF10 passam | ✅ |
 | 6B | Injeção de falhas | `FALHAR_EM` (seção 9.5). TF1 a TF7 passam | ⏳ |
 | 7 | Precedência | Wait-die (seção 8). Em disputa cruzada, a transação mais antiga completa, sem deadlock; TR3 e TR4 passam | ⏳ |
 | 8 | Cancelamentos | Seção 10, com outbox. TC1 a TC4 e TF8 passam | ⏳ |
@@ -1482,10 +1482,16 @@ Notas de sequência:
 | TR2 afirma **no máximo** um sucesso, e não exatamente um | Com no-wait e 50 tentativas simultâneas, a que ganha o assento único de C é muitas vezes uma das 40 que perdem A, e desiste na hora. Sob wait-die, A esgotada por portadores em `PREPARADO` responde `AGUARDE`/`PRECEDENCIA` em vez de `SEM_ASSENTO`, a D36 tenta de novo, e o vencedor passa a ser determinístico. A atomicidade — nunca dois sucessos, e todo assento de volta — é afirmada já agora | 7 |
 | `DISPUTA_PERDIDA` não existe; tentativas esgotadas respondem `SEM_ASSENTO` | O ramo de `PRECEDENCIA` está escrito e sem gatilho: o participante é no-wait | 7 |
 | `LISTAR_MINHAS_RESERVAS` emite `empresa` por perna sem que a seção 5.10 do `PROTOCOL.md` a documente | O dado vem da cópia da D42 e a perna remota ficaria ilegível sem ele. A seção 5.10 e os clientes mudam juntos na fase 9 | 9 |
-| I-P2-3 fora do verificador | Ela vale "após recuperação e quiescência", e a recuperação é a fase 6: aqui seria afirmação sobre código que não existe | 6A |
 
 - **O TF8 fica na fase 8**, porque o ponto `aviso-apos-registrar` depende do
   outbox.
+
+**Limitações da fase 6A**, pelo mesmo critério:
+
+| Limitação | Por quê | Sai na |
+|---|---|---|
+| A queda é simulada pelos testes (derrubar e religar a empresa a partir do mesmo log), e não por `FALHAR_EM` | O ponto de falha nomeado é o entregável da 6B. O que a 6A entrega é o que acontece **depois** da queda, e isso independe de onde ela foi provocada: a ferramenta de religamento é a mesma que a 6B vai usar com os pontos da seção 9.5 | 6B |
+| A parte "outbox vazio" da I-P2-3 é verificada contra uma lista que está sempre vazia | O outbox nasce com os cancelamentos da D39. A verificação já está escrita para que a fase 8 não precise lembrar de acrescentá-la | 8 |
 
 O relatório SBC é escrito fora deste roteiro.
 
