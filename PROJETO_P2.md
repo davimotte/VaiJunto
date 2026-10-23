@@ -1428,6 +1428,12 @@ serviço (`http://rotacapixaba:8080`). Cada empresa tem o seu diretório de
 estado. O compose é só para desenvolvimento; no laboratório, cada máquina usa o
 `docker run` acima.
 
+`FALHAR_EM` (D31) é declarada só no serviço `vaijunto`, e vazia por padrão: a
+demonstração D-5 arma o ponto com
+`FALHAR_EM=coord-apos-decidir docker compose up -d --force-recreate vaijunto` e
+religa com `docker compose start vaijunto`. Nos outros dois serviços a variável
+não entra, para que uma rodada sabotada seja sempre de uma empresa só.
+
 ---
 
 ## 14. Fases e estado
@@ -1448,7 +1454,7 @@ sessão. Os critérios de pronto são os que a fase precisa demonstrar, com
 | 4 | Participante do 2PC | `preparar`, `confirmar` e `abortar` com idempotência, **no-wait** (NÃO imediato quando falta assento) e verificação de papéis (seção 1.2); rede em memória | ✅ |
 | 5 | Coordenador do 2PC | Seção 7.1, ainda com no-wait; `/auditoria` e verificador de invariantes. TR1, TR2 e TR5 passam | ✅ |
 | 6A | Recuperação | Seções 9.3 e 9.4: retomada, `consultar`, veto e terminação. TF9 e TF10 passam | ✅ |
-| 6B | Injeção de falhas | `FALHAR_EM` (seção 9.5). TF1 a TF7 passam | ⏳ |
+| 6B | Injeção de falhas | `FALHAR_EM` (seção 9.5). TF1 a TF7 passam | ✅ |
 | 7 | Precedência | Wait-die (seção 8). Em disputa cruzada, a transação mais antiga completa, sem deadlock; TR3 e TR4 passam | ⏳ |
 | 8 | Cancelamentos | Seção 10, com outbox. TC1 a TC4 e TF8 passam | ⏳ |
 | 9 | Clientes e protocolo | `PROTOCOL.md` v2 (seção 5.6) e clientes adaptados; fluxo completo pelo CLI | ⏳ |
@@ -1490,8 +1496,14 @@ Notas de sequência:
 
 | Limitação | Por quê | Sai na |
 |---|---|---|
-| A queda é simulada pelos testes (derrubar e religar a empresa a partir do mesmo log), e não por `FALHAR_EM` | O ponto de falha nomeado é o entregável da 6B. O que a 6A entrega é o que acontece **depois** da queda, e isso independe de onde ela foi provocada: a ferramenta de religamento é a mesma que a 6B vai usar com os pontos da seção 9.5 | 6B |
 | A parte "outbox vazio" da I-P2-3 é verificada contra uma lista que está sempre vazia | O outbox nasce com os cancelamentos da D39. A verificação já está escrita para que a fase 8 não precise lembrar de acrescentá-la | 8 |
+
+**Limitações da fase 6B:**
+
+| Limitação | Por quê | Sai na |
+|---|---|---|
+| `aviso-apos-registrar` é um nome válido de `FALHAR_EM` sem gatilho nenhum | O outbox nasce com os cancelamentos da D39; armá-lo hoje é um servidor que nunca cai. O nome existe desde já para que a lista aceita seja a da seção 9.5 inteira | 8 |
+| No contêiner, a variável continua armada depois de um `docker compose start` | O ambiente é do contêiner, não da execução. Para `coord-apos-decidir` isso é inofensivo — o ponto só fica no caminho de um `RESERVAR` novo —, mas `coord-durante-confirmar` e `part-apos-confirmar` cairiam outra vez na retomada. Religar é sempre **sem** a variável, e é o que os testes em processo fazem | — |
 
 O relatório SBC é escrito fora deste roteiro.
 
