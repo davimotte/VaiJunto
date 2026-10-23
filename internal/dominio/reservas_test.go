@@ -25,15 +25,84 @@ func as(hora, minuto int) time.Time {
 	return time.Date(2026, 10, 1, hora, minuto, 0, 0, fusoBrasilia())
 }
 
+// reservar faz, dentro de uma empresa só, o que o coordenador faz pela rede
+// (seção 7.1): prepara, valida o encadeamento sobre as pernas que o dono
+// devolveu e confirma.
+//
+// Existe porque o Reservar do P1 não existe mais (D07 revogada): as regras que
+// estes testes cobrem continuam todas valendo, mas se espalharam pelos passos
+// do 2PC. Reunir os passos aqui mantém os casos legíveis e, principalmente,
+// mantém a **regressão**: cada itinerário que o P1 recusava tem de continuar
+// recusado, agora pelo passo que herdou a regra.
+//
+// Os passos estão na ordem do coordenador de verdade, e o abort também: uma
+// tentativa que falha no encadeamento ou na sobreposição já tinha descontado
+// assentos no PREPARAR, e é o ABORTAR que os devolve. É por isso que os testes
+// de recusa podem afirmar, depois, que nenhum contador se moveu.
+func reservar(e *Estado, passageiroID string, itens []ItemReserva, agora time.Time) (Reserva, Itinerario, error) {
+	if err := ValidarItens(itens); err != nil {
+		return Reserva{}, Itinerario{}, err
+	}
+	txID, err := GerarIDTransacao(e.Empresa())
+	if err != nil {
+		return Reserva{}, Itinerario{}, err
+	}
+	participantes := []string{e.Empresa()}
+
+	pernas, err := e.Preparar(PedidoPreparacao{
+		TxID:          txID,
+		Coordenador:   e.Empresa(),
+		Participantes: participantes,
+		Carimbo:       Carimbo{Lamport: 1, Empresa: e.Empresa()},
+		Passageiro:    Passageiro{Ref: e.Empresa() + ":" + passageiroID, Nome: passageiroID},
+		Itens:         itens,
+	}, agora)
+	if err != nil {
+		return Reserva{}, Itinerario{}, err
+	}
+
+	if err := ValidarEncadeamento(pernas); err != nil {
+		_, _ = e.Abortar(txID)
+		return Reserva{}, Itinerario{}, err
+	}
+
+	r, it, err := e.ConfirmarReserva(txID, passageiroID, participantes, itens, pernas, agora)
+	if err != nil {
+		_, _ = e.Abortar(txID)
+		return Reserva{}, Itinerario{}, err
+	}
+	if _, err := e.Confirmar(txID); err != nil {
+		return Reserva{}, Itinerario{}, err
+	}
+	return r, it, nil
+}
+
 // reservarNoCenario é o atalho das reservas bem-sucedidas, que aparecem como
 // preparação em quase todos os testes de cancelamento.
 func reservarNoCenario(t *testing.T, e *Estado, passageiro string, itens ...ItemReserva) Reserva {
 	t.Helper()
-	r, _, err := e.Reservar(passageiro, itens, as(0, 0))
+	r, _, err := reservar(e, passageiro, itens, as(0, 0))
 	if err != nil {
-		t.Fatalf("Reservar(%s, %v): %v", passageiro, itens, err)
+		t.Fatalf("reservar(%s, %v): %v", passageiro, itens, err)
 	}
 	return r
+}
+
+// desativarReservaNoTeste marca uma reserva como inativa sem passar pelo
+// cancelamento, que na fase 5 é recusado (D39, fase 8).
+//
+// Mexe no estado direto porque é teste do mesmo pacote, e porque a alternativa
+// seria não poder testar nada que dependa de reserva inativa — a listagem com
+// incluir_canceladas, por exemplo — até a fase 8.
+func desativarReservaNoTeste(t *testing.T, e *Estado, reservaID string) {
+	t.Helper()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	r, existe := e.reservas[reservaID]
+	if !existe {
+		t.Fatalf("desativarReservaNoTeste: reserva %q não existe", reservaID)
+	}
+	r.Ativa = false
 }
 
 // item monta um ItemReserva, só para deixar as tabelas de caso legíveis.
@@ -64,7 +133,7 @@ func livresDe(t *testing.T, e *Estado, motorista, caronaID string) []int {
 func TestReservar_BaldeacaoDaCargaDecrementaSoOsTrechosUsados(t *testing.T) {
 	e := estadoDoCenario(t)
 
-	reserva, itinerario, err := e.Reservar("maria", []ItemReserva{item("vaijunto:car-1", 0, 2), item("vaijunto:car-2", 0, 1)}, as(0, 0))
+	reserva, itinerario, err := reservar(e, "maria", []ItemReserva{item("vaijunto:car-1", 0, 2), item("vaijunto:car-2", 0, 1)}, as(0, 0))
 	if err != nil {
 		t.Fatalf("Reservar: %v", err)
 	}
@@ -112,7 +181,10 @@ func TestReservar_Recusas(t *testing.T) {
 		esperado error
 	}{
 		{"lista vazia", nil, ErrItemInvalido},
-		{"carona inexistente", []ItemReserva{item("car-99", 0, 1)}, ErrCaronaNaoEncontrada},
+		{"carona inexistente", []ItemReserva{item("vaijunto:car-99", 0, 1)}, ErrCaronaNaoEncontrada},
+		// Novo no P2: sem prefixo de empresa não há como saber a quem pedir o
+		// assento (D27), e a recusa vem antes de qualquer transação.
+		{"identificador sem empresa", []ItemReserva{item("car-1", 0, 1)}, ErrIDSemEmpresa},
 		{"de igual a ate", []ItemReserva{item("vaijunto:car-1", 1, 1)}, ErrItemInvalido},
 		{"de maior que ate", []ItemReserva{item("vaijunto:car-1", 2, 1)}, ErrItemInvalido},
 		{"de negativo", []ItemReserva{item("vaijunto:car-1", -1, 1)}, ErrItemInvalido},
@@ -128,7 +200,7 @@ func TestReservar_Recusas(t *testing.T) {
 		t.Run(caso.nome, func(t *testing.T) {
 			e := estadoDoCenario(t)
 
-			_, _, err := e.Reservar("maria", caso.itens, as(0, 0))
+			_, _, err := reservar(e, "maria", caso.itens, as(0, 0))
 			if !errors.Is(err, caso.esperado) {
 				t.Fatalf("erro = %v, want %v", err, caso.esperado)
 			}
@@ -160,7 +232,7 @@ func TestReservar_RecusaItinerarioQueVoltaACidade(t *testing.T) {
 	b := publicarNoDia(t, e, []string{"Feira de Santana", "Salvador"}, as(8, 30), as(10, 30))
 	c := publicarNoDia(t, e, []string{"Salvador", "Vitória da Conquista"}, as(11, 0), as(18, 30))
 
-	_, _, err := e.Reservar("maria", []ItemReserva{item(a, 0, 1), item(b, 0, 1), item(c, 0, 1)}, as(0, 0))
+	_, _, err := reservar(e, "maria", []ItemReserva{item(a, 0, 1), item(b, 0, 1), item(c, 0, 1)}, as(0, 0))
 	if !errors.Is(err, ErrItinerarioInvalido) {
 		t.Fatalf("erro = %v, want ErrItinerarioInvalido", err)
 	}
@@ -193,7 +265,7 @@ func TestReservar_RecusaPernaQueAtravessaCidadeVisitada(t *testing.T) {
 	b := publicarNoDia(t, e, []string{"Jequié", "Salvador", "Feira de Santana"}, as(8, 30), as(9, 30), as(10, 30))
 	c := publicarNoDia(t, e, []string{"Feira de Santana", "Vitória da Conquista"}, as(11, 0), as(14, 0))
 
-	_, _, err := e.Reservar("maria", []ItemReserva{item(a, 0, 1), item(b, 0, 2), item(c, 0, 1)}, as(0, 0))
+	_, _, err := reservar(e, "maria", []ItemReserva{item(a, 0, 1), item(b, 0, 2), item(c, 0, 1)}, as(0, 0))
 	if !errors.Is(err, ErrItinerarioInvalido) {
 		t.Fatalf("erro = %v, want ErrItinerarioInvalido", err)
 	}
@@ -201,7 +273,7 @@ func TestReservar_RecusaPernaQueAtravessaCidadeVisitada(t *testing.T) {
 		t.Errorf("%s livres = %v, want [2 2]: a recusa escreveu antes de validar tudo", b, got)
 	}
 
-	if _, _, err := e.Reservar("maria", []ItemReserva{item(b, 1, 2), item(c, 0, 1)}, as(0, 0)); err != nil {
+	if _, _, err := reservar(e, "maria", []ItemReserva{item(b, 1, 2), item(c, 0, 1)}, as(0, 0)); err != nil {
 		t.Fatalf("B de Salvador a Feira + C deveria ser aceito: %v", err)
 	}
 	if got := livresDe(t, e, "joao", b); got[0] != 2 || got[1] != 1 {
@@ -224,7 +296,7 @@ func TestReservar_SemAssentoNaoDecrementaAPernaDisponivel(t *testing.T) {
 
 	// pedro tenta chegar lá via car-1 até Feira (06:00 → 07:45) e car-4 a
 	// partir das 08:15, folga de 30 min, encadeamento válido. Só falta assento.
-	_, _, err := e.Reservar("pedro", []ItemReserva{item("vaijunto:car-1", 0, 1), item("vaijunto:car-4", 0, 1)}, as(0, 0))
+	_, _, err := reservar(e, "pedro", []ItemReserva{item("vaijunto:car-1", 0, 1), item("vaijunto:car-4", 0, 1)}, as(0, 0))
 	if !errors.Is(err, ErrSemAssento) {
 		t.Fatalf("erro = %v, want ErrSemAssento", err)
 	}
@@ -258,7 +330,7 @@ func TestReservar_ConflitoDeHorarioDoMesmoPassageiro(t *testing.T) {
 
 	primeira := reservarNoCenario(t, e, "maria", item("vaijunto:car-1", 0, 2))
 
-	_, _, err := e.Reservar("maria", []ItemReserva{item("vaijunto:car-4", 0, 1)}, as(0, 0))
+	_, _, err := reservar(e, "maria", []ItemReserva{item("vaijunto:car-4", 0, 1)}, as(0, 0))
 	if !errors.Is(err, ErrConflitoHorario) {
 		t.Fatalf("erro = %v, want ErrConflitoHorario", err)
 	}
@@ -272,12 +344,12 @@ func TestReservar_ConflitoDeHorarioDoMesmoPassageiro(t *testing.T) {
 	}
 
 	// O mesmo passageiro em outro veículo, mas em período que não se cruza.
-	if _, _, err := e.Reservar("maria", []ItemReserva{item("vaijunto:car-2", 0, 1)}, as(0, 0)); err != nil {
+	if _, _, err := reservar(e, "maria", []ItemReserva{item("vaijunto:car-2", 0, 1)}, as(0, 0)); err != nil {
 		t.Fatalf("reserva em período livre recusada: %v", err)
 	}
 
 	// E o conflito é por passageiro: pedro não é afetado pela reserva de maria.
-	if _, _, err := e.Reservar("pedro", []ItemReserva{item("vaijunto:car-4", 0, 1)}, as(0, 0)); err != nil {
+	if _, _, err := reservar(e, "pedro", []ItemReserva{item("vaijunto:car-4", 0, 1)}, as(0, 0)); err != nil {
 		t.Fatalf("reserva de outro passageiro recusada: %v", err)
 	}
 }
@@ -285,7 +357,15 @@ func TestReservar_ConflitoDeHorarioDoMesmoPassageiro(t *testing.T) {
 // TestCancelarReserva_DevolveAssentosDeTodosOsTrechos confere o efeito da
 // seção 5.11 do PROTOCOL.md: a reserva fica inativa e cada trecho que ela
 // consumia recupera um assento, nas duas caronas.
+//
+// **Suspenso na fase 5.** Uma reserva do P2 tem pernas em outras empresas, e
+// devolver assento só aqui deixaria os dos outros donos presos (I-P2-5). O
+// efeito volta na fase 8, com a decisão unilateral e o outbox da D39; até lá a
+// operação é recusada por inteiro, e é isso que TestCancelarReserva_Provisorio
+// verifica. O teste fica, em vez de ser apagado, porque é a regressão que a
+// fase 8 precisa reativar.
 func TestCancelarReserva_DevolveAssentosDeTodosOsTrechos(t *testing.T) {
+	t.Skip("efeito do cancelamento chega na fase 8 (D39); ver TestCancelarReserva_Provisorio")
 	e := estadoDoCenario(t)
 
 	reserva := reservarNoCenario(t, e, "maria", item("vaijunto:car-1", 0, 2), item("vaijunto:car-2", 0, 1))
@@ -339,8 +419,11 @@ func TestCancelarReserva_PrazoDoPassageiro(t *testing.T) {
 
 			err := e.CancelarReserva(reserva.ID, "maria", caso.agora)
 			if caso.permitido {
-				if err != nil {
-					t.Fatalf("CancelarReserva: %v", err)
+				// Dentro do prazo, a validação passa e o que barra é a recusa
+				// provisória da fase 5 — não o prazo. É o que mantém este teste
+				// pinando a fronteira mesmo com o efeito suspenso.
+				if !errors.Is(err, ErrOperacaoIndisponivel) {
+					t.Fatalf("dentro do prazo: erro = %v, want ErrOperacaoIndisponivel", err)
 				}
 				return
 			}
@@ -373,17 +456,20 @@ func TestCancelarReserva_Recusas(t *testing.T) {
 		t.Errorf("reserva de outro passageiro: erro = %v, want ErrNaoEDono", err)
 	}
 
-	if err := e.CancelarReserva(reserva.ID, "maria", as(0, 0)); err != nil {
-		t.Fatalf("CancelarReserva: %v", err)
-	}
-	if err := e.CancelarReserva(reserva.ID, "maria", as(0, 0)); !errors.Is(err, ErrReservaJaCancelada) {
-		t.Errorf("segundo cancelamento: erro = %v, want ErrReservaJaCancelada", err)
+	// ErrReservaJaCancelada precisa de uma reserva inativa para ser alcançado,
+	// e nada desativa reserva na fase 5 — o cancelamento é recusado antes de
+	// mudar qualquer coisa. O caso volta na fase 8, junto com o efeito.
+
+	// A recusa provisória vem **depois** das validações de posse e de prazo, o
+	// que prova que elas continuam rodando: a fase 8 as reaproveita como estão.
+	if err := e.CancelarReserva(reserva.ID, "maria", as(0, 0)); !errors.Is(err, ErrOperacaoIndisponivel) {
+		t.Errorf("dono e prazo corretos: erro = %v, want ErrOperacaoIndisponivel", err)
 	}
 
-	// O segundo cancelamento não pode ter devolvido o assento de novo: seria
-	// I2 violada por cima, com mais assentos livres do que o veículo tem.
-	if got := livresDe(t, e, "joao", "vaijunto:car-1"); got[0] != 3 {
-		t.Errorf("car-1 livres = %v, want [3 3]", got)
+	// A recusa não pode ter devolvido assento: seria I2 violada por cima, com
+	// mais assentos livres do que o veículo tem.
+	if got := livresDe(t, e, "joao", "vaijunto:car-1"); got[0] != 2 {
+		t.Errorf("car-1 livres = %v, want [2 2]: a recusa devolveu assento", got)
 	}
 }
 
@@ -439,6 +525,13 @@ func TestCancelarCarona_PrazoDoMotoristaVaiAteAPartida(t *testing.T) {
 //   - a reserva de pedro, que não usa car-1, não é tocada. A cascata atinge as
 //     reservas que dependem da carona, e não todas as reservas do sistema.
 func TestCancelarCarona_CascataDevolveAssentosDeCaronasVizinhas(t *testing.T) {
+	// **Suspenso na fase 5.** A cascata da D29 atravessa empresas: o dono avisa
+	// o coordenador de cada reserva atingida, que cancela o itinerário inteiro,
+	// e isso depende do outbox da fase 8. Cancelar só as pernas locais deixaria
+	// as outras vendidas. O teste fica como a regressão que a fase 8 reativa, e
+	// a recusa provisória é verificada em TestCancelarCarona_Provisorio.
+	t.Skip("cascata entre empresas chega na fase 8 (D29, D39); ver TestCancelarCarona_Provisorio")
+
 	e := estadoDoCenario(t)
 
 	daMaria := reservarNoCenario(t, e, "maria", item("vaijunto:car-1", 0, 2), item("vaijunto:car-2", 0, 1))
@@ -497,15 +590,59 @@ func TestCancelarCarona_Recusas(t *testing.T) {
 		t.Errorf("uma recusa cancelou reservas: maria tem %d ativa(s), want 1", len(ativas))
 	}
 
-	if _, err := e.CancelarCarona("vaijunto:car-1", "joao", as(0, 0)); err != nil {
-		t.Fatalf("CancelarCarona: %v", err)
+	// car-3 não tem reserva nenhuma, então o cancelamento passa normalmente: a
+	// recusa provisória da fase 5 atinge só as caronas com reserva.
+	if _, err := e.CancelarCarona("vaijunto:car-3", "ana", as(0, 0)); err != nil {
+		t.Fatalf("CancelarCarona(car-3): %v", err)
 	}
-	if _, err := e.CancelarCarona("vaijunto:car-1", "joao", as(0, 0)); !errors.Is(err, ErrCaronaCancelada) {
+	if _, err := e.CancelarCarona("vaijunto:car-3", "ana", as(0, 0)); !errors.Is(err, ErrCaronaCancelada) {
 		t.Errorf("segundo cancelamento: erro = %v, want ErrCaronaCancelada", err)
 	}
-	// O segundo cancelamento não pode ter devolvido assento de novo.
-	if got := livresDe(t, e, "joao", "vaijunto:car-1"); got[0] != 3 {
-		t.Errorf("car-1 livres = %v, want [3 3]", got)
+	// A reserva da maria, em car-1, não foi tocada por nada disso.
+	if got := livresDe(t, e, "joao", "vaijunto:car-1"); got[0] != 2 {
+		t.Errorf("car-1 livres = %v, want [2 2]", got)
+	}
+}
+
+// TestCancelarCarona_Provisorio fixa a recusa da fase 5: uma carona com reserva
+// não pode ser cancelada enquanto a cascata entre empresas não existir (D29).
+//
+// É conservador de propósito. Cancelar a carona e as pernas locais deixaria as
+// pernas das outras empresas do mesmo itinerário vendidas, com o passageiro
+// achando que viaja — e o enunciado exige "ou todos os trechos, ou nenhum".
+// Recusar atrasa o motorista; cancelar pela metade quebra a reserva de alguém.
+func TestCancelarCarona_Provisorio(t *testing.T) {
+	e := estadoDoCenario(t)
+	reservarNoCenario(t, e, "maria", item("vaijunto:car-1", 0, 2))
+
+	_, err := e.CancelarCarona("vaijunto:car-1", "joao", as(0, 0))
+	if !errors.Is(err, ErrOperacaoIndisponivel) {
+		t.Fatalf("erro = %v, want ErrOperacaoIndisponivel", err)
+	}
+	// A recusa não escreveu nada: a carona segue válida e o assento, ocupado.
+	if ativas := e.ReservasDoPassageiro("maria", false); len(ativas) != 1 {
+		t.Errorf("a recusa mexeu na reserva: maria tem %d ativa(s), want 1", len(ativas))
+	}
+	if got := livresDe(t, e, "joao", "vaijunto:car-1"); got[0] != 2 {
+		t.Errorf("car-1 livres = %v, want [2 2]", got)
+	}
+}
+
+// TestCancelarReserva_Provisorio fixa a outra metade da recusa da fase 5.
+func TestCancelarReserva_Provisorio(t *testing.T) {
+	e := estadoDoCenario(t)
+	reserva := reservarNoCenario(t, e, "maria", item("vaijunto:car-1", 0, 2))
+
+	// 04:00: duas horas antes da partida das 06:00, bem dentro do prazo.
+	if err := e.CancelarReserva(reserva.ID, "maria", as(4, 0)); !errors.Is(err, ErrOperacaoIndisponivel) {
+		t.Fatalf("erro = %v, want ErrOperacaoIndisponivel", err)
+	}
+	// Nada mudou: a reserva segue ativa e o assento, descontado.
+	if ativas := e.ReservasDoPassageiro("maria", false); len(ativas) != 1 {
+		t.Errorf("a recusa desativou a reserva: %+v", ativas)
+	}
+	if got := livresDe(t, e, "joao", "vaijunto:car-1"); got[0] != 2 {
+		t.Errorf("car-1 livres = %v, want [2 2]", got)
 	}
 }
 
@@ -519,7 +656,7 @@ func TestReservar_CaronaCanceladaReprova(t *testing.T) {
 		t.Fatalf("CancelarCarona: %v", err)
 	}
 
-	_, _, err := e.Reservar("maria", []ItemReserva{item("vaijunto:car-1", 0, 2)}, as(0, 0))
+	_, _, err := reservar(e, "maria", []ItemReserva{item("vaijunto:car-1", 0, 2)}, as(0, 0))
 	if !errors.Is(err, ErrCaronaCancelada) {
 		t.Fatalf("erro = %v, want ErrCaronaCancelada", err)
 	}
@@ -546,16 +683,19 @@ func TestReservasDoPassageiro_LimiteCortaDepoisDeOrdenar(t *testing.T) {
 		if err != nil {
 			t.Fatalf("PublicarCarona %d: %v", i, err)
 		}
-		r, _, err := e.Reservar("maria", []ItemReserva{item(c.ID, 0, 1)}, agoraDaPublicacao())
+		r, _, err := reservar(e, "maria", []ItemReserva{item(c.ID, 0, 1)}, agoraDaPublicacao())
 		if err != nil {
 			t.Fatalf("Reservar %d: %v", i, err)
 		}
 		ids[i] = r.ID
 	}
+	// As reservas são desativadas direto no estado, e não por CancelarReserva,
+	// que na fase 5 responde recusa provisória (D39 chega na fase 8). O que
+	// este teste afirma é a ordenação e o corte da listagem, não o caminho do
+	// cancelamento — é o mesmo recurso de cancelarParticipacaoNoTeste, que
+	// monta uma situação CANCELADO à mão por não haver quem a produza ainda.
 	for _, id := range ids[:canceladas] {
-		if err := e.CancelarReserva(id, "maria", agoraDaPublicacao()); err != nil {
-			t.Fatalf("CancelarReserva(%s): %v", id, err)
-		}
+		desativarReservaNoTeste(t, e, id)
 	}
 
 	lista := e.ReservasDoPassageiro("maria", true)
@@ -572,5 +712,113 @@ func TestReservasDoPassageiro_LimiteCortaDepoisDeOrdenar(t *testing.T) {
 
 	if n := len(e.ReservasDoPassageiro("maria", false)); n != ativas {
 		t.Fatalf("sem as canceladas: len = %d, want %d", n, ativas)
+	}
+}
+
+// TestValidarEncadeamento_RecusaOsControlesNegativosDoFixture prende as duas
+// leituras da regra de encadeamento ao mesmo resultado.
+//
+// A regra existe em dois lugares de propósito (ver o comentário de
+// ValidarEncadeamento): na busca ela é poda incremental dentro da DFS, e aqui é
+// conferência final sobre um itinerário completo. São algoritmos diferentes
+// sobre a mesma regra, e é exatamente o arranjo em que uma divergência passa
+// despercebida — a busca ofereceria um itinerário que a reserva recusa, e o
+// passageiro veria a opção sumir entre a consulta e a confirmação.
+//
+// Os três casos são os controles negativos do fixture do P1 (seção 12.4), os
+// mesmos que a busca já recusa: car-6 viola a margem, car-7 estoura o teto de
+// espera, car-8 fecha um ciclo. Se um dia a busca passar a aceitar qualquer um
+// deles, este teste continua provando que a reserva não aceita.
+func TestValidarEncadeamento_RecusaOsControlesNegativosDoFixture(t *testing.T) {
+	// Pernas montadas com os horários do fixture, no formato autoritativo que
+	// os donos devolvem no voto (seção 3.3 da API).
+	perna := func(carona string, cidades []string, partida, chegada time.Time) Perna {
+		return Perna{
+			CaronaID: carona, Empresa: "vaijunto", MotoristaNome: "João Silva",
+			De: 0, Ate: len(cidades) - 1, Cidades: cidades,
+			Partida: partida, Chegada: chegada, PrecoCentavos: 3000,
+		}
+	}
+
+	casos := []struct {
+		nome   string
+		pernas []Perna
+	}{
+		{
+			// car-1 chega a Jequié 10:45; esta parte 11:00, 15 min depois.
+			"folga abaixo da margem (car-6)",
+			[]Perna{
+				perna("vaijunto:car-1", []string{"Salvador", "Feira de Santana", "Jequié"}, as(6, 0), as(10, 45)),
+				perna("vaijunto:car-6", []string{"Jequié", "Vitória da Conquista"}, as(11, 0), as(13, 0)),
+			},
+		},
+		{
+			// Parte no dia seguinte: 24 h de espera, acima do teto de 12 h.
+			"espera acima do teto (car-7)",
+			[]Perna{
+				perna("vaijunto:car-1", []string{"Salvador", "Feira de Santana", "Jequié"}, as(6, 0), as(10, 45)),
+				perna("vaijunto:car-7", []string{"Jequié", "Vitória da Conquista"},
+					as(10, 45).AddDate(0, 0, 1), as(13, 0).AddDate(0, 0, 1)),
+			},
+		},
+		{
+			// Volta a Salvador, por onde o itinerário já passou.
+			"ciclo pela cidade de origem (car-8)",
+			[]Perna{
+				perna("vaijunto:car-1", []string{"Salvador", "Feira de Santana"}, as(6, 0), as(7, 45)),
+				perna("vaijunto:car-8", []string{"Feira de Santana", "Salvador"}, as(9, 0), as(11, 0)),
+			},
+		},
+		{
+			// Encadeia no tempo, mas não no espaço.
+			"desembarque diferente do embarque seguinte",
+			[]Perna{
+				perna("vaijunto:car-1", []string{"Salvador", "Feira de Santana"}, as(6, 0), as(7, 45)),
+				perna("vaijunto:car-2", []string{"Jequié", "Vitória da Conquista"}, as(9, 0), as(11, 0)),
+			},
+		},
+		{
+			// Cidade intermediária repetida: o passageiro passa duas vezes por
+			// Feira de Santana, uma delas sem desembarcar. É o caso que só as
+			// Cidades completas da Perna permitem pegar (D42, seção 3.3).
+			"cidade intermediária repetida",
+			[]Perna{
+				perna("vaijunto:car-1", []string{"Salvador", "Feira de Santana"}, as(6, 0), as(7, 45)),
+				perna("vaijunto:car-5", []string{"Feira de Santana", "Jequié"}, as(9, 0), as(11, 0)),
+				perna("vaijunto:car-3", []string{"Jequié", "Feira de Santana", "Vitória da Conquista"},
+					as(12, 0), as(16, 0)),
+			},
+		},
+	}
+
+	for _, caso := range casos {
+		t.Run(caso.nome, func(t *testing.T) {
+			if err := ValidarEncadeamento(caso.pernas); !errors.Is(err, ErrItinerarioInvalido) {
+				t.Fatalf("erro = %v, want ErrItinerarioInvalido", err)
+			}
+		})
+	}
+}
+
+// TestValidarEncadeamento_AceitaOItinerarioDaDemonstracao é o contraponto: as
+// margens do cenário da seção 12.2, que a demonstração D-1 percorre, passam.
+//
+// Sem este caso o teste acima poderia ser satisfeito por uma função que recusa
+// tudo.
+func TestValidarEncadeamento_AceitaOItinerarioDaDemonstracao(t *testing.T) {
+	// 90 min de folga em cada baldeação, como na seção 12.2.
+	pernas := []Perna{
+		{CaronaID: "vaijunto:car-1", Empresa: "vaijunto", De: 0, Ate: 2,
+			Cidades: []string{"Salvador", "Feira de Santana", "Vitória da Conquista"},
+			Partida: as(5, 0), Chegada: as(12, 30), PrecoCentavos: 9500},
+		{CaronaID: "rotacapixaba:car-1", Empresa: "rotacapixaba", De: 0, Ate: 2,
+			Cidades: []string{"Vitória da Conquista", "Vitória", "Cachoeiro de Itapemirim"},
+			Partida: as(14, 0), Chegada: as(6, 30).AddDate(0, 0, 1), PrecoCentavos: 21500},
+		{CaronaID: "rotafluminense:car-1", Empresa: "rotafluminense", De: 0, Ate: 2,
+			Cidades: []string{"Cachoeiro de Itapemirim", "Rio de Janeiro", "Petrópolis"},
+			Partida: as(8, 0).AddDate(0, 0, 1), Chegada: as(14, 30).AddDate(0, 0, 1), PrecoCentavos: 12000},
+	}
+	if err := ValidarEncadeamento(pernas); err != nil {
+		t.Fatalf("o itinerário da demonstração foi recusado: %v", err)
 	}
 }

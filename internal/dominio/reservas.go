@@ -27,21 +27,28 @@ import (
 // sentido da regra, prendendo o passageiro a um veículo que não vai sair.
 const ANTECEDENCIA_CANCELAMENTO = 1 * time.Hour
 
-// gerarIDReserva sorteia um identificador opaco no formato
-// "<empresa>:res-91c2a07e" (D27; PROTOCOL.md, seção 3), pelos mesmos motivos de gerarIDCarona: roda dentro da
-// seção crítica, então conferir colisão contra o mapa é grátis.
-func gerarIDReserva(e *Estado) (string, error) {
-	var sufixo [4]byte
-	for tentativa := 0; tentativa < 10; tentativa++ {
-		if _, err := rand.Read(sufixo[:]); err != nil {
-			return "", fmt.Errorf("%w: %v", ErrGeracaoDeID, err)
-		}
-		id := prefixar(e.empresa, "res-"+hex.EncodeToString(sufixo[:]))
-		if _, existe := e.reservas[id]; !existe {
-			return id, nil
-		}
+// GerarIDTransacao sorteia o identificador de uma transação, no formato
+// "<empresa>:res-91c2a07e" (D27; seção 4.2).
+//
+// A mesma família de prefixo "res-" serve à transação e à reserva porque cada
+// tentativa de reserva **é** uma transação com identificador próprio (D36), e a
+// reserva confirmada fica com o identificador da tentativa que venceu.
+//
+// Diferente do gerador do P1, não recebe o Estado e não confere colisão contra
+// o mapa de reservas: o coordenador precisa do identificador **antes** de tocar
+// no estado, porque o txID vai no PREPARAR e a votação acontece inteira fora de
+// qualquer seção crítica (regra 2). A colisão continua coberta onde importa —
+// ConfirmarReserva recusa um txID que já exista, e aí seria violação de
+// protocolo, não azar.
+func GerarIDTransacao(empresa string) (string, error) {
+	if err := ValidarEmpresa(empresa); err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("%w: espaço de identificadores esgotado", ErrGeracaoDeID)
+	var sufixo [4]byte
+	if _, err := rand.Read(sufixo[:]); err != nil {
+		return "", fmt.Errorf("%w: %v", ErrGeracaoDeID, err)
+	}
+	return prefixar(empresa, "res-"+hex.EncodeToString(sufixo[:])), nil
 }
 
 // copia devolve uma cópia profunda da reserva, pelo mesmo motivo de
@@ -50,52 +57,56 @@ func gerarIDReserva(e *Estado) (string, error) {
 func (r *Reserva) copia() Reserva {
 	copiada := *r
 	copiada.Itens = append([]ItemReserva(nil), r.Itens...)
+	copiada.Participantes = append([]string(nil), r.Participantes...)
+	copiada.Pernas = make([]Perna, len(r.Pernas))
+	for i, p := range r.Pernas {
+		copiada.Pernas[i] = p
+		// Cidades é fatia dentro da perna: copiar só o slice externo deixaria
+		// as duas reservas apontando para o mesmo arranjo de cidades.
+		copiada.Pernas[i].Cidades = append([]string(nil), p.Cidades...)
+	}
 	return copiada
 }
 
-// itinerarioDaReserva resolve os índices guardados na reserva contra as
-// caronas, produzindo o itinerário completo com cidades, horários e preços.
+// itinerarioDasPernas monta o itinerário legível a partir da cópia das pernas
+// que a reserva guarda (D42).
 //
-// É a única função que traduz {carona, De, Ate} em dados legíveis, e por isso
-// é o ponto de reúso das quatro operações: a reserva usa o intervalo para
-// checar sobreposição, a listagem devolve o itinerário inteiro ao passageiro, e
-// os dois cancelamentos precisam da partida do primeiro trecho.
+// No P1 esta função resolvia {carona, De, Ate} contra e.caronas, para não
+// guardar duas vezes o mesmo dado (PROJETO.md, seção 4). No P2 isso não serve
+// mais: as caronas das pernas remotas estão em **outros** servidores, e procurar
+// por carona de outra empresa em e.caronas não encontra nada. Listar as
+// reservas não pode depender de todos os pares estarem no ar (RD05), então a
+// fonte passa a ser a cópia autoritativa que veio nos votos SIM.
 //
-// Uma reserva nunca referencia carona inexistente (identificadores não são
-// removidos do estado), mas a checagem existe para que uma inconsistência
-// futura vire um itinerário incompleto e visível, e não um pânico dentro da
-// seção crítica — que derrubaria o servidor inteiro, e não só a conexão.
-func itinerarioDaReserva(e *Estado, r *Reserva) Itinerario {
-	it := Itinerario{Pernas: make([]PernaItinerario, 0, len(r.Itens))}
-
-	for _, item := range r.Itens {
-		c, ok := e.caronas[item.CaronaID]
-		if !ok {
+// A cópia não diverge do original porque rota, horários e preços são imutáveis
+// após a publicação (D09). O único dado mutável, o cancelamento, chega ao
+// coordenador pelo aviso da D39.
+//
+// É função pura sobre a cópia: não lê o estado e por isso nem precisaria do
+// lock. Fica aqui por coerência com o resto do arquivo.
+func itinerarioDasPernas(pernas []Perna) Itinerario {
+	it := Itinerario{Pernas: make([]PernaItinerario, 0, len(pernas))}
+	for _, p := range pernas {
+		if len(p.Cidades) < 2 {
+			// Perna malformada nunca é gravada; a checagem existe para que uma
+			// inconsistência futura vire um itinerário incompleto e visível, e
+			// não um pânico dentro da seção crítica — que derrubaria o servidor
+			// inteiro, e não só a conexão.
 			continue
 		}
-
-		motorista := c.MotoristaID
-		if u, ok := e.usuarios[c.MotoristaID]; ok {
-			motorista = u.Nome
-		}
-
-		preco := 0
-		for t := item.De; t < item.Ate; t++ {
-			preco += c.PrecoTrecho[t]
-		}
-
 		it.Pernas = append(it.Pernas, PernaItinerario{
-			CaronaID:      c.ID,
-			Motorista:     motorista,
-			De:            item.De,
-			Ate:           item.Ate,
-			Origem:        c.Rota[item.De],
-			Destino:       c.Rota[item.Ate],
-			Partida:       c.Horarios[item.De],
-			Chegada:       c.Horarios[item.Ate],
-			PrecoCentavos: preco,
+			CaronaID:      p.CaronaID,
+			Empresa:       p.Empresa,
+			Motorista:     p.MotoristaNome,
+			De:            p.De,
+			Ate:           p.Ate,
+			Origem:        p.Cidades[0],
+			Destino:       p.Cidades[len(p.Cidades)-1],
+			Partida:       p.Partida,
+			Chegada:       p.Chegada,
+			PrecoCentavos: p.PrecoCentavos,
 		})
-		it.PrecoTotalCentavos += preco
+		it.PrecoTotalCentavos += p.PrecoCentavos
 	}
 
 	if len(it.Pernas) > 0 {
@@ -117,127 +128,190 @@ func seSobrepoe(partidaA, chegadaA, partidaB, chegadaB time.Time) bool {
 	return !chegadaA.Before(partidaB) && !chegadaB.Before(partidaA)
 }
 
-// reservar implementa o algoritmo de reserva atômica da seção 7 do PROJETO.md
-// e responde a RESERVAR (PROTOCOL.md, seção 5.9).
+// ValidarItens é o passo 1 do algoritmo do coordenador (seção 7.1): o que se
+// pode conferir na lista pedida sem saber nada das caronas.
 //
-// A estrutura da função **é** o argumento de corretude, e por isso os passos
-// estão marcados: os passos 1 a 4 apenas leem e podem retornar erro a qualquer
-// momento; o passo 6 apenas escreve e não pode mais falhar. Nenhuma escrita
-// acontece antes de toda a validação passar, então não existe estado parcial a
-// desfazer e nenhum rollback é necessário (RNF06).
+// Fica no domínio, e não na borda TCP, porque é regra de negócio: "de < ate" e
+// "nenhuma carona repetida" valem venha o pedido de onde vier. O que **não**
+// está aqui é se a empresa de cada carona pertence ao consórcio — essa lista é
+// configuração do servidor, e quem a tem é o coordenador (camada 5).
 //
-// Tudo isso roda dentro da seção crítica aberta por Estado.Reservar, de forma
-// que a disponibilidade lida no passo 3 é exatamente a que o passo 6 decrementa
-// — é isso, e não a busca, que garante RNF05.
-func reservar(e *Estado, passageiroID string, itens []ItemReserva, agora time.Time) (Reserva, Itinerario, error) {
-	// Passo 1 — formato.
+// Embarcar duas vezes no mesmo veículo não é itinerário: é a mesma regra que a
+// busca aplica ao montar os candidatos (PROJETO.md, seção 6).
+func ValidarItens(itens []ItemReserva) error {
 	if len(itens) == 0 {
-		return Reserva{}, Itinerario{}, fmt.Errorf("%w: nenhum trecho informado", ErrItemInvalido)
+		return fmt.Errorf("%w: nenhum trecho informado", ErrItemInvalido)
 	}
 
-	caronas := make([]*Carona, len(itens))
 	vistas := make(map[string]bool, len(itens))
 	for i, item := range itens {
-		c, ok := e.caronas[item.CaronaID]
-		if !ok {
-			return Reserva{}, Itinerario{}, fmt.Errorf("%w: %q", ErrCaronaNaoEncontrada, item.CaronaID)
+		if item.CaronaID == "" {
+			return fmt.Errorf("%w: o trecho %d não informa a carona", ErrItemInvalido, i)
 		}
-		if c.Cancelada {
-			return Reserva{}, Itinerario{}, fmt.Errorf("%w: %q", ErrCaronaCancelada, item.CaronaID)
+		if _, err := EmpresaDoID(item.CaronaID); err != nil {
+			return err
 		}
-		if item.De < 0 || item.De >= item.Ate || item.Ate > len(c.Rota)-1 {
-			return Reserva{}, Itinerario{}, fmt.Errorf("%w: trecho [%d,%d) fora da rota de %q, que tem %d cidades",
-				ErrItemInvalido, item.De, item.Ate, item.CaronaID, len(c.Rota))
+		if item.De < 0 || item.De >= item.Ate {
+			return fmt.Errorf("%w: trecho [%d,%d) inválido em %q", ErrItemInvalido, item.De, item.Ate, item.CaronaID)
 		}
-		// Embarcar duas vezes no mesmo veículo não é itinerário — é a mesma
-		// regra que a busca aplica ao montar os candidatos (PROJETO.md, seção 6).
 		if vistas[item.CaronaID] {
-			return Reserva{}, Itinerario{}, fmt.Errorf("%w: a carona %q aparece duas vezes", ErrItinerarioInvalido, item.CaronaID)
+			return fmt.Errorf("%w: a carona %q aparece duas vezes", ErrItinerarioInvalido, item.CaronaID)
 		}
 		vistas[item.CaronaID] = true
-		caronas[i] = c
+	}
+	return nil
+}
+
+// ValidarEncadeamento é o passo 7 do algoritmo do coordenador (seção 7.1): o
+// encadeamento no espaço e no tempo do itinerário inteiro, verificado sobre os
+// dados **autoritativos** que os donos devolveram nos votos SIM (D34).
+//
+// É o passo 2 do RESERVAR do P1 (PROJETO.md, seção 7), agora do lado de quem
+// coordena. A divisão da D34 é esta: cada participante valida o que só ele sabe
+// (a carona existe, não está cancelada, os índices cabem, há assento), e o
+// coordenador valida o que envolve mais de uma empresa — e por isso nenhuma
+// empresa sozinha poderia validar.
+//
+// O coordenador **não** confia no resultado da busca, que pode estar
+// desatualizado: os horários conferidos aqui são os que o dono afirmou agora,
+// no voto, e não os que a busca mostrou ao passageiro.
+//
+// As duas margens são as mesmas constantes da busca (D13). Se divergissem, a
+// busca ofereceria itinerários que a reserva recusa, e o passageiro veria a
+// opção sumir entre a consulta e a confirmação.
+//
+// É função pura: roda fora do lock, porque só trabalha sobre a cópia das
+// pernas. A versão da busca (caronas.go) continua separada de propósito — lá o
+// encadeamento é poda incremental dentro da DFS, que valida a próxima perna
+// enquanto expande; aqui é conferência final de um itinerário completo.
+func ValidarEncadeamento(pernas []Perna) error {
+	if len(pernas) == 0 {
+		return fmt.Errorf("%w: itinerário sem pernas", ErrItinerarioInvalido)
+	}
+	for i, p := range pernas {
+		if len(p.Cidades) < 2 {
+			return fmt.Errorf("%w: a perna %d não informa as cidades percorridas", ErrItinerarioInvalido, i)
+		}
 	}
 
-	// Passo 2 — encadeamento no espaço e no tempo.
-	//
-	// As duas margens são as mesmas constantes da busca (D13). Se divergissem,
-	// a busca ofereceria itinerários que a reserva recusa, e o passageiro veria
-	// a opção sumir entre a consulta e a confirmação.
-	for i := 1; i < len(itens); i++ {
-		anterior, atual := caronas[i-1], caronas[i]
-		desembarque := anterior.Rota[itens[i-1].Ate]
-		embarque := atual.Rota[itens[i].De]
+	for i := 1; i < len(pernas); i++ {
+		anterior, atual := pernas[i-1], pernas[i]
+		desembarque := anterior.Cidades[len(anterior.Cidades)-1]
+		embarque := atual.Cidades[0]
 		if desembarque != embarque {
-			return Reserva{}, Itinerario{}, fmt.Errorf("%w: o trecho %d desembarca em %q e o seguinte embarca em %q",
+			return fmt.Errorf("%w: o trecho %d desembarca em %q e o seguinte embarca em %q",
 				ErrItinerarioInvalido, i-1, desembarque, embarque)
 		}
 
-		chegada := anterior.Horarios[itens[i-1].Ate]
-		partida := atual.Horarios[itens[i].De]
+		chegada, partida := anterior.Chegada, atual.Partida
 		if partida.Before(chegada.Add(MARGEM_BALDEACAO)) {
-			return Reserva{}, Itinerario{}, fmt.Errorf("%w: folga de %s entre o trecho %d e o %d, abaixo da margem de %s",
+			return fmt.Errorf("%w: folga de %s entre o trecho %d e o %d, abaixo da margem de %s",
 				ErrItinerarioInvalido, partida.Sub(chegada), i-1, i, MARGEM_BALDEACAO)
 		}
 		if partida.After(chegada.Add(ESPERA_MAXIMA_BALDEACAO)) {
-			return Reserva{}, Itinerario{}, fmt.Errorf("%w: espera de %s entre o trecho %d e o %d, acima do teto de %s",
+			return fmt.Errorf("%w: espera de %s entre o trecho %d e o %d, acima do teto de %s",
 				ErrItinerarioInvalido, partida.Sub(chegada), i-1, i, ESPERA_MAXIMA_BALDEACAO)
 		}
 	}
 
-	// Ainda no passo 2: nenhuma cidade se repete no itinerário (D09). É a mesma
-	// regra do passo 3 da busca, e pelo mesmo motivo das margens acima: sem ela
-	// aqui, o cliente confirmaria por chamada direta ao protocolo um itinerário
-	// de ida e volta que a busca nunca ofereceria.
-	//
-	// Contam todas as cidades de cada item, inclusive as intermediárias por onde
-	// o passageiro passa dentro do veículo. A de embarque de cada item fica de
-	// fora porque é a de desembarque do item anterior — já marcada, e onde o
-	// passageiro de fato está. O passo 1 já garantiu que [De, Ate] cabe na rota.
-	visitadas := map[string]bool{caronas[0].Rota[itens[0].De]: true}
-	for i, item := range itens {
-		percorridas := caronas[i].Rota[item.De+1 : item.Ate+1]
+	// Nenhuma cidade se repete no itinerário (D09), contando as intermediárias
+	// por onde o passageiro passa dentro do veículo — é para isso que a Perna
+	// carrega Cidades inteira, e não só origem e destino. A de embarque de cada
+	// perna fica de fora porque é a de desembarque da anterior: já marcada, e
+	// onde o passageiro de fato está.
+	visitadas := map[string]bool{pernas[0].Cidades[0]: true}
+	for i, p := range pernas {
+		percorridas := p.Cidades[1:]
 		for _, cidade := range percorridas {
 			if visitadas[cidade] {
-				return Reserva{}, Itinerario{}, fmt.Errorf("%w: o itinerário passa duas vezes por %q (trecho %d)",
+				return fmt.Errorf("%w: o itinerário passa duas vezes por %q (trecho %d)",
 					ErrItinerarioInvalido, cidade, i)
 			}
 		}
 		marcar(percorridas, visitadas, true)
 	}
+	return nil
+}
 
-	// Passo 3 — disponibilidade, trecho a trecho (RF11, D10).
-	for i, item := range itens {
-		c := caronas[i]
-		for t := item.De; t < item.Ate; t++ {
-			if c.Livres[t] < 1 {
-				return Reserva{}, Itinerario{}, &ErroSemAssento{
-					CaronaID:     c.ID,
-					IndiceTrecho: t,
-					Origem:       c.Rota[t],
-					Destino:      c.Rota[t+1],
-				}
-			}
-		}
+// marcarReservaEmAndamento é o passo 2 do coordenador (D35): no máximo uma
+// reserva em andamento por passageiro.
+//
+// No P1 o mutex global impedia que duas reservas simultâneas do mesmo
+// passageiro furassem a checagem de sobreposição (T8). No P2 entre a votação e
+// a decisão passa-se tempo de rede, e as duas poderiam passar na checagem: a
+// seção crítica da validação não é mais a mesma da gravação. A marca restaura a
+// garantia sem precisar segurar o lock durante a votação, que é proibido
+// (regra 2).
+//
+// Nada disso vai ao log: o coordenador não grava nada antes de decidir (D23).
+func marcarReservaEmAndamento(e *Estado, passageiroID string) error {
+	if e.emAndamento[passageiroID] {
+		return fmt.Errorf("%w: %q", ErrReservaEmAndamento, passageiroID)
+	}
+	e.emAndamento[passageiroID] = true
+	return nil
+}
+
+// liberarReservaEmAndamento retira a marca da D35. O coordenador a chama num
+// defer, para que ela saia em **qualquer** saída do algoritmo — erro, prazo
+// esgotado, abort ou pânico.
+func liberarReservaEmAndamento(e *Estado, passageiroID string) {
+	delete(e.emAndamento, passageiroID)
+}
+
+// confirmarReserva é o passo 8 do coordenador, o **ponto de commit** da
+// transação (seção 7.1): grava DECISAO_CONFIRMAR com fsync e cria a reserva
+// com a cópia das pernas (D42).
+//
+// Duas coisas acontecem aqui numa seção crítica só, e a ordem é o argumento de
+// corretude:
+//
+//  1. a sobreposição com as reservas ativas do passageiro é conferida (passo 4
+//     do P1, D14) — ela é a última coisa que ainda pode falhar;
+//  2. só então o registro vai ao log, e só depois de o fsync voltar a reserva
+//     entra no estado.
+//
+// Validar e escrever na mesma seção crítica é a regra 5 ("valide tudo antes de
+// escrever qualquer coisa"): nenhuma escrita acontece antes de toda a validação
+// passar, então não existe estado parcial a desfazer. A D35 já garantiria que
+// nenhuma outra reserva deste passageiro entra no meio, mas conferir aqui
+// dispensa esse argumento — a invariante passa a ser local a esta função.
+//
+// O OK ao passageiro só pode sair depois do retorno desta função, porque é o
+// fsync do DECISAO_CONFIRMAR que torna a decisão durável (regra 3). A partir
+// daqui a transação está confirmada mesmo que o servidor caia: a fase 2 é
+// retomada no boot (seção 9.3).
+//
+// **Não mexe em Livres.** Os assentos se movem só pelos registros do dono
+// (PREPARADO, CONFIRMADO, ABORTADO): esta reserva é a visão do coordenador, e
+// descontar aqui também seria descontar o mesmo assento duas vezes quando a
+// empresa é coordenadora e participante da mesma transação.
+func confirmarReserva(e *Estado, txID, passageiroID string, participantes []string, itens []ItemReserva, pernas []Perna, agora time.Time) (Reserva, Itinerario, error) {
+	if _, existe := e.reservas[txID]; existe {
+		// O txID é novo a cada tentativa (D36) e nasce aqui; repetição é bug do
+		// coordenador, não caso de idempotência.
+		return Reserva{}, Itinerario{}, fmt.Errorf("%w: a reserva %q já existe", ErrViolacaoProtocolo, txID)
 	}
 
-	// Passo 4 — sobreposição com as reservas ativas do mesmo passageiro (D14).
-	//
-	// A comparação é sobre o itinerário inteiro, da primeira partida à última
-	// chegada, e não trecho a trecho: o tempo de espera de uma baldeação também
-	// é tempo em que o passageiro não pode estar em outra viagem.
-	partida := caronas[0].Horarios[itens[0].De]
-	chegada := caronas[len(itens)-1].Horarios[itens[len(itens)-1].Ate]
+	it := itinerarioDasPernas(pernas)
+	if len(it.Pernas) == 0 {
+		return Reserva{}, Itinerario{}, fmt.Errorf("%w: nenhuma perna autoritativa", ErrItinerarioInvalido)
+	}
 
+	// Passo 4 do P1 — sobreposição com as reservas ativas do mesmo passageiro
+	// (D14). A comparação é sobre o itinerário inteiro, da primeira partida à
+	// última chegada, e não trecho a trecho: o tempo de espera de uma baldeação
+	// também é tempo em que o passageiro não pode estar em outra viagem.
 	conflitante := ""
 	for _, r := range e.reservas {
 		if !r.Ativa || r.PassageiroID != passageiroID {
 			continue
 		}
-		outro := itinerarioDaReserva(e, r)
+		outro := itinerarioDasPernas(r.Pernas)
 		if len(outro.Pernas) == 0 {
 			continue
 		}
-		if !seSobrepoe(partida, chegada, outro.Partida, outro.Chegada) {
+		if !seSobrepoe(it.Partida, it.Chegada, outro.Partida, outro.Chegada) {
 			continue
 		}
 		// Havendo mais de uma conflitante, reportar sempre a de menor
@@ -252,33 +326,53 @@ func reservar(e *Estado, passageiroID string, itens []ItemReserva, agora time.Ti
 		return Reserva{}, Itinerario{}, &ErroConflitoHorario{ReservaID: conflitante}
 	}
 
-	// Última coisa que ainda pode falhar, e por isso vem antes de qualquer
-	// escrita: gerar o identificador depende de crypto/rand.
-	id, err := gerarIDReserva(e)
-	if err != nil {
+	nova := &Reserva{
+		ID:           txID,
+		PassageiroID: passageiroID,
+		// Tudo entra copiado: o estado não pode compartilhar memória com quem o
+		// alimentou, e as pernas vêm de fora, da resposta dos participantes.
+		Itens:         append([]ItemReserva(nil), itens...),
+		Participantes: append([]string(nil), participantes...),
+		Ativa:         true,
+		CriadaEm:      agora,
+	}
+	nova.Pernas = make([]Perna, len(pernas))
+	for i, p := range pernas {
+		nova.Pernas[i] = p
+		nova.Pernas[i].Cidades = append([]string(nil), p.Cidades...)
+	}
+
+	// Write-ahead: o registro vai ao log, com fsync, antes de a reserva entrar
+	// no estado (regra 3). Falha no log não aplica nada.
+	if err := gravar(e, tipoDecisaoConfirmar, dadosDecisaoConfirmarDe(nova)); err != nil {
 		return Reserva{}, Itinerario{}, err
 	}
 
-	// Passo 6 — commit. Daqui para baixo nada retorna erro.
-	for i, item := range itens {
-		c := caronas[i]
-		for t := item.De; t < item.Ate; t++ {
-			c.Livres[t]--
-		}
-	}
+	e.reservas[txID] = nova
+	return nova.copia(), it, nil
+}
 
-	nova := &Reserva{
-		ID:           id,
-		PassageiroID: passageiroID,
-		// Os itens vêm decodificados do JSON do cliente e entram copiados: o
-		// estado não pode compartilhar memória com quem o alimentou.
-		Itens:    append([]ItemReserva(nil), itens...),
-		Ativa:    true,
-		CriadaEm: agora,
+// concluirReserva marca o fim da fase 2 (seção 7.1, passo 9): todos os
+// participantes confirmaram o recebimento do CONFIRMAR.
+//
+// É só um fato registrado, sem efeito sobre assentos. Serve à auditoria e à
+// recuperação: uma reserva confirmada e **não** concluída é o que faz o boot
+// retomar a fase 2 (seção 9.3).
+func concluirReserva(e *Estado, txID string) error {
+	r, existe := e.reservas[txID]
+	if !existe {
+		return fmt.Errorf("%w: reserva %q desconhecida", ErrReservaNaoEncontrada, txID)
 	}
-	e.reservas[id] = nova
-
-	return nova.copia(), itinerarioDaReserva(e, nova), nil
+	if r.Concluida {
+		// Idempotente: a fase 2 pode terminar duas vezes se a repetição e a
+		// retomada do boot se cruzarem.
+		return nil
+	}
+	if err := gravar(e, tipoConcluida, dadosTransacao{Tx: txID}); err != nil {
+		return err
+	}
+	r.Concluida = true
+	return nil
 }
 
 // reservasDoPassageiro lista as reservas de um passageiro com os itinerários
@@ -308,7 +402,7 @@ func reservasDoPassageiro(e *Estado, passageiroID string, incluirCanceladas bool
 			ID:         r.ID,
 			Ativa:      r.Ativa,
 			CriadaEm:   r.CriadaEm,
-			Itinerario: itinerarioDaReserva(e, r),
+			Itinerario: itinerarioDasPernas(r.Pernas),
 		})
 	}
 
@@ -327,28 +421,24 @@ func reservasDoPassageiro(e *Estado, passageiroID string, incluirCanceladas bool
 	return lista
 }
 
-// devolverAssentos reativa a capacidade consumida por uma reserva, trecho a
-// trecho, em **todas** as caronas que ela usa.
+// devolverItens devolve a capacidade consumida por uma lista de itens, trecho a
+// trecho, em **todas** as caronas que eles usam.
 //
-// É o passo que sustenta o lado inferior de I1 (Livres nunca abaixo do que a
+// É o passo que sustenta o lado inferior da I-P2-1 (Livres nunca abaixo do que a
 // ocupação real exige) e a metade de RNF07 que fala de assento bloqueado para
-// sempre. Ele devolve os assentos até das caronas canceladas: o assento de uma
+// sempre. Devolve os assentos até das caronas canceladas: o assento de uma
 // carona cancelada não vale nada, mas deixá-lo decrementado quebraria a
 // invariante e mascararia um defeito de verdade no próximo teste que a
 // verificasse.
 //
-// Não marca a reserva como inativa — quem chama decide isso —, mas só deve ser
-// chamada junto com essa marcação, ou o assento seria devolvido duas vezes.
-func devolverAssentos(e *Estado, r *Reserva) {
-	devolverItens(e, r.Itens)
-}
-
-// devolverItens devolve a capacidade consumida por uma lista de itens.
+// Opera sobre itens, e não sobre uma Reserva, porque na fase 5 o único usuário é
+// o abort do participante (seção 7.2), que libera os assentos em espera de uma
+// participação — ela tem itens, mas não é uma Reserva. O caminho que a chamava
+// pela reserva inteira era o cancelamento do P1, suspenso até a fase 8
+// (cancelarReserva, abaixo); quando ele voltar, volta por aqui.
 //
-// É o laço que estava dentro de devolverAssentos, isolado porque o abort do
-// participante precisa exatamente dele (seção 7.2): liberar os assentos em
-// espera de uma participação, que tem itens mas não é uma Reserva. Uma segunda
-// cópia do laço seria uma segunda chance de errar o limite do trecho.
+// Não marca nada como inativo — quem chama decide isso —, mas só deve ser
+// chamada junto com essa marcação, ou o assento seria devolvido duas vezes.
 func devolverItens(e *Estado, itens []ItemReserva) {
 	for _, item := range itens {
 		c, ok := e.caronas[item.CaronaID]
@@ -363,10 +453,20 @@ func devolverItens(e *Estado, itens []ItemReserva) {
 
 // cancelarReserva desfaz uma reserva do passageiro (PROTOCOL.md, seção 5.11).
 //
-// Mesma forma da reserva: valida tudo, e só então escreve. O prazo é contado da
-// partida do primeiro trecho e vale até ANTECEDENCIA_CANCELAMENTO antes dela
-// (D13); o instante exato do limite ainda é permitido, porque o prazo é "até 1
-// hora antes", e não "menos de 1 hora antes".
+// **Limitação temporária da fase 5** (seção 14). Uma reserva do P2 tem pernas
+// em outras empresas, e cancelá-la exige a decisão unilateral com outbox da
+// D39: gravar CANCELAMENTO_DECIDIDO, cancelar as pernas locais e retransmitir
+// CANCELAR_PERNAS a cada participante até ele confirmar. Enquanto o aviso não
+// chega, o assento continua ocupado no dono — conservador de propósito, para
+// nunca causar venda dupla.
+//
+// Devolver os assentos só aqui, como o P1 fazia, deixaria a reserva cancelada
+// no coordenador e os assentos em espera presos nos donos para sempre, o que
+// violaria a I-P2-5. Então, até a fase 8, a operação é recusada por inteiro:
+// recusar é honesto, devolver pela metade não.
+//
+// As validações de posse e de prazo ficam escritas, porque continuam valendo e
+// a fase 8 as reaproveita; só o efeito está suspenso.
 func cancelarReserva(e *Estado, reservaID, passageiroID string, agora time.Time) error {
 	r, ok := e.reservas[reservaID]
 	if !ok {
@@ -379,7 +479,7 @@ func cancelarReserva(e *Estado, reservaID, passageiroID string, agora time.Time)
 		return fmt.Errorf("%w: %q", ErrReservaJaCancelada, reservaID)
 	}
 
-	it := itinerarioDaReserva(e, r)
+	it := itinerarioDasPernas(r.Pernas)
 	if len(it.Pernas) > 0 {
 		limite := it.Partida.Add(-ANTECEDENCIA_CANCELAMENTO)
 		if agora.After(limite) {
@@ -387,9 +487,7 @@ func cancelarReserva(e *Estado, reservaID, passageiroID string, agora time.Time)
 		}
 	}
 
-	r.Ativa = false
-	devolverAssentos(e, r)
-	return nil
+	return fmt.Errorf("%w: cancelamento de reserva chega na fase 8 (D39)", ErrOperacaoIndisponivel)
 }
 
 // cancelarCarona cancela a carona do motorista e propaga o cancelamento às
@@ -429,35 +527,45 @@ func cancelarCarona(e *Estado, caronaID, motoristaID string, agora time.Time) (i
 		return 0, &ErroPrazoCancelamento{Partida: partida}
 	}
 
-	// D22, regra 3: o registro é gravado antes de qualquer mudança. É a última
-	// coisa que pode falhar; depois dela a aplicação é só atribuição em memória.
-	// As reservas atingidas não vão ao log nesta fase (seção 14): elas só
-	// existem em memória até o 2PC da Fase 5.
-	if err := gravar(e, tipoCaronaCancelada, dadosCaronaCancelada{Carona: caronaID}); err != nil {
-		return 0, err
+	// **Limitação temporária da fase 5** (seção 14). A cascata da D29/D39 — o
+	// dono avisa o coordenador de cada reserva atingida, que cancela o
+	// itinerário inteiro — depende do outbox, que chega na fase 8. Uma carona
+	// usada por reserva de outra empresa não pode ser cancelada só aqui: as
+	// outras pernas do itinerário ficariam vendidas, contra a D29.
+	//
+	// Também não há ainda o CARONA_EM_TRANSACAO da D39 para participação em
+	// PREPARADO; nesta fase as duas situações respondem a mesma recusa.
+	for _, pt := range e.participacoes {
+		if pt.Situacao != SituacaoPreparado && pt.Situacao != SituacaoConfirmado {
+			continue
+		}
+		for _, item := range pt.Itens {
+			if item.CaronaID == caronaID {
+				return 0, fmt.Errorf("%w: a carona %q tem reserva e a cascata chega na fase 8 (D29, D39)",
+					ErrOperacaoIndisponivel, caronaID)
+			}
+		}
 	}
-
-	// A partir daqui nada mais pode falhar.
-	c.Cancelada = true
-
-	canceladas := 0
 	for _, r := range e.reservas {
 		if !r.Ativa {
 			continue
 		}
-		usa := false
 		for _, item := range r.Itens {
 			if item.CaronaID == caronaID {
-				usa = true
-				break
+				return 0, fmt.Errorf("%w: a carona %q tem reserva e a cascata chega na fase 8 (D29, D39)",
+					ErrOperacaoIndisponivel, caronaID)
 			}
 		}
-		if !usa {
-			continue
-		}
-		r.Ativa = false
-		devolverAssentos(e, r)
-		canceladas++
 	}
-	return canceladas, nil
+
+	// D22, regra 3: o registro é gravado antes de qualquer mudança. É a última
+	// coisa que pode falhar; depois dela a aplicação é só atribuição em memória.
+	if err := gravar(e, tipoCaronaCancelada, dadosCaronaCancelada{Carona: caronaID}); err != nil {
+		return 0, err
+	}
+
+	// A partir daqui nada mais pode falhar. Nenhuma reserva é atingida: as que
+	// seriam já fizeram a função recusar acima.
+	c.Cancelada = true
+	return 0, nil
 }

@@ -71,7 +71,7 @@ func TestIDsGerados_LevamPrefixoDaEmpresa(t *testing.T) {
 		t.Errorf("ID da carona = %q, want rotacapixaba:car-<8 hex>", carona.ID)
 	}
 
-	reserva, _, err := e.Reservar("maria", []ItemReserva{{CaronaID: carona.ID, De: 0, Ate: 1}}, agora)
+	reserva, _, err := reservar(e, "maria", []ItemReserva{{CaronaID: carona.ID, De: 0, Ate: 1}}, agora)
 	if err != nil {
 		t.Fatalf("Reservar: %v", err)
 	}

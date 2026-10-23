@@ -149,6 +149,64 @@ func reaplicar(e *Estado, registros [][]byte) (uint64, error) {
 				return 0, fmt.Errorf("dominio: log, registro %d (%s): transação %q está em %s", n, r.Tipo, d.Tx, pt.Situacao)
 			}
 
+		case tipoDecisaoConfirmar:
+			var d dadosDecisaoConfirmar
+			if err := json.Unmarshal(r.Dados, &d); err != nil {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): dados ilegíveis: %w", n, r.Tipo, err)
+			}
+			if _, repetida := e.reservas[d.Tx]; repetida {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): reserva %q repetida", n, r.Tipo, d.Tx)
+			}
+			if len(d.Pernas) == 0 {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): reserva %q sem pernas", n, r.Tipo, d.Tx)
+			}
+			itens := make([]ItemReserva, 0, len(d.Itens))
+			for _, item := range d.Itens {
+				itens = append(itens, ItemReserva{CaronaID: item.Carona, De: item.De, Ate: item.Ate})
+			}
+			pernas := make([]Perna, 0, len(d.Pernas))
+			for _, p := range d.Pernas {
+				pernas = append(pernas, Perna{
+					CaronaID:      p.Carona,
+					Empresa:       p.Empresa,
+					MotoristaNome: p.MotoristaNome,
+					De:            p.De,
+					Ate:           p.Ate,
+					Cidades:       p.Cidades,
+					Partida:       p.Partida,
+					Chegada:       p.Chegada,
+					PrecoCentavos: p.PrecoCentavos,
+				})
+			}
+			// **Não toca em Livres.** Esta é a visão do coordenador; os assentos
+			// se movem só pelos registros do dono (PREPARADO, CONFIRMADO,
+			// ABORTADO). Quando a empresa é coordenadora e participante da mesma
+			// transação, os dois registros estão neste mesmo arquivo, cada um
+			// com o seu efeito — descontar aqui também seria contar o mesmo
+			// assento duas vezes.
+			e.reservas[d.Tx] = &Reserva{
+				ID:            d.Tx,
+				PassageiroID:  d.Passageiro,
+				Itens:         itens,
+				Pernas:        pernas,
+				Participantes: d.Participantes,
+				Ativa:         true,
+				CriadaEm:      d.CriadaEm,
+			}
+
+		case tipoConcluida:
+			var d dadosTransacao
+			if err := json.Unmarshal(r.Dados, &d); err != nil {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): dados ilegíveis: %w", n, r.Tipo, err)
+			}
+			// CONCLUIDA só é gravada para reserva que existe (seção 7.1, passo
+			// 9), então reserva desconhecida aqui é log corrompido.
+			reserva, conhecida := e.reservas[d.Tx]
+			if !conhecida {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): reserva %q desconhecida", n, r.Tipo, d.Tx)
+			}
+			reserva.Concluida = true
+
 		default:
 			return 0, fmt.Errorf("dominio: log, registro %d: tipo desconhecido %q", n, r.Tipo)
 		}

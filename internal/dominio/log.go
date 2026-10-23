@@ -53,6 +53,11 @@ const (
 	tipoPreparado       = "PREPARADO"
 	tipoConfirmado      = "CONFIRMADO"
 	tipoAbortado        = "ABORTADO"
+	// Os dois do coordenador (seção 4.8). O abort presumido (D23) explica por
+	// que não existe um "DECISAO_ABORTAR": transação sem decisão gravada **é**
+	// uma transação abortada, então gravar o abort seria gravar o padrão.
+	tipoDecisaoConfirmar = "DECISAO_CONFIRMAR"
+	tipoConcluida        = "CONCLUIDA"
 )
 
 // registro é o envelope de cada linha do log (seção 4.8). Lamport é o L da
@@ -128,6 +133,38 @@ type dadosTransacao struct {
 	Tx string `json:"tx"`
 }
 
+// dadosDecisaoConfirmar é o corpo de DECISAO_CONFIRMAR, o ponto de commit do
+// coordenador (seção 4.8).
+//
+// Guarda a reserva inteira, **com as pernas**, e não só os índices. É a D42:
+// as caronas das pernas remotas estão em outros servidores, então o replay não
+// tem contra o que resolver {carona, De, Ate} — se as pernas não estivessem
+// aqui, uma reserva com trecho de outra empresa voltaria ilegível do boot, e
+// listar as reservas passaria a depender de todos os pares estarem no ar
+// (RD05). CriadaEm também vai ao log porque é o instante da decisão, e o replay
+// não pode inventá-lo.
+type dadosDecisaoConfirmar struct {
+	Tx            string     `json:"tx"`
+	Passageiro    string     `json:"passageiro"`
+	Participantes []string   `json:"participantes"`
+	Itens         []itemLog  `json:"itens"`
+	Pernas        []pernaLog `json:"pernas"`
+	CriadaEm      time.Time  `json:"criada_em"`
+}
+
+// pernaLog é a Perna autoritativa como ela vai ao log (seção 3.3 da API).
+type pernaLog struct {
+	Carona        string    `json:"carona"`
+	Empresa       string    `json:"empresa"`
+	MotoristaNome string    `json:"motorista_nome"`
+	De            int       `json:"de"`
+	Ate           int       `json:"ate"`
+	Cidades       []string  `json:"cidades"`
+	Partida       time.Time `json:"partida"`
+	Chegada       time.Time `json:"chegada"`
+	PrecoCentavos int       `json:"preco_centavos"`
+}
+
 func dadosCaronaPublicadaDe(c *Carona) dadosCaronaPublicada {
 	return dadosCaronaPublicada{
 		Carona:         c.ID,
@@ -151,6 +188,35 @@ func dadosPreparadoDe(p PedidoPreparacao) dadosPreparado {
 		Itens:         itens,
 		Carimbo:       carimboLog{Lamport: p.Carimbo.Lamport, Empresa: p.Carimbo.Empresa},
 		Passageiro:    passageiroLog{Ref: p.Passageiro.Ref, Nome: p.Passageiro.Nome},
+	}
+}
+
+func dadosDecisaoConfirmarDe(r *Reserva) dadosDecisaoConfirmar {
+	itens := make([]itemLog, 0, len(r.Itens))
+	for _, item := range r.Itens {
+		itens = append(itens, itemLog{Carona: item.CaronaID, De: item.De, Ate: item.Ate})
+	}
+	pernas := make([]pernaLog, 0, len(r.Pernas))
+	for _, p := range r.Pernas {
+		pernas = append(pernas, pernaLog{
+			Carona:        p.CaronaID,
+			Empresa:       p.Empresa,
+			MotoristaNome: p.MotoristaNome,
+			De:            p.De,
+			Ate:           p.Ate,
+			Cidades:       p.Cidades,
+			Partida:       p.Partida,
+			Chegada:       p.Chegada,
+			PrecoCentavos: p.PrecoCentavos,
+		})
+	}
+	return dadosDecisaoConfirmar{
+		Tx:            r.ID,
+		Passageiro:    r.PassageiroID,
+		Participantes: r.Participantes,
+		Itens:         itens,
+		Pernas:        pernas,
+		CriadaEm:      r.CriadaEm,
 	}
 }
 

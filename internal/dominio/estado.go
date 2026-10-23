@@ -27,6 +27,7 @@ func NovoEstado(empresa string) *Estado {
 		caronas:       make(map[string]*Carona),
 		reservas:      make(map[string]*Reserva),
 		participacoes: make(map[string]*Participacao),
+		emAndamento:   make(map[string]bool),
 		log:           NovaLogMemoria(),
 		lamport:       relogioParado,
 	}
@@ -153,17 +154,72 @@ func (e *Estado) CancelarCarona(caronaID, motoristaID string, agora time.Time) (
 	return cancelarCarona(e, caronaID, motoristaID, agora)
 }
 
-// Reservar confirma um itinerário de forma atômica (PROTOCOL.md, seção 5.9).
+// Empresa devolve o identificador desta empresa (D27).
 //
-// Este é o método que carrega o peso de RNF05 e RNF06. Toda a validação e toda
-// a escrita do algoritmo da seção 7 acontecem entre este Lock e este Unlock —
-// não existe uma segunda seção crítica, nem estado intermediário de "assento em
-// espera" entre elas (D07). Cinquenta conexões disputando o mesmo assento se
-// enfileiram aqui, e só a primeira encontra Livres maior que zero.
-func (e *Estado) Reservar(passageiroID string, itens []ItemReserva, agora time.Time) (Reserva, Itinerario, error) {
+// Não precisa do lock: o campo é atribuído na criação e nunca mais escrito.
+// Existe porque o coordenador precisa dele para montar a referência opaca do
+// passageiro ("<empresa>:<usuario>", D32) e o carimbo da transação (D24).
+func (e *Estado) Empresa() string {
+	return e.empresa
+}
+
+// MarcarReservaEmAndamento é o passo 2 do coordenador: no máximo uma reserva em
+// andamento por passageiro (D35). Devolve ErrReservaEmAndamento se já houver.
+//
+// A seção crítica é curtíssima de propósito: ela **não** cobre a votação, que
+// faz E/S de rede e não pode acontecer com o lock preso (regra 2). É a marca,
+// e não o lock, que serializa as reservas do mesmo passageiro.
+func (e *Estado) MarcarReservaEmAndamento(passageiroID string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return reservar(e, passageiroID, itens, agora)
+	return marcarReservaEmAndamento(e, passageiroID)
+}
+
+// LiberarReservaEmAndamento retira a marca da D35. O coordenador a chama num
+// defer, para que ela saia em qualquer saída do algoritmo.
+func (e *Estado) LiberarReservaEmAndamento(passageiroID string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	liberarReservaEmAndamento(e, passageiroID)
+}
+
+// ConfirmarReserva é o ponto de commit do coordenador (seção 7.1, passo 8):
+// confere a sobreposição, grava DECISAO_CONFIRMAR com fsync e cria a reserva
+// com a cópia das pernas (D42).
+//
+// Substitui o Reservar do P1, que fazia a reserva inteira — validação e escrita
+// — numa seção crítica só (D07, revogada). No P2 isso não é possível: os
+// assentos estão em outras empresas, e garantir atomicidade passou a ser
+// trabalho do 2PC, não do mutex. O que **continua** valendo aqui é a regra 5:
+// entre este Lock e este Unlock, valida-se tudo antes de escrever qualquer
+// coisa, e nada parcial pode sobrar.
+//
+// O OK ao passageiro só sai depois que este método retorna, porque é o fsync
+// que ele faz que torna a decisão durável (regra 3).
+func (e *Estado) ConfirmarReserva(txID, passageiroID string, participantes []string, itens []ItemReserva, pernas []Perna, agora time.Time) (Reserva, Itinerario, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return confirmarReserva(e, txID, passageiroID, participantes, itens, pernas, agora)
+}
+
+// ConcluirReserva grava CONCLUIDA: a fase 2 terminou e todos os participantes
+// confirmaram o recebimento (seção 7.1, passo 9).
+func (e *Estado) ConcluirReserva(txID string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return concluirReserva(e, txID)
+}
+
+// Reserva devolve uma cópia de uma reserva, se ela existe. Serve à auditoria e
+// à retomada da fase 2; nenhuma decisão do protocolo a usa.
+func (e *Estado) Reserva(txID string) (Reserva, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	r, existe := e.reservas[txID]
+	if !existe {
+		return Reserva{}, false
+	}
+	return r.copia(), true
 }
 
 // ReservasDoPassageiro lista as reservas do passageiro com os itinerários já
@@ -257,4 +313,17 @@ func (e *Estado) Ocupacao() []OcupacaoTrecho {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return ocupacao(e)
+}
+
+// Auditoria devolve o estado completo da empresa para o verificador de
+// invariantes (seção 11.2).
+//
+// Uma chamada só, sob um único Lock, pelo mesmo motivo de Ocupacao: as
+// invariantes do P2 são relações entre caronas, participações e reservas, e
+// lê-las em chamadas separadas deixaria uma transação concorrente entrar no
+// meio e o verificador acusaria violação que nunca existiu.
+func (e *Estado) Auditoria() Auditoria {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return auditoria(e)
 }

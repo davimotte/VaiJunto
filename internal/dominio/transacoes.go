@@ -157,8 +157,8 @@ type PedidoPreparacao struct {
 // passo só: lê-la em duas chamadas deixaria uma transação concorrente entrar
 // no meio e acusar uma violação que nunca existiu.
 //
-// Confirmados soma as participações CONFIRMADO e as reservas ativas do P1, que
-// ainda descontam assentos até o 2PC substituir o RESERVAR na fase 5.
+// Confirmados soma as participações CONFIRMADO: com o 2PC, quem desconta
+// assento é sempre o dono da carona, pela participação dele.
 type OcupacaoTrecho struct {
 	CaronaID    string
 	Trecho      int
@@ -398,7 +398,7 @@ func validarPedido(e *Estado, p PedidoPreparacao) ([]*Carona, error) {
 //
 // Roda depois da validação, ou sobre itens que já foram validados quando a
 // participação nasceu. A checagem de carona ausente existe pelo mesmo motivo
-// da de itinerarioDaReserva: uma inconsistência futura deve virar uma resposta
+// da de itinerarioDasPernas: uma inconsistência futura deve virar uma resposta
 // incompleta e visível, e não um pânico dentro da seção crítica, que
 // derrubaria o servidor inteiro.
 func pernasDe(e *Estado, itens []ItemReserva) []Perna {
@@ -485,8 +485,8 @@ func contem(lista []string, valor string) bool {
 //
 // Inclui as caronas canceladas: o assento de uma carona cancelada não vale
 // nada, mas a conta tem de fechar mesmo nelas, ou um defeito de verdade ficaria
-// escondido atrás do cancelamento (é o mesmo motivo de devolverAssentos
-// devolver assento de carona cancelada).
+// escondido atrás do cancelamento (é o mesmo motivo de devolverItens devolver
+// assento de carona cancelada).
 func ocupacao(e *Estado) []OcupacaoTrecho {
 	var lista []OcupacaoTrecho
 	for _, c := range e.caronas {
@@ -511,12 +511,19 @@ func ocupacao(e *Estado) []OcupacaoTrecho {
 }
 
 // confirmadosNoTrecho conta os assentos de fato vendidos num trecho: as
-// participações CONFIRMADO e as reservas ativas do P1.
+// participações CONFIRMADO.
 //
-// As duas somas convivem porque, até a fase 5, o RESERVAR do cliente continua
-// sendo o do P1 e desconta assentos sem passar pelo 2PC (seção 14, limitação
-// temporária). Quando o coordenador substituir o RESERVAR, a segunda soma
-// deixa de encontrar reservas e some sozinha da conta.
+// Conta **só** as participações, e é aqui que mora um ponto fino do P2. As
+// reservas que esta empresa guarda são a visão de **coordenador** (seção 4.5):
+// elas podem ter pernas em outras empresas, e quem desconta assento é sempre o
+// dono da carona, pela sua participação. Somar as duas coisas contaria duas
+// vezes o mesmo assento toda vez que a empresa fosse coordenadora e
+// participante da mesma transação — que é o caso comum, porque o passageiro
+// costuma começar a viagem numa carona da própria empresa.
+//
+// Até a fase 4 a soma das reservas do P1 existia aqui, porque o RESERVAR ainda
+// descontava assentos sem passar pelo 2PC. Com o coordenador da fase 5 ela
+// saiu: toda venda passa pelo PREPARAR do dono.
 func confirmadosNoTrecho(e *Estado, caronaID string, trecho int) int {
 	n := 0
 	for _, pt := range e.participacoes {
@@ -524,10 +531,86 @@ func confirmadosNoTrecho(e *Estado, caronaID string, trecho int) int {
 			n++
 		}
 	}
-	for _, r := range e.reservas {
-		if r.Ativa && cobre(r.Itens, caronaID, trecho) {
-			n++
-		}
-	}
 	return n
+}
+
+// Auditoria é o estado completo da empresa para o verificador de invariantes
+// (seção 11.2; seção 4.9 da API).
+//
+// Existe porque, no P2, uma parte do estado correto não aparece para os
+// clientes: assentos em espera e participações são invisíveis pelo protocolo
+// TCP, então o verificador do P1, que reconstruía as invariantes pelo próprio
+// protocolo, não basta mais. E outra parte do estado correto é **a concordância
+// entre empresas**, que só pode ser observada olhando todas.
+//
+// Não é um componente central: é instrumento de observação, como o -race. Não
+// participa de nenhuma decisão, é somente leitura e fica desligado por padrão
+// (flag --auditoria).
+type Auditoria struct {
+	Empresa string
+	// Lamport é o relógio desta empresa no instante do retrato (seção 4.9 da
+	// API). Vem de dentro da seção crítica, junto com o resto: lido depois, por
+	// quem monta a resposta, daria ao verificador um retrato que nunca existiu.
+	Lamport       uint64
+	Caronas       []CaronaAuditada
+	Participacoes []Participacao
+	Reservas      []Reserva
+}
+
+// CaronaAuditada são os contadores de uma carona, trecho a trecho. A I-P2-1 é
+// verificada linha a linha: Livres + Confirmados + EmEspera == Assentos.
+type CaronaAuditada struct {
+	ID          string
+	Assentos    int
+	Cancelada   bool
+	Livres      []int
+	Confirmados []int
+	EmEspera    []int
+}
+
+// auditoria monta o retrato do estado. Roda com e.mu já travado (D05).
+//
+// Tudo numa chamada só, sob um único Lock, pelo mesmo motivo de ocupacao: as
+// invariantes do P2 são relações **entre** caronas, participações e reservas.
+// Ler cada parte numa chamada separada deixaria uma transação concorrente
+// entrar no meio, e o verificador acusaria uma violação que nunca existiu.
+func auditoria(e *Estado) Auditoria {
+	a := Auditoria{
+		Empresa:       e.empresa,
+		Lamport:       e.lamport(),
+		Caronas:       make([]CaronaAuditada, 0, len(e.caronas)),
+		Participacoes: make([]Participacao, 0, len(e.participacoes)),
+		Reservas:      make([]Reserva, 0, len(e.reservas)),
+	}
+
+	for _, c := range e.caronas {
+		linha := CaronaAuditada{
+			ID:          c.ID,
+			Assentos:    c.Assentos,
+			Cancelada:   c.Cancelada,
+			Livres:      append([]int(nil), c.Livres...),
+			Confirmados: make([]int, len(c.Livres)),
+			EmEspera:    make([]int, len(c.Livres)),
+		}
+		for t := range c.Livres {
+			linha.Confirmados[t] = confirmadosNoTrecho(e, c.ID, t)
+			linha.EmEspera[t] = len(portadores(e, c.ID, t))
+		}
+		a.Caronas = append(a.Caronas, linha)
+	}
+
+	for _, pt := range e.participacoes {
+		a.Participacoes = append(a.Participacoes, pt.copia())
+	}
+	for _, r := range e.reservas {
+		a.Reservas = append(a.Reservas, r.copia())
+	}
+
+	// Ordem explícita nas três listas: a iteração de mapa em Go é aleatória, e
+	// sem ela o mesmo GET /auditoria devolveria ordens diferentes, o que
+	// tornaria o teste instável e a comparação entre empresas penosa.
+	sort.Slice(a.Caronas, func(i, j int) bool { return a.Caronas[i].ID < a.Caronas[j].ID })
+	sort.Slice(a.Participacoes, func(i, j int) bool { return a.Participacoes[i].TxID < a.Participacoes[j].TxID })
+	sort.Slice(a.Reservas, func(i, j int) bool { return a.Reservas[i].ID < a.Reservas[j].ID })
+	return a
 }

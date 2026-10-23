@@ -119,6 +119,26 @@ var (
 	// existe para que, se acontecer, apareça registrada e verificável pelo
 	// teste, em vez de corromper o estado em silêncio.
 	ErrViolacaoProtocolo = errors.New("dominio: violação de protocolo do 2PC")
+
+	// ErrReservaEmAndamento — o passageiro já tem uma reserva em andamento
+	// (D35). Só o coordenador o produz, e só entre o RESERVAR e a decisão.
+	ErrReservaEmAndamento = errors.New("dominio: reserva em andamento para o passageiro")
+
+	// ErrEmpresaIndisponivel — alguma empresa dona de um trecho não respondeu
+	// dentro do prazo de votação (D30, D41). Nenhum assento fica preso: o
+	// coordenador aborta e quem não recebeu o ABORTAR descobre a decisão
+	// consultando (D23).
+	ErrEmpresaIndisponivel = errors.New("dominio: empresa indisponível")
+
+	// ErrOperacaoIndisponivel — operação prevista que ainda não está ligada
+	// nesta versão.
+	//
+	// **Provisório.** Existe só da fase 5 à 7, para os dois cancelamentos que
+	// dependem do outbox da D39: cancelar uma reserva e cancelar uma carona que
+	// tenha reserva. Recusar por inteiro é honesto; devolver os assentos só no
+	// coordenador deixaria os dos outros donos presos para sempre e violaria a
+	// I-P2-5. Sai na fase 8, junto com a seção 10.
+	ErrOperacaoIndisponivel = errors.New("dominio: operação indisponível nesta versão")
 )
 
 // TodosOsErros lista todos os sentinelas exportados do domínio.
@@ -154,6 +174,9 @@ func TodosOsErros() []error {
 		ErrItemDeOutraEmpresa,
 		ErrTransacaoAbortada,
 		ErrViolacaoProtocolo,
+		ErrReservaEmAndamento,
+		ErrEmpresaIndisponivel,
+		ErrOperacaoIndisponivel,
 	}
 }
 

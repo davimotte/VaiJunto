@@ -48,15 +48,32 @@ type ItemReserva struct {
 	De, Ate  int
 }
 
-// Reserva é um itinerário confirmado por um passageiro, possivelmente
-// combinando trechos de caronas diferentes (RF07). É criada de uma só vez,
-// dentro da seção crítica da confirmação (D07): não existe reserva parcial.
+// Reserva é um itinerário confirmado por um passageiro, guardada pelo
+// **coordenador**, isto é, pela empresa do passageiro (seção 4.5). É a reserva
+// que o passageiro lista e cancela.
+//
+// O ID **é** o TxID da tentativa que venceu (D36): cada tentativa de reserva é
+// uma transação com identificador próprio, e a que confirma dá o seu nome à
+// reserva. Guardar os dois lado a lado seria guardar o mesmo dado duas vezes.
+//
+// Pernas é a cópia dos dados que os participantes devolveram no voto SIM (D42).
+// No P1 a reserva guardava só os índices e os dados legíveis eram resolvidos
+// contra as caronas a cada listagem; no P2 as caronas das pernas remotas estão
+// em outros servidores, e listar as reservas não pode depender de todos eles
+// estarem no ar (RD05). A cópia não diverge porque rota, horários e preços são
+// imutáveis após a publicação (D09).
 type Reserva struct {
-	ID           string
-	PassageiroID string
-	Itens        []ItemReserva
-	Ativa        bool
-	CriadaEm     time.Time
+	ID            string
+	PassageiroID  string
+	Itens         []ItemReserva
+	Pernas        []Perna
+	Participantes []string
+	Ativa         bool
+	CriadaEm      time.Time
+	// Concluida é verdadeiro quando todos os participantes confirmaram o
+	// recebimento do CONFIRMAR, isto é, quando a fase 2 terminou (seção 7.1,
+	// passo 9).
+	Concluida bool
 }
 
 // Estado é todo o estado de domínio do servidor, protegido por um único
@@ -81,6 +98,23 @@ type Estado struct {
 	// Quem está em espera em cada trecho **não** é guardado aqui em paralelo:
 	// é derivado destas participações pela função portadores (seção 4.3).
 	participacoes map[string]*Participacao
+	// emAndamento marca os passageiros com uma reserva em andamento (D35). O
+	// servidor de origem recusa um segundo RESERVAR do mesmo passageiro
+	// enquanto o primeiro não termina: entre a votação e a decisão passa-se
+	// tempo de rede, e duas reservas simultâneas do mesmo passageiro poderiam
+	// ambas passar na checagem de sobreposição.
+	//
+	// **Nunca vai ao log**, de propósito: o coordenador não grava nada antes de
+	// decidir (D23), então a marca não sobrevive a um reboot — é exatamente o
+	// que a seção 9.3 prevê ("Passageiro marcado pela D35: não existe, estava
+	// só na memória").
+	//
+	// Fica aqui, e não na camada 5, para que continue valendo que existe **um**
+	// mutex por servidor protegendo todo o estado da empresa (D04, regra 1). Os
+	// votos e os prazos de uma transação em andamento, que são contabilidade da
+	// coordenação e não estado da empresa, ficam em variáveis locais da
+	// goroutine que atende o RESERVAR (seção 4.6).
+	emAndamento map[string]bool
 	// log recebe cada mudança ANTES de ela ser aplicada (D22, regra 3). Nunca
 	// é nil: os construtores começam com LogMemoria e o servidor troca por
 	// arquivo com UsarLog. seq numera os registros (seção 4.8).
