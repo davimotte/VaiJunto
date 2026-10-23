@@ -42,7 +42,7 @@ func coordenadorDeTeste(estado *dominio.Estado) *transacao.Coordenador {
 		Empresa:      estado.Empresa(),
 		Estado:       estado,
 		Relogio:      transacao.NovoRelogio(),
-		Participante: federacao.NovoVotanteLocal(transacao.NovoParticipante(estado)),
+		Participante: federacao.NovoVotanteLocal(transacao.NovoParticipante(estado, nil)),
 	})
 }
 

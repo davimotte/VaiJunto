@@ -27,11 +27,15 @@ import (
 // handler pendurado.
 type Participante struct {
 	estado *dominio.Estado
+	falha  *Injetor
 }
 
 // NovoParticipante liga o participante ao estado da empresa.
-func NovoParticipante(estado *dominio.Estado) *Participante {
-	return &Participante{estado: estado}
+//
+// falha é o injetor de pontos de falha desta instância (D31); nil desliga todos
+// os pontos, que é o caso de toda execução normal.
+func NovoParticipante(estado *dominio.Estado, falha *Injetor) *Participante {
+	return &Participante{estado: estado, falha: falha}
 }
 
 // Preparar avalia um PREPARAR e, quando o voto é SIM, devolve os dados
@@ -42,18 +46,43 @@ func NovoParticipante(estado *dominio.Estado) *Participante {
 // caminho HTTP e à rede em memória, e por isso nenhuma das duas inventa um
 // código seu.
 func (p *Participante) Preparar(pedido dominio.PedidoPreparacao) ([]dominio.Perna, error) {
+	// D31: ponto part-antes-de-gravar (TF4). Antes de qualquer coisa, portanto
+	// antes do fsync: nada foi gravado e nada foi prometido a ninguém, e a
+	// instância que volta não tem o que recuperar. Para o coordenador, é só uma
+	// empresa que não respondeu (D30).
+	p.falha.Em(PontoPartAntesDeGravar)
+
 	// time.Now() cru, sem .In(FusoDasCidades()): este instante nunca é exibido,
 	// só comparado com um prazo (D41), e In() descarta a leitura monotônica do
 	// relógio. Com ela, o prazo de dúvida da fase 6A fica imune a ajuste de
 	// relógio de parede. É o oposto do que a borda TCP faz, onde o instante vai
 	// para a tela e o fuso importa.
-	return p.estado.Preparar(pedido, time.Now())
+	pernas, err := p.estado.Preparar(pedido, time.Now())
+	if err != nil {
+		return pernas, err
+	}
+
+	// D31: ponto part-apos-gravar (TF5). O PREPARADO está no log com fsync e o
+	// assento está descontado, mas o voto SIM nunca saiu — o coordenador aborta
+	// por prazo e não grava nada. É a assimetria que a terminação cooperativa
+	// existe para resolver: na volta, a consulta descobre o abort presumido e
+	// devolve o assento (seção 9.4).
+	p.falha.Em(PontoPartAposGravar)
+	return pernas, nil
 }
 
 // Confirmar aplica a decisão de confirmar e devolve a situação resultante
 // (seção 4.4 da API).
 func (p *Participante) Confirmar(txID string) (dominio.Situacao, error) {
-	return p.estado.Confirmar(txID)
+	situacao, err := p.estado.Confirmar(txID)
+	if err == nil {
+		// D31: ponto part-apos-confirmar (TF7). O CONFIRMADO está no log e a
+		// resposta não saiu, então o coordenador segue repetindo o CONFIRMAR
+		// para quem já confirmou. A repetição é inofensiva pela idempotência do
+		// txID (D28, regra 6), e é ela que destrava o CONCLUIDA.
+		p.falha.Em(PontoPartAposConfirmar)
+	}
+	return situacao, err
 }
 
 // Abortar aplica a decisão de abortar, liberando os assentos em espera, e grava

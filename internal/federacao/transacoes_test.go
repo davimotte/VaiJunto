@@ -30,7 +30,7 @@ const txDeTeste = "rotacapixaba:res-3f0b11c4"
 func configDeTransacoes(estado *dominio.Estado) Config {
 	cfg := configDeTeste()
 	cfg.Estado = estado
-	cfg.Participante = transacao.NovoParticipante(estado)
+	cfg.Participante = transacao.NovoParticipante(estado, nil)
 	return cfg
 }
 

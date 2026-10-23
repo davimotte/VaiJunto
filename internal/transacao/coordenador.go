@@ -37,6 +37,7 @@ type Coordenador struct {
 	participante Votante
 	consorcio    map[string]bool
 	registro     RegistroDecisao
+	falha        *Injetor
 	prazoVotacao time.Duration
 	prazoAguarde time.Duration
 	prazoFase2   time.Duration
@@ -82,6 +83,10 @@ type ConfigCoordenador struct {
 	PrazoAguarde time.Duration // D41: 200 ms entre repetições após AGUARDE
 	PrazoFase2   time.Duration // D41: 2 s entre repetições de CONFIRMAR e ABORTAR
 	Tentativas   int           // D36: 3
+
+	// Falha é o injetor de pontos de falha desta instância (D31, seção 9.5).
+	// Nil, que é o padrão de toda execução normal, desliga todos os pontos.
+	Falha *Injetor
 }
 
 // Prazos e contagem padrão da D41 e da D36, usados quando a Config os deixa em
@@ -103,6 +108,7 @@ func NovoCoordenador(cfg ConfigCoordenador) *Coordenador {
 		participante: cfg.Participante,
 		consorcio:    make(map[string]bool, len(cfg.Consorcio)+1),
 		registro:     cfg.Registro,
+		falha:        cfg.Falha,
 		prazoVotacao: cfg.PrazoVotacao,
 		prazoAguarde: cfg.PrazoAguarde,
 		prazoFase2:   cfg.PrazoFase2,
@@ -235,6 +241,14 @@ func (c *Coordenador) tentar(ctx context.Context, txID string, carimbo dominio.C
 	// Passo 5 — votação.
 	votos, falta := c.votar(ctx, txID, carimbo, passageiro, participantes, porEmpresa)
 
+	// D31: ponto coord-apos-preparar (TF1). Todos os PREPARAR foram enviados e
+	// respondidos, e nenhuma decisão foi tomada nem gravada — o coordenador não
+	// grava nada antes de decidir (D23). É o estado mais delicado do 2PC: os
+	// donos têm assentos em espera e o destino da transação existe apenas nesta
+	// memória, que a queda leva embora. Quem resolve é o abort presumido, na
+	// volta.
+	c.falha.Em(PontoCoordAposPreparar)
+
 	// Passo 6 — fim da votação sem unanimidade.
 	if falta != nil {
 		// O ABORTAR vai em segundo plano e a decisão NÃO é gravada: quem não
@@ -277,6 +291,13 @@ func (c *Coordenador) tentar(ctx context.Context, txID string, carimbo dominio.C
 		return dominio.Reserva{}, dominio.Itinerario{}, &recusa{definitivo: err}, nil
 	}
 	c.anotar(txID, "CONFIRMAR")
+
+	// D31: ponto coord-apos-decidir (TF2). O DECISAO_CONFIRMAR já está no log
+	// com fsync e nenhum CONFIRMAR saiu. A reserva existe, mas o passageiro
+	// perde o OK, que ainda nem foi escrito: é o efeito clássico de o cliente
+	// não saber o resultado de uma operação que deu certo. A decisão gravada
+	// chega de todo jeito, pela retomada da fase 2 (seção 9.3).
+	c.falha.Em(PontoCoordAposDecidir)
 
 	// Passo 9 — fase 2 em segundo plano. O passageiro recebe OK antes de ela
 	// terminar, e isso é seguro: a decisão já está gravada com fsync e será
@@ -452,6 +473,14 @@ func (c *Coordenador) confirmarTodos(txID string, participantes []string) {
 			cancelar()
 			if err == nil {
 				delete(falta, empresa)
+				// D31: ponto coord-durante-confirmar (TF3). Está depois de
+				// **cada** confirmação recebida e por isso dispara na primeira:
+				// a queda não devolve o controle. O estado que ele produz é um
+				// dono em CONFIRMADO e os demais em PREPARADO — que parece
+				// inconsistente e não é, porque a I-P2-5 só vale após a
+				// quiescência. A retomada reenvia a todos, e quem já confirmou
+				// responde de novo, idempotente (D28, regra 6).
+				c.falha.Em(PontoCoordDuranteConfirmar)
 			}
 		}
 		if len(falta) == 0 {

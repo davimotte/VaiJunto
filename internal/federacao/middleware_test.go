@@ -27,7 +27,7 @@ func configDeTeste() Config {
 		Pares:        map[string]string{"rotacapixaba": "http://rotacapixaba.invalido:8080"},
 		Relogio:      transacao.NovoRelogio(),
 		Estado:       estado,
-		Participante: transacao.NovoParticipante(estado),
+		Participante: transacao.NovoParticipante(estado, nil),
 		PrazoChamada: 50 * time.Millisecond,
 		PrazoBusca:   50 * time.Millisecond,
 	}

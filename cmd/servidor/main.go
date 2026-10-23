@@ -42,6 +42,26 @@ func main() {
 		log.Fatalf("servidor: --empresa é obrigatória e precisa estar no formato certo: %v", err)
 	}
 
+	// D31: o ponto de falha é lido do ambiente, e não de uma flag (seção 13.1).
+	// Um ponto desconhecido recusa a subida: um nome escrito errado viraria um
+	// servidor que nunca cai, e o teste de falha passaria sem ter testado nada.
+	//
+	// Em produção a queda é o processo inteiro: a linha de registro sai antes do
+	// os.Exit para que `docker logs` mostre onde ele morreu, e o boot seguinte é
+	// a recuperação (seção 9.1). Nos testes em processo, quem derruba é a
+	// ferramenta da fase 6A, que fecha só aquela instância.
+	falha, err := transacao.NovoInjetor(os.Getenv(transacao.VariavelFalharEm), func(ponto transacao.Ponto) {
+		log.Printf("servidor: %s=%s (D31): encerrando neste ponto do protocolo", transacao.VariavelFalharEm, ponto)
+		os.Exit(1)
+	})
+	if err != nil {
+		log.Fatalf("servidor: %s: %v", transacao.VariavelFalharEm, err)
+	}
+	if falha != nil {
+		log.Printf("servidor: ATENÇÃO: %s=%s armado (D31); o servidor vai morrer de propósito neste ponto",
+			transacao.VariavelFalharEm, falha.Ponto())
+	}
+
 	// A lista de pares é estática (D20): é com ela que o cliente da federação
 	// encontra cada empresa e é ela que diz quem pode nos chamar. Validar já
 	// aqui faz o erro de digitação aparecer na subida, e não numa busca
@@ -101,7 +121,7 @@ func main() {
 	// precisa dele: a mesma instância atende os pares pela borda REST e a
 	// chamada local do coordenador quando esta empresa é dona de algum trecho
 	// (D21; seção 7.1, passo 5).
-	participante := transacao.NovoParticipante(estado)
+	participante := transacao.NovoParticipante(estado, falha)
 
 	cfgREST := federacao.Config{
 		Empresa: *empresa,
@@ -115,6 +135,7 @@ func main() {
 		Participante: participante,
 		PrazoChamada: *prazoChamada,
 		PrazoBusca:   *prazoBusca,
+		Falha:        falha,
 		Auditoria:    *auditoria,
 	}
 	if *logOperacoes {
@@ -139,6 +160,7 @@ func main() {
 		Participante: federacao.NovoVotanteLocal(participante),
 		Consorcio:    empresasDoConsorcio(*empresa, pares),
 		Registro:     cfgREST.Registro,
+		Falha:        falha,
 		PrazoVotacao: *prazoVotacao,
 		PrazoAguarde: *prazoAguarde,
 		PrazoFase2:   *prazoFase2,

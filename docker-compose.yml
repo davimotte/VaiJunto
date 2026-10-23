@@ -33,6 +33,18 @@ x-servidor: &servidor
 services:
   vaijunto:
     <<: *servidor
+    # O merge do <<: *servidor substitui o bloco environment inteiro, por isso o
+    # TZ reaparece aqui.
+    #
+    # FALHAR_EM (D31, secao 9.5) existe so neste servico, e vazio por padrao: a
+    # demonstracao D-5 arma o ponto com
+    # `FALHAR_EM=coord-apos-decidir docker compose up -d --force-recreate vaijunto`,
+    # faz uma reserva e religa com `docker compose start vaijunto`, agora sem a
+    # variavel. Nos outros dois servicos ela nao entra para que uma rodada
+    # sabotada seja sempre de uma empresa so.
+    environment:
+      TZ: America/Bahia
+      FALHAR_EM: "${FALHAR_EM:-}"
     command:
       - "--empresa=vaijunto"
       - "--endereco=0.0.0.0:9000"

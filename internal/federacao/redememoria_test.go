@@ -23,7 +23,7 @@ func hubDeTeste(t *testing.T) (*RedeEmMemoria, *dominio.Estado) {
 	t.Helper()
 	estado := parComUmaCarona(t, "vaijunto")
 	hub := NovaRedeEmMemoria()
-	hub.Registrar("vaijunto", transacao.NovoParticipante(estado))
+	hub.Registrar("vaijunto", transacao.NovoParticipante(estado, nil))
 	return hub, estado
 }
 
@@ -278,7 +278,7 @@ func TestRedeEmMemoria_PerdaDeMensagemAtingeSoAsPrimeiras(t *testing.T) {
 // sentidos, até o Reconectar.
 func TestRedeEmMemoria_ParticaoEReconexao(t *testing.T) {
 	hub, _ := hubDeTeste(t)
-	hub.Registrar("rotacapixaba", transacao.NovoParticipante(parComUmaCarona(t, "rotacapixaba")))
+	hub.Registrar("rotacapixaba", transacao.NovoParticipante(parComUmaCarona(t, "rotacapixaba"), nil))
 	ctx := context.Background()
 
 	hub.Particionar("rotacapixaba", "vaijunto")

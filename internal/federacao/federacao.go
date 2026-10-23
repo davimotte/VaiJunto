@@ -90,6 +90,12 @@ type Config struct {
 	// lentos não somem três prazos na espera do passageiro.
 	PrazoBusca time.Duration
 
+	// Falha é o injetor de pontos de falha desta instância (D31, seção 9.5).
+	// Só um ponto vive nesta camada — part-apos-responder, que precisa da
+	// resposta já entregue —; os outros estão em internal/transacao. Nil, que é
+	// o padrão, desliga todos.
+	Falha *transacao.Injetor
+
 	// Auditoria liga GET /auditoria, o estado completo desta empresa para o
 	// verificador de invariantes (seção 11.2; flag --auditoria).
 	//
@@ -126,7 +132,7 @@ func NovoHandler(cfg Config) http.Handler {
 	// caractere ":" é válido num segmento de URL (seção 1.4 da API). O curinga
 	// {tx} casa exatamente um segmento, que é o identificador inteiro.
 	mux.HandleFunc("POST /transacoes/{tx}/preparar", func(w http.ResponseWriter, r *http.Request) {
-		tratarPreparar(w, r, cfg.Participante)
+		tratarPreparar(w, r, cfg.Participante, cfg.Falha)
 	})
 	mux.HandleFunc("POST /transacoes/{tx}/confirmar", func(w http.ResponseWriter, r *http.Request) {
 		tratarConfirmar(w, r, cfg.Participante)

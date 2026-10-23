@@ -105,7 +105,7 @@ type respostaConsulta struct {
 }
 
 // tratarPreparar responde POST /transacoes/{tx}/preparar: a fase 1 do 2PC.
-func tratarPreparar(w http.ResponseWriter, r *http.Request, p *transacao.Participante) {
+func tratarPreparar(w http.ResponseWriter, r *http.Request, p *transacao.Participante, injetor *transacao.Injetor) {
 	txID, erro := txDoCoordenador(r)
 	if erro != nil {
 		responderErro(w, *erro)
@@ -132,6 +132,19 @@ func tratarPreparar(w http.ResponseWriter, r *http.Request, p *transacao.Partici
 		anotar(w, "tx=%s %s voto=%s", txID, carimbo, voto.Voto)
 	}
 	responderJSON(w, http.StatusOK, votoDeFio(voto))
+
+	// D31: ponto part-apos-responder (TF6). É o único ponto que vive nesta
+	// camada, e é por isso que ele está aqui e não em internal/transacao: a
+	// tabela da seção 9.5 o define como "voto SIM enviado", e só a borda sabe
+	// quando a resposta deixou de ser uma estrutura em memória. responderJSON
+	// declara Content-Length e esvazia o buffer, então quando esta linha é
+	// alcançada o voto está no fio.
+	//
+	// Só no SIM: um NÃO não compromete o participante com nada, e cair depois
+	// dele seria o mesmo cenário do part-antes-de-gravar.
+	if voto.Voto == transacao.VotoSim {
+		injetor.Em(transacao.PontoPartAposResponder)
+	}
 }
 
 // votoDoParticipante traduz o resultado do participante no voto que o
