@@ -1446,7 +1446,7 @@ sessão. Os critérios de pronto são os que a fase precisa demonstrar, com
 | 3A | Pilha REST | Servidor e cliente HTTP, cabeçalhos, **relógio de Lamport**, `/saude` | ✅ |
 | 3B | Busca federada | Seção 6. TB1 e TB2 passam | ✅ |
 | 4 | Participante do 2PC | `preparar`, `confirmar` e `abortar` com idempotência, **no-wait** (NÃO imediato quando falta assento) e verificação de papéis (seção 1.2); rede em memória | ✅ |
-| 5 | Coordenador do 2PC | Seção 7.1, ainda com no-wait; `/auditoria` e verificador de invariantes. TR1, TR2 e TR5 passam | ⏳ |
+| 5 | Coordenador do 2PC | Seção 7.1, ainda com no-wait; `/auditoria` e verificador de invariantes. TR1, TR2 e TR5 passam | ✅ |
 | 6A | Recuperação | Seções 9.3 e 9.4: retomada, `consultar`, veto e terminação. TF9 e TF10 passam | ⏳ |
 | 6B | Injeção de falhas | `FALHAR_EM` (seção 9.5). TF1 a TF7 passam | ⏳ |
 | 7 | Precedência | Wait-die (seção 8). Em disputa cruzada, a transação mais antiga completa, sem deadlock; TR3 e TR4 passam | ⏳ |
@@ -1472,6 +1472,18 @@ Notas de sequência:
   reservas somem, inclusive as atingidas por um cancelamento já gravado. Da
   fase 5 à 7, os cancelamentos que envolvem
   reservas respondem um erro provisório, até a fase 8.
+
+**Limitações da fase 5**, todas removidas nas fases que as resolvem:
+
+| Limitação | Por quê | Sai na |
+|---|---|---|
+| `CANCELAR_RESERVA` e `CANCELAR_CARONA` de carona com reserva respondem `OPERACAO_INDISPONIVEL` | A devolução dos assentos atravessa empresas e depende da decisão unilateral com outbox (D39). Devolver só no coordenador deixaria presos os assentos dos outros donos, contra a I-P2-5; recusar por inteiro é conservador | 8 |
+| Os seis testes do cancelamento ficam em `t.Skip`: T4, T5, `TestSessaoCompletaDoPassageiro_Cancelamento`, `TestCascataDoMotoristaIgnoraOPrazoDoPassageiro`, `TestCancelarReserva_DevolveAssentosDeTodosOsTrechos` e `TestCancelarCarona_CascataDevolveAssentosDeCaronasVizinhas` | Dependem do cancelamento acima. Ficam escritos por inteiro, só com o `Skip` a mais, para a fase 8 reativá-los tirando uma linha | 8 |
+| TR2 afirma **no máximo** um sucesso, e não exatamente um | Com no-wait e 50 tentativas simultâneas, a que ganha o assento único de C é muitas vezes uma das 40 que perdem A, e desiste na hora. Sob wait-die, A esgotada por portadores em `PREPARADO` responde `AGUARDE`/`PRECEDENCIA` em vez de `SEM_ASSENTO`, a D36 tenta de novo, e o vencedor passa a ser determinístico. A atomicidade — nunca dois sucessos, e todo assento de volta — é afirmada já agora | 7 |
+| `DISPUTA_PERDIDA` não existe; tentativas esgotadas respondem `SEM_ASSENTO` | O ramo de `PRECEDENCIA` está escrito e sem gatilho: o participante é no-wait | 7 |
+| `LISTAR_MINHAS_RESERVAS` emite `empresa` por perna sem que a seção 5.10 do `PROTOCOL.md` a documente | O dado vem da cópia da D42 e a perna remota ficaria ilegível sem ele. A seção 5.10 e os clientes mudam juntos na fase 9 | 9 |
+| I-P2-3 fora do verificador | Ela vale "após recuperação e quiescência", e a recuperação é a fase 6: aqui seria afirmação sobre código que não existe | 6A |
+
 - **O TF8 fica na fase 8**, porque o ponto `aviso-apos-registrar` depende do
   outbox.
 

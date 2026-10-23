@@ -478,25 +478,37 @@ O cliente devolve os trechos do itinerário escolhido, na ordem:
 ]}}
 ```
 
-Algoritmo do servidor, integralmente dentro de uma seção crítica:
+As caronas podem ser de empresas diferentes. O servidor que recebe o
+`RESERVAR` é o **coordenador** da transação, porque é a empresa do passageiro
+(D21), e a reserva é concluída por *two-phase commit* — não há mais uma seção
+crítica única que abranja o itinerário inteiro, porque os assentos estão em
+servidores diferentes. O algoritmo completo está na seção 7.1 do
+`PROJETO_P2.md`; em resumo:
 
-1. Validar formato: lista não vazia, toda carona existe e não está cancelada,
-   `de < ate`, índices dentro da rota, sem carona repetida.
-2. Validar encadeamento: a cidade de chegada de cada perna é a de partida da
-   seguinte, a partida da seguinte ocorre no mínimo **30 minutos** e no máximo
-   **12 horas** após a chegada da anterior, e nenhuma cidade se repete no
-   itinerário, contando as cidades intermediárias de cada perna.
-3. Validar disponibilidade: para todo trecho `t` em `[de, ate)` de cada carona,
-   `livres[t] >= 1`.
-4. Validar sobreposição: o intervalo `[partida, chegada]` do novo itinerário não
-   intersecta o de nenhuma reserva ativa do mesmo passageiro.
-5. Se qualquer passo falhar, responder erro **sem alterar nada**.
-6. Se tudo passar, decrementar todos os `livres` envolvidos, criar a reserva e
-   responder `OK`.
+1. Validar formato: lista não vazia, `de < ate`, sem carona repetida, e toda
+   carona com prefixo de uma empresa do consórcio.
+2. Recusar um segundo `RESERVAR` do mesmo passageiro enquanto o primeiro está em
+   andamento, com `RESERVA_EM_ANDAMENTO` (D35).
+3. Enviar `PREPARAR` em paralelo a cada empresa dona de alguma perna. Cada dona
+   valida o que só ela sabe — a carona existe, não está cancelada, os índices
+   cabem na rota e há assento — e, votando SIM, **desconta o assento** e grava
+   o voto em disco antes de responder.
+4. Sem unanimidade dentro do prazo de votação, abortar: nenhum assento fica
+   reservado em nenhuma empresa, e a resposta é o erro correspondente.
+5. Com todos os votos SIM, validar o encadeamento sobre os dados que as donas
+   devolveram: a cidade de chegada de cada perna é a de partida da seguinte, a
+   partida da seguinte ocorre no mínimo **30 minutos** e no máximo **12 horas**
+   após a chegada da anterior, nenhuma cidade se repete no itinerário (contando
+   as intermediárias), e o intervalo `[partida, chegada]` não intersecta o de
+   nenhuma reserva ativa do mesmo passageiro.
+6. Gravar a decisão de confirmar e responder `OK`. Os `CONFIRMAR` seguem para
+   as donas em segundo plano.
 
-A separação entre os passos 1–4 (que só verificam) e o passo 6 (que só escreve) é
-o que garante a atomicidade. Nenhuma escrita ocorre antes de toda a validação
-passar, então não existe estado parcial a desfazer.
+A atomicidade não vem mais de um mutex, e sim de duas regras: nenhuma dona
+confirma sem que a decisão esteja gravada, e a decisão só é tomada com todos os
+votos SIM — cada um deles dado depois de o assento já estar descontado. Ou
+todos os trechos valem, ou nenhum. O argumento completo está na seção 7.4 do
+`PROJETO_P2.md`.
 
 ```json
 {"id":"7","status":"OK","dados":{"reserva_id":"vaijunto:res-91c4e2d8","preco_total_centavos":10000}}
@@ -516,6 +528,23 @@ Erro por sobreposição:
 {"id":"7","status":"ERRO","codigo":"CONFLITO_HORARIO",
  "mensagem":"Você já tem a reserva vaijunto:res-91c4e2d8 nesse período.",
  "dados":{"reserva_id":"vaijunto:res-91c4e2d8"}}
+```
+
+Erro por reserva já em andamento do mesmo passageiro (D35):
+
+```json
+{"id":"7","status":"ERRO","codigo":"RESERVA_EM_ANDAMENTO",
+ "mensagem":"Você já tem uma reserva em andamento; aguarde o resultado dela.",
+ "dados":{}}
+```
+
+Erro por empresa fora do ar, quando alguma dona de um trecho não responde
+dentro do prazo de votação (D30). Nenhum assento fica reservado:
+
+```json
+{"id":"7","status":"ERRO","codigo":"EMPRESA_INDISPONIVEL",
+ "mensagem":"Uma das empresas do itinerário não respondeu; nenhum assento foi reservado.",
+ "dados":{}}
 ```
 
 Outros erros: `CARONA_NAO_ENCONTRADA`, `CARONA_CANCELADA`,
@@ -604,11 +633,21 @@ vazio, porque a seção 2.2 exige o campo em toda resposta.
 | `RESERVA_NAO_ENCONTRADA` | `reserva_id` inexistente | `{}` |
 | `RESERVA_JA_CANCELADA` | Reserva já inativa | `{}` |
 | `PRAZO_CANCELAMENTO_EXPIRADO` | Fora do prazo permitido para cancelar | **`partida`** (5.7 e 5.11) |
+| `RESERVA_EM_ANDAMENTO` | O passageiro já tem uma reserva em andamento (D35) | `{}` |
+| `EMPRESA_INDISPONIVEL` | Uma empresa dona de um trecho não respondeu no prazo (D30) | `{}` |
+| `OPERACAO_INDISPONIVEL` | Operação ainda não disponível nesta versão (**provisório**, ver abaixo) | `{}` |
 | `ERRO_INTERNO` | Falha inesperada | `{}` |
 
 Os três com conteúdo são os que o cliente precisa para montar uma mensagem
 acionável: qual trecho esgotou, qual reserva ocupa o período, e de que partida o
 prazo foi contado. Nos demais, a `mensagem` basta.
+
+**`OPERACAO_INDISPONIVEL` é provisório.** Ele responde, da fase 5 à 7, as duas
+operações de cancelamento que dependem do outbox da D39: `CANCELAR_RESERVA` e
+`CANCELAR_CARONA` de uma carona que tenha reserva. Recusá-las por inteiro é
+conservador de propósito — devolver o assento só no coordenador deixaria os das
+outras empresas presos para sempre, contra a I-P2-5. O código sai do protocolo
+na fase 8, quando a seção 10 do `PROJETO_P2.md` entra.
 
 ---
 
