@@ -2,9 +2,12 @@ package testes
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -73,6 +76,18 @@ type opcoesConsorcio struct {
 	// chegue a acontecer — e um teste que os respeitasse levaria minutos.
 	prazoDuvida   time.Duration
 	prazoConsulta time.Duration
+	// prazoFase2 é o intervalo entre repetições de CONFIRMAR e de ABORTAR
+	// (D41). Importa aos testes que esperam uma repetição acontecer, como o TF6
+	// e o TF7: com os 2 s de produção, cada um levaria segundos sob -count=20.
+	prazoFase2 time.Duration
+	// falhaEm arma um ponto de falha por empresa (D31, seção 9.5): empresa →
+	// valor de FALHAR_EM. Empresa ausente, ou ponto vazio, sobe sem ponto
+	// nenhum — que é o caso de todos os testes que não são da fase 6B.
+	//
+	// É por empresa, e não um valor só, porque as três sobem no mesmo processo:
+	// um ponto global armaria a queda nas três ao mesmo tempo, e o cenário
+	// deixaria de ser "a empresa X caiu no ponto Y".
+	falhaEm map[string]string
 }
 
 // empresa é uma empresa do consórcio no ar, com as peças que o boot liga
@@ -99,11 +114,25 @@ type empresa struct {
 	usuariosJSON  []byte
 	caronasJSON   []byte
 
-	// caida evita derrubar duas vezes a mesma instância. O caso normal de um
-	// teste é derrubar, observar o consórcio sem ela e religar — e o
-	// religamento começa derrubando, para que também sirva a quem ainda não
-	// derrubou. Uma queda é uma queda: repeti-la não é erro, é nada.
-	caida bool
+	// falha é o injetor de pontos desta instância (D31); nil quando o teste não
+	// armou nenhum.
+	falha *transacao.Injetor
+
+	// quedas recebe o ponto em que esta instância caiu, para o teste saber que
+	// a queda aconteceu antes de religar. Tem capacidade 1 e o envio não
+	// bloqueia: quem cai não pode ficar preso esperando alguém escutar.
+	quedas chan transacao.Ponto
+
+	// umaQueda garante que fechar portas, tarefas e log aconteça uma vez só.
+	// O caso normal de um teste é derrubar, observar o consórcio sem a empresa
+	// e religar — e o religamento começa derrubando, para que também sirva a
+	// quem ainda não derrubou. Uma queda é uma queda: repeti-la não é erro, é
+	// nada.
+	//
+	// Precisa ser sincronizado, e não um booleano: com um ponto de falha
+	// armado, quem derruba é uma goroutine do próprio servidor, concorrente com
+	// a do teste.
+	umaQueda sync.Once
 }
 
 // urlBase é o endereço base da porta dos pares desta empresa.
@@ -161,13 +190,24 @@ func montarEmpresa(t *testing.T, nome string, usuarios, caronas []byte, op opcoe
 	e := &empresa{
 		nome:         nome,
 		estado:       estado,
-		participante: transacao.NovoParticipante(estado),
 		pares:        make(map[string]string),
 		registro:     &saidaSegura{},
 		relogio:      transacao.NovoRelogio(),
 		usuariosJSON: usuarios,
 		caronasJSON:  caronas,
+		quedas:       make(chan transacao.Ponto, 1),
 	}
+	// O injetor nasce antes do participante porque o participante o recebe
+	// (D31): os pontos part-* vivem na borda do estado, e não no domínio
+	// (regra 8).
+	if ponto := op.falhaEm[nome]; ponto != "" {
+		injetor, err := transacao.NovoInjetor(ponto, e.cair)
+		if err != nil {
+			t.Fatalf("empresa %s: ponto de falha: %v", nome, err)
+		}
+		e.falha = injetor
+	}
+	e.participante = transacao.NovoParticipante(estado, e.falha)
 	estado.UsarRelogio(e.relogio.Agora)
 	if op.dirLogs != "" {
 		e.wal = instalarWAL(t, estado, filepath.Join(op.dirLogs, nome+".wal"))
@@ -198,6 +238,7 @@ func (e *empresa) configREST(op opcoesConsorcio) federacao.Config {
 		Participante: e.participante,
 		PrazoChamada: prazoChamada,
 		PrazoBusca:   prazoBuscaNosTestes,
+		Falha:        e.falha,
 		Auditoria:    op.auditoria,
 	}
 }
@@ -255,7 +296,9 @@ func ligarEmpresa(t *testing.T, e *empresa, consorcio map[string]*empresa, op op
 		Participante: federacao.NovoVotanteLocal(e.participante),
 		Consorcio:    empresasDe(consorcio, op.paresExtra),
 		Registro:     cfg.Registro,
+		Falha:        e.falha,
 		PrazoVotacao: op.prazoVotacao,
+		PrazoFase2:   op.prazoFase2,
 	})
 	e.terminador = transacao.NovoTerminador(transacao.ConfigTerminador{
 		Empresa:       e.nome,
@@ -307,31 +350,91 @@ func ligarEmpresa(t *testing.T, e *empresa, consorcio map[string]*empresa, op op
 // sobrevive é só o que está no log, e é dele que o religamento parte.
 func derrubarEmpresa(t *testing.T, e *empresa) {
 	t.Helper()
-	if e.caida {
-		return
+	if err := fecharEmpresa(e); err != nil {
+		t.Fatalf("empresa %s: %v", e.nome, err)
 	}
-	e.caida = true
-	e.coordenador.Parar()
-	e.terminador.Parar()
-	if e.tcp != nil {
-		_ = e.tcp.Fechar()
-	}
-	if err := e.rest.Fechar(); err != nil {
-		t.Fatalf("empresa %s: fechar porta dos pares: %v", e.nome, err)
-	}
-	if e.wal != nil {
-		if err := e.wal.Fechar(); err != nil {
-			t.Fatalf("empresa %s: fechar log: %v", e.nome, err)
+}
+
+// fecharEmpresa é a queda em si, sem *testing.T.
+//
+// Existe separada de derrubarEmpresa porque, com um ponto de falha armado (D31),
+// quem derruba é uma goroutine do próprio servidor — o handler do PREPARAR, a
+// conexão do RESERVAR ou a fase 2 —, e chamar t.Fatalf de fora da goroutine do
+// teste não encerra o teste: só a goroutine, deixando o resto correr sem saber.
+// Então o erro volta como valor, e quem está na goroutine do teste é que o
+// transforma em falha.
+func fecharEmpresa(e *empresa) error {
+	var err error
+	e.umaQueda.Do(func() {
+		e.coordenador.Parar()
+		e.terminador.Parar()
+		if e.tcp != nil {
+			_ = e.tcp.Fechar()
 		}
+		if erroPares := e.rest.Fechar(); erroPares != nil {
+			err = fmt.Errorf("fechar porta dos pares: %w", erroPares)
+			return
+		}
+		if e.wal != nil {
+			if erroLog := e.wal.Fechar(); erroLog != nil {
+				err = fmt.Errorf("fechar log: %w", erroLog)
+			}
+		}
+	})
+	return err
+}
+
+// cair é o que um ponto de falha faz nos testes em processo (D31, seção 9.5):
+// fecha esta instância, avisa o teste e abandona a goroutine que estava
+// atendendo.
+//
+// É o análogo local do os.Exit de produção, e o runtime.Goexit é a metade que
+// importa: sem ele, a goroutine continuaria o protocolo depois da "queda" —
+// responderia o PREPARAR que o ponto part-apos-gravar manda não responder,
+// mandaria os CONFIRMAR que o coord-apos-decidir manda não mandar — e o ponto
+// não significaria nada.
+//
+// Goexit, e não panic, porque serve aos três tipos de chamador sem exceção: no
+// handler HTTP, os defer do net/http fecham a conexão sem resposta; na conexão
+// TCP, o defer conn.Close() de atenderConexao dá EOF ao passageiro; e na
+// goroutine da fase 2, que não tem recover nenhum, um panic derrubaria o
+// processo de teste inteiro em vez de uma empresa.
+//
+// O estado em memória é abandonado sem ser zerado, como em derrubarEmpresa: o
+// que sobrevive é só o que está no log, e é dele que o religamento parte.
+func (e *empresa) cair(ponto transacao.Ponto) {
+	_ = fecharEmpresa(e)
+	// Sem bloquear: quem cai não espera por quem escuta.
+	select {
+	case e.quedas <- ponto:
+	default:
+	}
+	runtime.Goexit()
+}
+
+// esperarQueda espera a queda desta instância num ponto de falha e devolve o
+// ponto.
+//
+// É espera observada, como esperarSituacao: a queda acontece numa goroutine do
+// servidor, e um sleep calibrado seria ou lento ou instável sob -count=20.
+func esperarQueda(t *testing.T, e *empresa) transacao.Ponto {
+	t.Helper()
+	select {
+	case ponto := <-e.quedas:
+		return ponto
+	case <-time.After(prazoDeQuiescencia):
+		t.Fatalf("empresa %s: não caiu em %s; o ponto %s não foi alcançado",
+			e.nome, prazoDeQuiescencia, e.falha.Ponto())
+		return ""
 	}
 }
 
 // religarEmpresa derruba uma empresa e a reabre a partir do mesmo log, no
 // mesmo endereço, pelo caminho completo do boot (seção 9.2).
 //
-// É a ferramenta de queda que a fase 6B vai reutilizar com os pontos de
-// FALHAR_EM: lá o que muda é **quando** a queda acontece, não o que acontece
-// depois dela. Substitui a entrada do consórcio, porque tudo é novo — estado,
+// É a mesma ferramenta que os pontos de FALHAR_EM usam (D31): o que o ponto
+// muda é **quando** a queda acontece, não o que acontece depois dela.
+// Substitui a entrada do consórcio, porque tudo é novo — estado,
 // participante, coordenador, terminador e cliente —, exatamente como num
 // processo que reinicia.
 //
@@ -349,9 +452,16 @@ func religarEmpresa(t *testing.T, consorcio map[string]*empresa, nome string, op
 	}
 	derrubarEmpresa(t, antiga)
 
-	nova := montarEmpresa(t, nome, antiga.usuariosJSON, antiga.caronasJSON, op, antiga.enderecoPares)
+	// Religa **sem** ponto de falha armado (D31), que é o equivalente a tirar
+	// FALHAR_EM do comando antes de subir de novo. Com o ponto rearmado, um
+	// coord-durante-confirmar cairia outra vez na retomada da fase 2, e o
+	// servidor nunca terminaria de se recuperar.
+	semPontos := op
+	semPontos.falhaEm = nil
+
+	nova := montarEmpresa(t, nome, antiga.usuariosJSON, antiga.caronasJSON, semPontos, antiga.enderecoPares)
 	consorcio[nome] = nova
-	ligarEmpresa(t, nova, consorcio, op)
+	ligarEmpresa(t, nova, consorcio, semPontos)
 	return nova
 }
 
