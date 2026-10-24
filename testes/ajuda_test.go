@@ -70,6 +70,11 @@ type opcoesConsorcio struct {
 	// de um prazo curto para provar que ele decide algo.
 	prazoChamada time.Duration
 	prazoVotacao time.Duration
+	// prazoAguarde é o intervalo entre repetições do PREPARAR após um AGUARDE
+	// (D41, seção 8.2). Nos 200 ms de produção, um teste de disputa gasta
+	// quase todo o seu tempo dormindo entre repetições; os testes do wait-die
+	// o encurtam para milissegundos.
+	prazoAguarde time.Duration
 	// prazoDuvida e prazoConsulta são os da terminação cooperativa (D41,
 	// seção 9.4). Nos testes vão para a casa dos milissegundos: os 10 s e 3 s
 	// de produção existem para que, num sistema saudável, consulta nenhuma
@@ -80,6 +85,21 @@ type opcoesConsorcio struct {
 	// (D41). Importa aos testes que esperam uma repetição acontecer, como o TF6
 	// e o TF7: com os 2 s de produção, cada um levaria segundos sob -count=20.
 	prazoFase2 time.Duration
+	// redeEmMemoria troca o cliente HTTP pela rede em memória da seção 5.4 em
+	// todas as empresas do consórcio. As portas continuam no ar — é só o
+	// **transporte** do 2PC que muda.
+	//
+	// Serve aos cenários que dependem de ordem de chegada, como a disputa
+	// cruzada do TR3 (seção 8.3): com ela o teste decide em que ordem cada
+	// PREPARAR chega a cada dono, pelo gancho de Interceptar, em vez de torcer
+	// para o escalonador produzir a ordem certa.
+	//
+	// Duas consequências a lembrar ao escrever um teste assim: a rede em
+	// memória não passa pelo middleware REST, então **o relógio de Lamport não
+	// se propaga** entre as empresas — quem quiser carimbos ordenados os fixa
+	// com Relogio.Restaurar — e o registro de operações não ganha as linhas de
+	// requisição, porque não houve requisição.
+	redeEmMemoria *federacao.RedeEmMemoria
 	// falhaEm arma um ponto de falha por empresa (D31, seção 9.5): empresa →
 	// valor de FALHAR_EM. Empresa ausente, ou ponto vazio, sobe sem ponto
 	// nenhum — que é o caso de todos os testes que não são da fase 6B.
@@ -288,22 +308,30 @@ func ligarEmpresa(t *testing.T, e *empresa, consorcio map[string]*empresa, op op
 
 	cliente := federacao.NovoCliente(cfg)
 	e.rede = cliente
+	// A rede em memória substitui o transporte, e só ele: o participante é o
+	// mesmo, o coordenador é o mesmo, e a tradução de erro em voto passa pela
+	// mesma tabela da borda (seção 5.4).
+	if op.redeEmMemoria != nil {
+		op.redeEmMemoria.Registrar(e.nome, e.participante)
+		e.rede = op.redeEmMemoria.De(e.nome)
+	}
 	e.coordenador = transacao.NovoCoordenador(transacao.ConfigCoordenador{
 		Empresa:      e.nome,
 		Estado:       e.estado,
 		Relogio:      e.relogio,
-		Rede:         cliente,
+		Rede:         e.rede,
 		Participante: federacao.NovoVotanteLocal(e.participante),
 		Consorcio:    empresasDe(consorcio, op.paresExtra),
 		Registro:     cfg.Registro,
 		Falha:        e.falha,
 		PrazoVotacao: op.prazoVotacao,
+		PrazoAguarde: op.prazoAguarde,
 		PrazoFase2:   op.prazoFase2,
 	})
 	e.terminador = transacao.NovoTerminador(transacao.ConfigTerminador{
 		Empresa:       e.nome,
 		Estado:        e.estado,
-		Rede:          cliente,
+		Rede:          e.rede,
 		Registro:      cfg.Registro,
 		PrazoDuvida:   op.prazoDuvida,
 		PrazoConsulta: op.prazoConsulta,
