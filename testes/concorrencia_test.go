@@ -339,6 +339,25 @@ func contar(respostas []protocolo.Resposta) (oks int, porCodigo map[string]int) 
 	return oks, porCodigo
 }
 
+// recusasPorFaltaDeAssento soma as duas recusas que "o assento não é seu"
+// produz sob o wait-die: SEM_ASSENTO e DISPUTA_PERDIDA.
+//
+// Antes da fase 7 toda perdedora recebia SEM_ASSENTO, porque a disputa era
+// no-wait. Com o wait-die, quem chega enquanto a vencedora ainda está em
+// PREPARADO entra na disputa — AGUARDE se for mais velha, PRECEDENCIA se for
+// mais nova — e, esgotadas as três tentativas da D36, recebe DISPUTA_PERDIDA.
+// Quem chega depois do CONFIRMAR encontra o trecho cheio de assentos vendidos
+// e recebe SEM_ASSENTO.
+//
+// A divisão entre os dois depende de quando cada uma das cinquenta chegou, e
+// portanto do escalonador: afirmá-la seria afirmar temporização. O que **não**
+// depende do escalonador, e é o que estes cenários existem para provar, é a
+// soma — ninguém além da vencedora leva assento — e o estado final dos
+// contadores.
+func recusasPorFaltaDeAssento(porCodigo map[string]int) int {
+	return porCodigo[protocolo.CodigoSemAssento] + porCodigo[protocolo.CodigoDisputaPerdida]
+}
+
 // trecho monta um item de RESERVAR (PROTOCOL.md, seção 5.9).
 func trecho(caronaID string, de, ate int) protocolo.ItemReserva {
 	return protocolo.ItemReserva{CaronaID: caronaID, De: de, Ate: ate}
@@ -388,9 +407,9 @@ func TestT1AssentoUnicoDisputadoPor50Clientes(t *testing.T) {
 	if oks != 1 {
 		t.Errorf("confirmações = %d, want 1 — o assento único foi vendido %d vezes", oks, oks)
 	}
-	if porCodigo[protocolo.CodigoSemAssento] != len(participantes)-1 {
-		t.Errorf("SEM_ASSENTO = %d, want %d (códigos observados: %v)",
-			porCodigo[protocolo.CodigoSemAssento], len(participantes)-1, porCodigo)
+	if recusas := recusasPorFaltaDeAssento(porCodigo); recusas != len(participantes)-1 {
+		t.Errorf("recusas por falta de assento = %d, want %d (códigos observados: %v)",
+			recusas, len(participantes)-1, porCodigo)
 	}
 
 	caronas := observarCaronas(t, endereco)
@@ -439,9 +458,9 @@ func TestT2ItinerarioAtomicoNaoDeixaReservaParcial(t *testing.T) {
 	if oks != 1 {
 		t.Errorf("confirmações = %d, want 1", oks)
 	}
-	if porCodigo[protocolo.CodigoSemAssento] != len(participantes)-1 {
-		t.Errorf("SEM_ASSENTO = %d, want %d (códigos observados: %v)",
-			porCodigo[protocolo.CodigoSemAssento], len(participantes)-1, porCodigo)
+	if recusas := recusasPorFaltaDeAssento(porCodigo); recusas != len(participantes)-1 {
+		t.Errorf("recusas por falta de assento = %d, want %d (códigos observados: %v)",
+			recusas, len(participantes)-1, porCodigo)
 	}
 
 	caronas := observarCaronas(t, endereco)

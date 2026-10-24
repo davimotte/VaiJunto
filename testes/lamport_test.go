@@ -50,8 +50,8 @@ func subirComRelogio(t *testing.T, caminho string) (*dominio.Estado, *transacao.
 //
 // Sem isto, um servidor religado reemitiria carimbos já usados: duas
 // transações distintas apareceriam como simultâneas na ordem total da
-// seção 8.1, e a precedência por wait-die (fase 7) decidiria a disputa de
-// formas diferentes em servidores diferentes.
+// seção 8.1, e a precedência por wait-die decidiria a disputa de formas
+// diferentes em servidores diferentes.
 func TestReinicioRestauraORelogioDeLamport(t *testing.T) {
 	caminho := filepath.Join(t.TempDir(), "vaijunto.wal")
 

@@ -61,6 +61,14 @@ func corpoPreparar(itens ...map[string]any) map[string]any {
 	}
 }
 
+// corpoPrepararComLamport é o mesmo corpo com o número de Lamport escolhido,
+// para os testes em que a precedência do wait-die é o que se afirma.
+func corpoPrepararComLamport(lamport int, itens ...map[string]any) map[string]any {
+	corpo := corpoPreparar(itens...)
+	corpo["carimbo"] = map[string]any{"lamport": lamport, "empresa": "rotacapixaba"}
+	return corpo
+}
+
 func itemDeFio(carona string, de, ate int) map[string]any {
 	return map[string]any{"carona_id": carona, "de": de, "ate": ate}
 }
@@ -130,11 +138,18 @@ func TestPreparar_RepetidoDevolveOMesmoSim(t *testing.T) {
 func TestPreparar_VotoNaoTrazMotivoETrechoZero(t *testing.T) {
 	cfg := configDeTransacoes(parComUmaCarona(t, "vaijunto"))
 
-	// A carona tem três assentos: os três primeiros levam o trecho 0.
+	// A carona tem três assentos: os três primeiros levam o trecho 0, e são
+	// **confirmados**. Confirmar é o que torna o trecho esgotado sem
+	// portadores, que é a linha da tabela da seção 8.2 em que o voto é
+	// SEM_ASSENTO. Deixados em PREPARADO, o quarto pedido entraria no wait-die
+	// e a resposta seria AGUARDE ou PRECEDENCIA, não este NÃO.
 	for _, tx := range []string{"rotacapixaba:res-00000001", "rotacapixaba:res-00000002", "rotacapixaba:res-00000003"} {
 		if voto := votoDaResposta(t, pedirTransacao(cfg, "rotacapixaba", tx, "preparar",
 			corpoPreparar(itemDeFio("vaijunto:car-1", 0, 1)))); voto.Voto != "SIM" {
 			t.Fatalf("%s: voto = %q, want SIM", tx, voto.Voto)
+		}
+		if rec := pedirTransacao(cfg, "rotacapixaba", tx, "confirmar", map[string]any{}); rec.Code != http.StatusOK {
+			t.Fatalf("%s: confirmar = %d, want 200", tx, rec.Code)
 		}
 	}
 
@@ -672,5 +687,74 @@ func TestTransacoes_SemCabecalhosEm400(t *testing.T) {
 	}
 	if got := codigoDoErro(t, rec); got != codigoCabecalhoInvalido {
 		t.Errorf("codigo = %q, want %q", got, codigoCabecalhoInvalido)
+	}
+}
+
+// A terceira forma de resposta da seção 4.3: o voto AGUARDE sai num 200, com
+// carona_id e trecho, e **sem** motivo — ele não é um voto NÃO.
+//
+// O contrato importa porque é por ele que o coordenador distingue o que fazer:
+// com AGUARDE ele volta em 200 ms (D41), com NÃO/PRECEDENCIA ele refaz a
+// reserva (D36). Um AGUARDE que chegasse com motivo faria o cliente HTTP
+// recusá-lo como resposta malformada.
+func TestPreparar_VotoAguardeNaoTrazMotivo(t *testing.T) {
+	estado := parComUmaCarona(t, "vaijunto")
+	cfg := configDeTransacoes(estado)
+
+	// Os três assentos ficam em espera com transações **mais novas** que a
+	// quarta, que por isso espera em vez de desistir (seção 8.2).
+	for i, tx := range []string{"rotacapixaba:res-00000001", "rotacapixaba:res-00000002", "rotacapixaba:res-00000003"} {
+		if voto := votoDaResposta(t, pedirTransacao(cfg, "rotacapixaba", tx, "preparar",
+			corpoPrepararComLamport(90+i, itemDeFio("vaijunto:car-1", 0, 1)))); voto.Voto != "SIM" {
+			t.Fatalf("%s: voto = %q, want SIM", tx, voto.Voto)
+		}
+	}
+
+	rec := pedirTransacao(cfg, "rotacapixaba", "rotacapixaba:res-00000004", "preparar",
+		corpoPrepararComLamport(10, itemDeFio("vaijunto:car-1", 0, 1)))
+
+	voto := votoDaResposta(t, rec)
+	if voto.Voto != string(transacao.VotoAguarde) || voto.Motivo != "" {
+		t.Fatalf("voto = %+v, want AGUARDE sem motivo", voto)
+	}
+	if voto.CaronaID != "vaijunto:car-1" || voto.Trecho == nil || *voto.Trecho != 0 {
+		t.Fatalf("voto = %+v, want carona_id vaijunto:car-1 e trecho 0", voto)
+	}
+	if len(voto.Pernas) != 0 {
+		t.Errorf("o AGUARDE veio com pernas: %+v", voto.Pernas)
+	}
+	// Nada foi gravado: a repetição é uma nova avaliação (seção 4.3).
+	if _, existe := estado.Participacao("rotacapixaba:res-00000004"); existe {
+		t.Errorf("o AGUARDE criou participação")
+	}
+	if o := estado.Ocupacao()[0]; o.Livres != 0 || o.EmEspera != 3 {
+		t.Errorf("ocupação = %+v, want 0 livres e 3 em espera", o)
+	}
+}
+
+// O voto NÃO por PRECEDENCIA tem a forma da seção 5.2: motivo, carona e
+// trecho, no mesmo 200 dos outros motivos.
+func TestPreparar_VotoPrecedenciaTrazMotivoETrecho(t *testing.T) {
+	estado := parComUmaCarona(t, "vaijunto")
+	cfg := configDeTransacoes(estado)
+
+	// Os três assentos ficam com transações mais **velhas** que a quarta.
+	for i, tx := range []string{"rotacapixaba:res-00000001", "rotacapixaba:res-00000002", "rotacapixaba:res-00000003"} {
+		if voto := votoDaResposta(t, pedirTransacao(cfg, "rotacapixaba", tx, "preparar",
+			corpoPrepararComLamport(10+i, itemDeFio("vaijunto:car-1", 0, 1)))); voto.Voto != "SIM" {
+			t.Fatalf("%s: voto = %q, want SIM", tx, voto.Voto)
+		}
+	}
+
+	voto := votoDaResposta(t, pedirTransacao(cfg, "rotacapixaba", "rotacapixaba:res-00000004", "preparar",
+		corpoPrepararComLamport(90, itemDeFio("vaijunto:car-1", 0, 1))))
+	if voto.Voto != "NAO" || voto.Motivo != motivoPrecedencia {
+		t.Fatalf("voto = %+v, want NAO/PRECEDENCIA", voto)
+	}
+	if voto.CaronaID != "vaijunto:car-1" || voto.Trecho == nil || *voto.Trecho != 0 {
+		t.Fatalf("voto = %+v, want carona_id vaijunto:car-1 e trecho 0", voto)
+	}
+	if _, existe := estado.Participacao("rotacapixaba:res-00000004"); existe {
+		t.Errorf("a PRECEDENCIA criou participação")
 	}
 }

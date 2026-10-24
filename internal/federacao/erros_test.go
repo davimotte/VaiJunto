@@ -46,10 +46,15 @@ func TestTraducaoUsaCodigosDaAPI(t *testing.T) {
 		codigoViolacaoProtocolo: true, codigoCorpoGrande: true,
 		codigoErroInterno: true,
 	}
+	// AGUARDE entra junto dos motivos porque sai do mesmo jeito: status 200,
+	// requisição processada (seção 2). Ele não é motivo de NÃO — é a terceira
+	// forma de voto da seção 4.3 —, e quem o converte em voto próprio é
+	// votoDoParticipante.
 	motivosDeVoto := map[string]bool{
 		motivoSemAssento: true, motivoPrecedencia: true,
 		motivoCaronaNaoEncontrada: true, motivoCaronaCancelada: true,
 		motivoItinerarioInvalido: true, motivoTransacaoAbortada: true,
+		votoAguarde: true,
 	}
 
 	for sentinela, traducao := range traducaoErros {

@@ -26,13 +26,33 @@ const txDeTeste = "rotacapixaba:res-3f0b11c4"
 
 // pedido monta um PedidoPreparacao bem formado com os itens dados.
 func pedido(tx string, itens ...ItemReserva) PedidoPreparacao {
+	return pedidoComCarimbo(tx, Carimbo{Lamport: 41, Empresa: "rotacapixaba"}, itens...)
+}
+
+// pedidoComCarimbo é o mesmo pedido com o carimbo escolhido, para os testes do
+// wait-die (seção 8.2), em que a precedência é justamente o que se afirma.
+func pedidoComCarimbo(tx string, carimbo Carimbo, itens ...ItemReserva) PedidoPreparacao {
 	return PedidoPreparacao{
 		TxID:          tx,
 		Coordenador:   "rotacapixaba",
 		Participantes: []string{"rotacapixaba", "vaijunto"},
-		Carimbo:       Carimbo{Lamport: 41, Empresa: "rotacapixaba"},
+		Carimbo:       carimbo,
 		Passageiro:    Passageiro{Ref: "rotacapixaba:maria", Nome: "Maria Souza"},
 		Itens:         itens,
+	}
+}
+
+// esgotarComConfirmado consome os assentos de um trecho com uma participação
+// **CONFIRMADO**, isto é, sem deixar portador nenhum em PREPARADO.
+//
+// Faz falta desde o wait-die: um trecho esgotado por uma transação em
+// PREPARADO não é mais SEM_ASSENTO, é disputa (seção 8.2). Quem quer o trecho
+// cheio de verdade — assento vendido, que não volta — precisa confirmar.
+func esgotarComConfirmado(t *testing.T, e *Estado, tx string, itens ...ItemReserva) {
+	t.Helper()
+	prepararNoCenario(t, e, tx, itens...)
+	if _, err := e.Confirmar(tx); err != nil {
+		t.Fatalf("Confirmar(%s): %v", tx, err)
 	}
 }
 
@@ -269,14 +289,14 @@ func TestPreparar_RepeticaoPorSituacao(t *testing.T) {
 	}
 }
 
-// Passo 3 com disputa **no-wait** (fase 4): trecho esgotado é NÃO na hora, com
-// o trecho identificado para o diagnóstico e o registro de operações. O
-// wait-die, que responderia AGUARDE para a transação mais velha, é da fase 7.
+// Primeira linha da tabela da seção 8.2: trecho esgotado **só por assentos
+// confirmados** é NÃO na hora, com o trecho identificado para o diagnóstico e
+// o registro de operações. Não há portador nenhum, logo não há o que esperar.
 func TestPreparar_SemAssentoNaoGravaNada(t *testing.T) {
 	e := estadoDoCenario(t)
 
-	// car-4 tem um assento só: o primeiro PREPARAR o leva.
-	prepararNoCenario(t, e, txDeTeste, item("vaijunto:car-4", 0, 1))
+	// car-4 tem um assento só, e aqui ele é vendido: confirmado não volta.
+	esgotarComConfirmado(t, e, txDeTeste, item("vaijunto:car-4", 0, 1))
 	conferirIP21(t, e)
 
 	antes := len(tiposNoLog(t, e))
@@ -308,7 +328,7 @@ func TestPreparar_SemAssentoNaoGravaNada(t *testing.T) {
 // validação passar (seção 7.2). Sem isso haveria estado parcial a desfazer.
 func TestPreparar_RecusaNaoDescontaOsOutrosItens(t *testing.T) {
 	e := estadoDoCenario(t)
-	prepararNoCenario(t, e, txDeTeste, item("vaijunto:car-4", 0, 1))
+	esgotarComConfirmado(t, e, txDeTeste, item("vaijunto:car-4", 0, 1))
 
 	_, err := e.Preparar(pedido("rotacapixaba:res-00000002",
 		item("vaijunto:car-1", 0, 1), item("vaijunto:car-4", 0, 1)), aoPreparar())
@@ -968,8 +988,8 @@ func TestReservasNaoConcluidas_SaoAsQueAFase2NaoTerminou(t *testing.T) {
 
 // Quem está em espera num trecho é derivado das participações em PREPARADO, e
 // não guardado em paralelo na carona (seção 4.3). Como os assentos são
-// contadores (D25), um trecho pode ter vários portadores ao mesmo tempo — é
-// disso que o wait-die da fase 7 precisa.
+// contadores (D25), um trecho pode ter vários portadores ao mesmo tempo — e é
+// contra **todos** eles que o wait-die compara o carimbo (seção 8.2).
 func TestPortadores_DerivamDasParticipacoesPreparadas(t *testing.T) {
 	e := estadoDoCenario(t)
 	prepararNoCenario(t, e, "rotacapixaba:res-00000001", item("vaijunto:car-1", 0, 1))
@@ -1164,4 +1184,166 @@ func TestReplay_RecusaRegistrosIncoerentes(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --- Wait-die: a tabela da seção 8.2 linha a linha ---
+//
+// Os testes do coordenador e da disputa entre empresas estão em testes/; aqui
+// o alvo é a decisão em si, com o estado montado à mão. É onde cada linha da
+// tabela aparece isolada, sem rede e sem coordenador.
+//
+// car-2 tem dois assentos no seu único trecho, o que permite montar um trecho
+// esgotado com **dois** portadores de carimbos diferentes — o caso em que a
+// exigência de ser mais velha que *todos* decide.
+
+// carimboDe é o atalho para um carimbo da rotacapixaba, que é a coordenadora
+// dos pedidos destes testes.
+func carimboDe(lamport uint64) Carimbo {
+	return Carimbo{Lamport: lamport, Empresa: "rotacapixaba"}
+}
+
+// esgotarCar2 põe os dois assentos de car-2 em espera, com os carimbos dados,
+// e devolve o estado.
+func esgotarCar2(t *testing.T, lamports ...uint64) *Estado {
+	t.Helper()
+	e := estadoDoCenario(t)
+	for i, l := range lamports {
+		tx := fmt.Sprintf("rotacapixaba:res-portador%d", i)
+		if _, err := e.Preparar(pedidoComCarimbo(tx, carimboDe(l), item("vaijunto:car-2", 0, 1)), aoPreparar()); err != nil {
+			t.Fatalf("pôr %s em espera: %v", tx, err)
+		}
+	}
+	if o := ocupacaoDe(t, e, "vaijunto:car-2", 0); o.Livres != 0 {
+		t.Fatalf("car-2 ficou com %d livres, want 0", o.Livres)
+	}
+	return e
+}
+
+// Segunda linha da tabela: mais velha que **todos** os portadores → AGUARDE,
+// com o trecho informado (seção 4.3 da API) e sem gravar nada.
+func TestWaitDie_MaisVelhaQueTodosEspera(t *testing.T) {
+	e := esgotarCar2(t, 20, 30)
+	antes := len(tiposNoLog(t, e))
+
+	_, err := e.Preparar(pedidoComCarimbo(txDeTeste, carimboDe(10), item("vaijunto:car-2", 0, 1)), aoPreparar())
+
+	var detalhe *ErroAguarde
+	if !errors.As(err, &detalhe) {
+		t.Fatalf("err = %v, want *ErroAguarde", err)
+	}
+	if detalhe.CaronaID != "vaijunto:car-2" || detalhe.IndiceTrecho != 0 {
+		t.Errorf("detalhe = %+v, want car-2 trecho 0", detalhe)
+	}
+	if depois := len(tiposNoLog(t, e)); depois != antes {
+		t.Errorf("o AGUARDE gravou %d registro(s); ele não grava nada (seção 8.2)", depois-antes)
+	}
+	if _, existe := e.Participacao(txDeTeste); existe {
+		t.Errorf("o AGUARDE criou participação")
+	}
+	conferirIP21(t, e)
+}
+
+// Terceira linha: basta **um** portador mais velho para a transação desistir,
+// ainda que ela seja mais velha que o outro.
+//
+// É o que a seção 8.2 quer dizer com "mais velha que todos": exigir menos
+// permitiria que T esperasse por alguém mais velho, e um ciclo de espera
+// voltaria a ser possível (seção 8.5).
+func TestWaitDie_UmPortadorMaisVelhoBastaParaDesistir(t *testing.T) {
+	e := esgotarCar2(t, 10, 30)
+	antes := len(tiposNoLog(t, e))
+
+	// 20 é mais velha que o portador de 30, e mais nova que o de 10.
+	_, err := e.Preparar(pedidoComCarimbo(txDeTeste, carimboDe(20), item("vaijunto:car-2", 0, 1)), aoPreparar())
+
+	var detalhe *ErroPrecedencia
+	if !errors.As(err, &detalhe) {
+		t.Fatalf("err = %v, want *ErroPrecedencia", err)
+	}
+	if detalhe.CaronaID != "vaijunto:car-2" || detalhe.IndiceTrecho != 0 {
+		t.Errorf("detalhe = %+v, want car-2 trecho 0", detalhe)
+	}
+	if depois := len(tiposNoLog(t, e)); depois != antes {
+		t.Errorf("a PRECEDENCIA gravou %d registro(s)", depois-antes)
+	}
+	conferirIP21(t, e)
+}
+
+// Carimbo **igual** ao do portador conta como espera.
+//
+// O único jeito de isso acontecer é a D36: a nova tentativa de uma reserva
+// reusa o carimbo com txID novo, e o ABORTAR da tentativa anterior vai em
+// segundo plano, então ela pode encontrar a si mesma ainda em PREPARADO. Se o
+// empate desse PRECEDENCIA, a reserva desistiria de si mesma e queimaria as
+// três tentativas; esperando, ela leva o assento assim que o abort chega.
+//
+// Para duas transações diferentes o empate é impossível: (lamport, empresa) é
+// ordem total.
+func TestWaitDie_CarimboIgualAoPortadorEspera(t *testing.T) {
+	e := esgotarCar2(t, 20, 20)
+
+	_, err := e.Preparar(pedidoComCarimbo(txDeTeste, carimboDe(20), item("vaijunto:car-2", 0, 1)), aoPreparar())
+	if !errors.Is(err, ErrAguarde) {
+		t.Fatalf("err = %v, want ErrAguarde", err)
+	}
+	conferirIP21(t, e)
+}
+
+// Primeira linha ganha das outras duas: um PREPARAR com dois trechos
+// esgotados, um sem portadores e outro com portador mais novo, é SEM_ASSENTO.
+//
+// A ordem das regras importa. Esperar faria o coordenador gastar o prazo de
+// votação por um assento que não vai vagar, porque o trecho sem portadores
+// está cheio de assentos **vendidos**, e venda não volta (regra 4).
+func TestWaitDie_TrechoVendidoGanhaDoTrechoEmDisputa(t *testing.T) {
+	e := estadoDoCenario(t)
+
+	// car-4 tem um assento, e ele é vendido: trecho esgotado sem portadores.
+	esgotarComConfirmado(t, e, "rotacapixaba:res-vendida", item("vaijunto:car-4", 0, 1))
+	// car-2 tem dois, e os dois ficam em espera com transações mais novas:
+	// sozinho, este trecho daria AGUARDE.
+	for i, l := range []uint64{90, 91} {
+		tx := fmt.Sprintf("rotacapixaba:res-portador%d", i)
+		if _, err := e.Preparar(pedidoComCarimbo(tx, carimboDe(l), item("vaijunto:car-2", 0, 1)), aoPreparar()); err != nil {
+			t.Fatalf("pôr %s em espera: %v", tx, err)
+		}
+	}
+
+	_, err := e.Preparar(pedidoComCarimbo(txDeTeste, carimboDe(1),
+		item("vaijunto:car-2", 0, 1), item("vaijunto:car-4", 0, 1)), aoPreparar())
+
+	var detalhe *ErroSemAssento
+	if !errors.As(err, &detalhe) {
+		t.Fatalf("err = %v, want *ErroSemAssento (o trecho vendido decide)", err)
+	}
+	if detalhe.CaronaID != "vaijunto:car-4" {
+		t.Errorf("detalhe = %+v, want o trecho vendido de car-4", detalhe)
+	}
+	conferirIP21(t, e)
+}
+
+// Um trecho com assento livre não entra na disputa: o PREPARAR de um
+// itinerário em que só um dos trechos está esgotado é decidido por esse
+// trecho, e o outro não vira nem espera nem recusa.
+func TestWaitDie_SoOsTrechosEsgotadosEntramNaDecisao(t *testing.T) {
+	e := estadoDoCenario(t)
+	if _, err := e.Preparar(pedidoComCarimbo("rotacapixaba:res-portador0", carimboDe(90),
+		item("vaijunto:car-2", 0, 1)), aoPreparar()); err != nil {
+		t.Fatalf("pôr o portador em espera: %v", err)
+	}
+
+	// car-2 tem dois assentos e só um portador: ainda há um livre, então
+	// nenhum trecho está esgotado e o voto é SIM.
+	if _, err := e.Preparar(pedidoComCarimbo(txDeTeste, carimboDe(1),
+		item("vaijunto:car-1", 0, 1), item("vaijunto:car-2", 0, 1)), aoPreparar()); err != nil {
+		t.Fatalf("Preparar com assento livre: %v", err)
+	}
+
+	// Agora car-2 esgotou, e o trecho livre de car-1 não muda a decisão.
+	_, err := e.Preparar(pedidoComCarimbo("rotacapixaba:res-00000009", carimboDe(99),
+		item("vaijunto:car-1", 0, 1), item("vaijunto:car-2", 0, 1)), aoPreparar())
+	if !errors.Is(err, ErrPrecedencia) {
+		t.Fatalf("err = %v, want ErrPrecedencia", err)
+	}
+	conferirIP21(t, e)
 }

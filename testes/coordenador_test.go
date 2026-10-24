@@ -155,9 +155,9 @@ func TestTR1UmAssentoCinquentaPassageirosDasTresEmpresas(t *testing.T) {
 	if oks != 1 {
 		t.Errorf("confirmações = %d, want exatamente 1 (códigos: %v)", oks, porCodigo)
 	}
-	if porCodigo[protocolo.CodigoSemAssento] != passageiros-1 {
-		t.Errorf("SEM_ASSENTO = %d, want %d (códigos: %v)",
-			porCodigo[protocolo.CodigoSemAssento], passageiros-1, porCodigo)
+	if recusas := recusasPorFaltaDeAssento(porCodigo); recusas != passageiros-1 {
+		t.Errorf("recusas por falta de assento = %d, want %d (códigos: %v)",
+			recusas, passageiros-1, porCodigo)
 	}
 
 	esperarQuiescencia(t, consorcio)
@@ -182,19 +182,17 @@ func TestTR1UmAssentoCinquentaPassageirosDasTresEmpresas(t *testing.T) {
 // pode deixar algo reservado em A ou em B, ainda que as duas tenham votado SIM
 // e descontado o assento antes de a decisão sair. Quem devolve é o ABORTAR.
 //
-// **Por que "no máximo um", e não "exatamente um", nesta fase.** O participante
-// é no-wait até a fase 7 (seção 14): ele responde NÃO na hora quando falta
-// assento, em vez de AGUARDE. Com 50 tentativas simultâneas e A tendo 10
-// assentos, a tentativa que ganha o assento único de C é muitas vezes uma das
-// 40 que perdem A — ela desiste imediatamente e devolve C, mas as outras já
-// desistiram também, e a rodada termina sem vencedor. Nada disso viola a
-// atomicidade: é desistência limpa, com todos os assentos de volta.
+// **Por que "exatamente um", e não "no máximo um".** Até a fase 6 este teste
+// afirmava apenas que ninguém vendia o assento duas vezes, porque com o
+// participante no-wait a rodada podia terminar sem vencedor: a tentativa que
+// ganhava o assento único de C era muitas vezes uma das 40 que perdiam A, e
+// desistia na hora, devolvendo C depois de as outras já terem desistido.
 //
-// Com o wait-die (fase 7) isso deixa de acontecer, e pelo motivo exato da seção
-// 8.2: A esgotada por **portadores em PREPARADO** não responde SEM_ASSENTO —
-// responde AGUARDE ou PRECEDENCIA, e aí a D36 manda tentar de novo com o mesmo
-// carimbo. Então a fase 7 troca a asserção por "exatamente 1", que é o que a
-// seção 11.3 pede, e este cenário passa a fechar por inteiro.
+// O wait-die acaba com isso, pelo motivo exato da seção 8.2: A esgotada por
+// **portadores em PREPARADO** não responde SEM_ASSENTO — responde AGUARDE ou
+// PRECEDENCIA —, e aí a D36 manda tentar de novo com o mesmo carimbo. A mais
+// velha espera em vez de morrer, e alguém sempre chega ao fim. É a asserção
+// que a seção 11.3 pede.
 //
 // É o T2 do P1 agora distribuído. A diferença é o que pode dar errado: no P1,
 // uma ordem de validação ruim; aqui, um abort que não chega.
@@ -232,18 +230,17 @@ func TestTR2ItinerarioEntreTresEmpresasEhAtomico(t *testing.T) {
 
 	respostas := reservarEmParalelo(t, pedidos)
 	oks, porCodigo := contar(respostas)
-	// A metade que importa para a atomicidade: dois sucessos significariam o
-	// assento único de C vendido duas vezes. Na fase 7 isto vira oks != 1.
-	if oks > 1 {
-		t.Fatalf("confirmações = %d, want no máximo 1 — o assento de C foi vendido duas vezes (códigos: %v)",
-			oks, porCodigo)
+	// Dois sucessos significariam o assento único de C vendido duas vezes;
+	// nenhum significaria que a disputa não converge. Sob wait-die, é um.
+	if oks != 1 {
+		t.Fatalf("confirmações = %d, want exatamente 1 (códigos: %v)", oks, porCodigo)
 	}
 	// Toda recusa tem de ser por falta de assento. Qualquer outro código aqui
 	// — ITINERARIO_INVALIDO, EMPRESA_INDISPONIVEL, ERRO_INTERNO — seria defeito,
 	// e não disputa.
-	if esperadas := len(pedidos) - oks; porCodigo[protocolo.CodigoSemAssento] != esperadas {
-		t.Errorf("SEM_ASSENTO = %d, want %d (códigos: %v)",
-			porCodigo[protocolo.CodigoSemAssento], esperadas, porCodigo)
+	if recusas := recusasPorFaltaDeAssento(porCodigo); recusas != len(pedidos)-oks {
+		t.Errorf("recusas por falta de assento = %d, want %d (códigos: %v)",
+			recusas, len(pedidos)-oks, porCodigo)
 	}
 
 	// A fase 2 precisa terminar antes da contagem: enquanto os ABORTAR estão no

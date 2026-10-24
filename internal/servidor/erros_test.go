@@ -49,6 +49,7 @@ func TestTraducaoUsaCodigosDoProtocolo(t *testing.T) {
 		protocolo.CodigoErroInterno: true,
 		// Códigos do P2 (seção 5.6 do PROJETO_P2.md), documentados na seção 6.
 		protocolo.CodigoReservaEmAndamento: true, protocolo.CodigoEmpresaIndisponivel: true,
+		protocolo.CodigoDisputaPerdida: true,
 		// Provisório, da fase 5 à 7.
 		protocolo.CodigoOperacaoIndisponivel: true,
 	}
