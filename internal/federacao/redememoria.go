@@ -40,6 +40,22 @@ type RedeEmMemoria struct {
 	atraso        map[string]time.Duration
 	particoes     map[parDeEmpresas]bool
 	perdas        map[chaveDePerda]int
+	gancho        func(Chamada)
+}
+
+// Chamada é o que o gancho de Interceptar vê de uma mensagem prestes a ser
+// entregue.
+//
+// Carimbo só vem preenchido no preparar, porque é a única operação que carrega
+// um — confirmar, abortar e consultar levam apenas o txID. É o campo que
+// permite a um teste distinguir tentativas da mesma reserva, que têm txID
+// diferente e carimbo igual (D36).
+type Chamada struct {
+	Origem   string
+	Destino  string
+	Operacao string
+	TxID     string
+	Carimbo  dominio.Carimbo
 }
 
 // parDeEmpresas identifica um corte de comunicação. A partição é simétrica,
@@ -114,6 +130,29 @@ func (h *RedeEmMemoria) Reconectar(a, b string) {
 	delete(h.particoes, parDeEmpresas{b, a})
 }
 
+// Interceptar instala um gancho chamado antes de cada entrega, FORA do mutex
+// do hub. Um gancho nil desliga a interceptação.
+//
+// É o botão que faltava para os cenários que dependem de **ordem de chegada**,
+// e não de atraso: o gancho pode bloquear, e enquanto bloqueia a mensagem está
+// parada na rede. É assim que o TR3 produz a ordem cruzada do instante 1 da
+// seção 8.3 — T₁ chegando primeiro a um dono e T₂ primeiro ao outro — sem
+// depender de o escalonador cooperar nem de um `sleep` calibrado.
+//
+// Fica fora do mutex de propósito: um gancho que bloqueia com o lock do hub
+// preso travaria todas as outras mensagens junto, e o teste deixaria de
+// atrasar uma mensagem para atrasar a rede inteira.
+//
+// O gancho **não** é interrompido pelo ctx de quem chama: segurar uma
+// mensagem para sempre pendura o teste até o prazo do `go test`, e não até o
+// prazo de votação. Quem quiser provar o que acontece quando uma mensagem não
+// chega usa Atrasar ou Particionar, que são os botões feitos para isso.
+func (h *RedeEmMemoria) Interceptar(gancho func(Chamada)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.gancho = gancho
+}
+
 // Perder descarta as próximas `quantas` chamadas de uma operação entre duas
 // empresas, e deixa as seguintes passar.
 //
@@ -139,7 +178,13 @@ var _ transacao.Rede = redeDe{}
 // Preparar entrega a fase 1 ao participante do destino e traduz o resultado
 // pela mesma tabela que o handler HTTP usa.
 func (r redeDe) Preparar(ctx context.Context, destino string, pedido dominio.PedidoPreparacao) (transacao.RespostaPreparar, error) {
-	p, err := r.entregar(ctx, destino, OperacaoPreparar, pedido.TxID, soDoCoordenador)
+	p, err := r.entregar(ctx, Chamada{
+		Origem:   r.empresa,
+		Destino:  destino,
+		Operacao: OperacaoPreparar,
+		TxID:     pedido.TxID,
+		Carimbo:  pedido.Carimbo,
+	}, soDoCoordenador)
 	if err != nil {
 		return transacao.RespostaPreparar{}, err
 	}
@@ -167,7 +212,12 @@ func (r redeDe) Consultar(ctx context.Context, destino, txID string) (transacao.
 	// o papel de coordenador (seção 1.2 da API). Exigi-lo aqui faria a rede em
 	// memória recusar o que o servidor de verdade aceita, e a terminação
 	// cooperativa ficaria intestável justamente no caminho que ela usa.
-	p, err := r.entregar(ctx, destino, OperacaoConsultar, txID, deTodoOConsorcio)
+	p, err := r.entregar(ctx, Chamada{
+		Origem:   r.empresa,
+		Destino:  destino,
+		Operacao: OperacaoConsultar,
+		TxID:     txID,
+	}, deTodoOConsorcio)
 	if err != nil {
 		return transacao.RespostaConsulta{}, err
 	}
@@ -180,7 +230,12 @@ func (r redeDe) Consultar(ctx context.Context, destino, txID string) (transacao.
 }
 
 func (r redeDe) decidir(ctx context.Context, destino, txID, operacao string) (dominio.Situacao, error) {
-	p, err := r.entregar(ctx, destino, operacao, txID, soDoCoordenador)
+	p, err := r.entregar(ctx, Chamada{
+		Origem:   r.empresa,
+		Destino:  destino,
+		Operacao: operacao,
+		TxID:     txID,
+	}, soDoCoordenador)
 	if err != nil {
 		return "", err
 	}
@@ -217,13 +272,16 @@ const (
 //
 // A ordem reproduz a de uma rede: primeiro não existe rota (par desconhecido),
 // depois o enlace está cortado (partição), depois a mensagem se perde, e só
-// então ela viaja — com atraso, se houver. O papel é conferido no fim, porque
-// numa rede de verdade quem o confere é o servidor que recebeu.
+// então ela viaja — passando pelo gancho de ordenação e pelo atraso, se
+// houver. O papel é conferido no fim, porque numa rede de verdade quem o
+// confere é o servidor que recebeu.
 //
-// Nada é feito com o mutex preso além de ler e atualizar os contadores: a
-// espera do atraso e a chamada ao participante acontecem fora dele, pelo mesmo
-// motivo da regra 2 do CLAUDE.md.
-func (r redeDe) entregar(ctx context.Context, destino, operacao, txID string, papel exigenciaDePapel) (*transacao.Participante, error) {
+// Nada é feito com o mutex preso além de ler e atualizar os contadores: o
+// gancho, a espera do atraso e a chamada ao participante acontecem fora dele,
+// pelo mesmo motivo da regra 2 do CLAUDE.md.
+func (r redeDe) entregar(ctx context.Context, chamada Chamada, papel exigenciaDePapel) (*transacao.Participante, error) {
+	destino, operacao, txID := chamada.Destino, chamada.Operacao, chamada.TxID
+
 	r.hub.mu.Lock()
 	p, conhecido := r.hub.participantes[destino]
 	cortada := r.hub.particoes[parDeEmpresas{r.empresa, destino}]
@@ -233,6 +291,7 @@ func (r redeDe) entregar(ctx context.Context, destino, operacao, txID string, pa
 		r.hub.perdas[chave]--
 	}
 	espera := r.hub.atraso[destino]
+	gancho := r.hub.gancho
 	r.hub.mu.Unlock()
 
 	switch {
@@ -242,6 +301,12 @@ func (r redeDe) entregar(ctx context.Context, destino, operacao, txID string, pa
 		return nil, fmt.Errorf("%w: %s: partição com %s", ErrParIndisponivel, destino, r.empresa)
 	case perder:
 		return nil, fmt.Errorf("%w: %s: %s perdido", ErrParIndisponivel, destino, operacao)
+	}
+
+	// A mensagem existe e vai ser entregue: é aqui que o teste pode segurá-la
+	// para impor uma ordem de chegada (ver Interceptar).
+	if gancho != nil {
+		gancho(chamada)
 	}
 
 	if espera > 0 {

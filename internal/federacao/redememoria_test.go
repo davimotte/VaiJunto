@@ -73,9 +73,15 @@ func TestRedeEmMemoria_VotoNaoTrazMotivoETrecho(t *testing.T) {
 	ctx := context.Background()
 	item := dominio.ItemReserva{CaronaID: "vaijunto:car-1", De: 0, Ate: 1}
 
+	// Os três assentos são vendidos, e não só postos em espera: um trecho
+	// esgotado por participações em PREPARADO é disputa, e o wait-die
+	// responderia AGUARDE ou PRECEDENCIA em vez deste NÃO (seção 8.2).
 	for i, tx := range []string{"rotacapixaba:res-1", "rotacapixaba:res-2", "rotacapixaba:res-3"} {
 		if _, err := rede.Preparar(ctx, "vaijunto", pedidoDeTeste(tx, item)); err != nil {
 			t.Fatalf("Preparar %d: %v", i, err)
+		}
+		if _, err := rede.Confirmar(ctx, "vaijunto", tx); err != nil {
+			t.Fatalf("Confirmar %d: %v", i, err)
 		}
 	}
 
