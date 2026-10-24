@@ -18,8 +18,8 @@ import (
 //     REST, quando o coordenador é outra empresa, e o coordenador local, quando
 //     a empresa do passageiro também é dona de algum trecho (seção 7.1, passo
 //     5). Participante de si mesma passa pelo mesmo código, sem rede;
-//   - o lugar onde a terminação cooperativa (fase 6A) e o wait-die (fase 7)
-//     entram, sem que a borda REST precise saber que existem.
+//   - o lugar por onde a terminação cooperativa e o wait-die passam, sem que a
+//     borda REST precise saber que existem.
 //
 // Não recebe context: aqui não há prazo a respeitar nem rede a esperar. O
 // trabalho é tomar o mutex, gravar com fsync e devolver — a espera do 2PC é do

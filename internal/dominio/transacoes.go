@@ -60,9 +60,9 @@ const (
 // seção 8.1).
 //
 // Mora no domínio, e não na camada de transação, porque é campo da
-// participação e porque é sob o lock que o wait-die da fase 7 vai comparar
-// carimbos (seção 8.2). O *relógio* de Lamport continua em internal/transacao:
-// o domínio guarda o carimbo que recebeu, nunca o produz.
+// participação e porque é sob o lock que o wait-die compara carimbos
+// (decidirDisputa, seção 8.2). O *relógio* de Lamport continua em
+// internal/transacao: o domínio guarda o carimbo que recebeu, nunca o produz.
 type Carimbo struct {
 	Lamport uint64
 	Empresa string
@@ -208,24 +208,27 @@ func preparar(e *Estado, p PedidoPreparacao, agora time.Time) ([]Perna, error) {
 		return nil, err
 	}
 
-	// Passo 3 — disponibilidade, trecho a trecho (D25).
+	// Passo 3 — disponibilidade e disputa, trecho a trecho (D25, D24).
 	//
-	// Nesta fase a disputa é **no-wait**: trecho esgotado vira NÃO na hora. O
-	// wait-die da seção 8.2, que compara o carimbo desta transação com os dos
-	// portadores e pode responder AGUARDE, entra na fase 7 exatamente aqui, e
-	// nada mais do algoritmo muda.
+	// Se todo trecho pedido tem Livres >= 1, a lista sai vazia e seguimos
+	// direto para o passo 4. Se não, o wait-die da seção 8.2 decide entre
+	// esperar, desistir e recusar — e nenhuma das três respostas grava nada.
+	var esgotados []trechoEsgotado
 	for i, item := range p.Itens {
 		c := caronas[i]
 		for t := item.De; t < item.Ate; t++ {
-			if c.Livres[t] < 1 {
-				return nil, &ErroSemAssento{
-					CaronaID:     c.ID,
-					IndiceTrecho: t,
-					Origem:       c.Rota[t],
-					Destino:      c.Rota[t+1],
-				}
+			if c.Livres[t] >= 1 {
+				continue
 			}
+			esgotados = append(esgotados, trechoEsgotado{
+				carona:     c,
+				trecho:     t,
+				portadores: portadores(e, c.ID, t),
+			})
 		}
+	}
+	if err := decidirDisputa(p.Carimbo, esgotados); err != nil {
+		return nil, err
 	}
 
 	// Passo 4 — escrever. D22, regra 3: o registro vai ao log com fsync antes
@@ -260,6 +263,84 @@ func preparar(e *Estado, p PedidoPreparacao, agora time.Time) ([]Perna, error) {
 	e.participacoes[p.TxID] = nova
 
 	return pernasDe(e, nova.Itens), nil
+}
+
+// trechoEsgotado é um trecho pedido que está sem assento livre, junto de quem
+// está com ele em espera. É o insumo da tabela da seção 8.2, montado sob o lock
+// no passo 3 do preparar.
+type trechoEsgotado struct {
+	carona     *Carona
+	trecho     int
+	portadores []*Participacao
+}
+
+// decidirDisputa aplica a tabela do wait-die (seção 8.2) aos trechos esgotados
+// de um PREPARAR. Devolve nil quando não há disputa, isto é, quando a lista
+// está vazia.
+//
+// É o **único** lugar do programa em que carimbos de transações diferentes são
+// comparados (D24). Isso importa: dois donos distintos decidem a mesma disputa
+// do mesmo jeito porque rodam esta mesma função sobre a mesma ordem total, sem
+// trocar mensagem nenhuma (seção 8.4). Espalhar a comparação por mais de um
+// lugar seria o caminho para dois donos discordarem e o sistema travar.
+//
+// As três regras, na ordem da tabela — e a ordem importa, porque um PREPARAR
+// pode ter trechos esgotados de naturezas diferentes:
+//
+//  1. Algum trecho esgotado **sem portadores**: ele está cheio só de assentos
+//     confirmados, e assento confirmado não volta (regra 4 do CLAUDE.md). Não
+//     há o que esperar, e esperar pelos outros trechos seria esperar por um
+//     assento que não viria de qualquer forma.
+//  2. Nenhum portador de nenhum trecho esgotado é mais velho: AGUARDE.
+//  3. Caso contrário: PRECEDENCIA.
+//
+// A comparação da regra 2 é `portador.MaisVelhoQue(meu)`, e não
+// `meu.MaisVelhoQue(portador)`. A diferença está só no empate, e o empate
+// existe: a D36 refaz a reserva com o **mesmo carimbo** e txID novo, enquanto o
+// ABORTAR da tentativa anterior vai em segundo plano, então a nova tentativa
+// pode encontrar a anterior ainda em PREPARADO, com carimbo idêntico. Pela
+// comparação estrita ela desistiria de si mesma e queimaria as três tentativas;
+// desta forma ela espera, o ABORTAR chega e a repetição de 200 ms leva o
+// assento. Para duas transações diferentes o empate é impossível, porque a
+// ordem de (lamport, empresa) é total.
+func decidirDisputa(meu Carimbo, esgotados []trechoEsgotado) error {
+	if len(esgotados) == 0 {
+		return nil
+	}
+
+	for _, t := range esgotados {
+		if len(t.portadores) == 0 {
+			return &ErroSemAssento{
+				CaronaID:     t.carona.ID,
+				IndiceTrecho: t.trecho,
+				Origem:       t.carona.Rota[t.trecho],
+				Destino:      t.carona.Rota[t.trecho+1],
+			}
+		}
+	}
+
+	for _, t := range esgotados {
+		for _, portador := range t.portadores {
+			if portador.Carimbo.MaisVelhoQue(meu) {
+				return &ErroPrecedencia{
+					CaronaID:     t.carona.ID,
+					IndiceTrecho: t.trecho,
+					Origem:       t.carona.Rota[t.trecho],
+					Destino:      t.carona.Rota[t.trecho+1],
+				}
+			}
+		}
+	}
+
+	// Mais velha que todos: espera. O trecho informado é o primeiro esgotado,
+	// como manda a seção 4.3 da API — serve ao diagnóstico e ao registro.
+	primeiro := esgotados[0]
+	return &ErroAguarde{
+		CaronaID:     primeiro.carona.ID,
+		IndiceTrecho: primeiro.trecho,
+		Origem:       primeiro.carona.Rota[primeiro.trecho],
+		Destino:      primeiro.carona.Rota[primeiro.trecho+1],
+	}
 }
 
 // confirmar é a fase 2 pelo lado do dono, quando a decisão é confirmar
@@ -586,8 +667,8 @@ func pernasDe(e *Estado, itens []ItemReserva) []Perna {
 // diverge (PROJETO.md, seção 4). Como os assentos são contadores (D25), um
 // trecho esgotado pode ter vários portadores ao mesmo tempo.
 //
-// Quem passa a usá-los para decidir é o wait-die da fase 7 (seção 8.2); nesta
-// fase eles sustentam a conta de I-P2-1. A ordem é por txID, para que duas
+// Quem os usa para decidir é o wait-die (decidirDisputa, seção 8.2); eles
+// também sustentam a conta de I-P2-1. A ordem é por txID, para que duas
 // leituras do mesmo estado deem a mesma lista — a iteração de mapa em Go é
 // aleatória.
 func portadores(e *Estado, caronaID string, trecho int) []*Participacao {

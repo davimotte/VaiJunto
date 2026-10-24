@@ -46,8 +46,8 @@ func (r *Relogio) Agora() uint64 {
 // É a outra metade da regra da seção 8.1, cuja primeira metade é AoReceber:
 // incrementa-se ao receber **e ao criar uma transação**. Sem o incremento aqui,
 // duas transações criadas em sequência no mesmo servidor sairiam com o mesmo
-// carimbo, e a ordem total que o wait-die precisa (fase 7) deixaria de ser
-// total — o desempate por empresa não resolve, porque a empresa é a mesma.
+// carimbo, e a ordem total de que o wait-die precisa deixaria de ser total —
+// o desempate por empresa não resolve, porque a empresa é a mesma.
 //
 // O carimbo é fixado uma vez por reserva, e não por tentativa: as três
 // tentativas da D36 compartilham o mesmo, para que a transação fique

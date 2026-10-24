@@ -130,6 +130,30 @@ var (
 	// consultando (D23).
 	ErrEmpresaIndisponivel = errors.New("dominio: empresa indisponível")
 
+	// ErrAguarde — wait-die: todo trecho esgotado está com portadores, e
+	// nenhum deles é mais velho que esta transação (D24; seção 8.2).
+	//
+	// Não é recusa: é "volte depois". O participante não grava nada e não
+	// segura o handler — quem espera é o coordenador, repetindo o PREPARAR a
+	// cada 200 ms (D41). Detalhes do trecho vêm em ErroAguarde.
+	ErrAguarde = errors.New("dominio: assento em espera por transação mais nova")
+
+	// ErrPrecedencia — wait-die: algum portador de um trecho esgotado é mais
+	// velho que esta transação, que por isso desiste (D24; seção 8.2).
+	//
+	// É voto NÃO, mas é o único cuja resposta certa é tentar de novo: o
+	// coordenador refaz a reserva com o mesmo carimbo (D36). Detalhes do trecho
+	// vêm em ErroPrecedencia.
+	ErrPrecedencia = errors.New("dominio: transação mais nova que um portador do assento")
+
+	// ErrDisputaPerdida — as três tentativas da D36 se esgotaram, ou o prazo de
+	// votação acabou com um AGUARDE pendente (seções 8.5 e 5.2 da API).
+	//
+	// Nasce no **coordenador**, nunca num participante: é o resultado da
+	// disputa inteira, e não a avaliação de um dono. Por isso não atravessa a
+	// borda REST — o que atravessa é PRECEDENCIA, trecho a trecho.
+	ErrDisputaPerdida = errors.New("dominio: disputa pelo assento perdida")
+
 	// ErrOperacaoIndisponivel — operação prevista que ainda não está ligada
 	// nesta versão.
 	//
@@ -176,6 +200,9 @@ func TodosOsErros() []error {
 		ErrViolacaoProtocolo,
 		ErrReservaEmAndamento,
 		ErrEmpresaIndisponivel,
+		ErrAguarde,
+		ErrPrecedencia,
+		ErrDisputaPerdida,
 		ErrOperacaoIndisponivel,
 	}
 }
@@ -205,6 +232,62 @@ func (e *ErroSemAssento) Error() string {
 }
 
 func (e *ErroSemAssento) Unwrap() error { return ErrSemAssento }
+
+func (e *ErroSemAssento) TrechoEsgotado() (string, int) { return e.CaronaID, e.IndiceTrecho }
+
+// TrechoDisputado é o que SEM_ASSENTO, AGUARDE e PRECEDENCIA têm em comum: os
+// três falam do mesmo trecho esgotado, e a seção 4.3 da API manda os três
+// levarem `carona_id` e `trecho` na resposta.
+//
+// A interface existe para que a borda extraia o trecho uma vez só, com um
+// errors.As, em vez de um por tipo concreto. Fica no domínio, e não na borda,
+// porque é uma propriedade dos erros — a borda só a consome.
+type TrechoDisputado interface {
+	error
+	TrechoEsgotado() (caronaID string, indice int)
+}
+
+// Os dois erros do wait-die (seção 8.2). São tipos separados, e não um só com
+// um campo dizendo qual é, porque o que a borda faz com cada um é diferente:
+// AGUARDE é um voto próprio, PRECEDENCIA é voto NÃO com motivo. Distinguir por
+// tipo deixa isso em errors.As, onde o compilador ajuda, em vez de num if sobre
+// um campo.
+
+// ErroAguarde identifica o primeiro trecho esgotado pelo qual esta transação
+// vai esperar.
+type ErroAguarde struct {
+	CaronaID     string
+	IndiceTrecho int
+	Origem       string
+	Destino      string
+}
+
+func (e *ErroAguarde) Error() string {
+	return fmt.Sprintf("dominio: carona %s, trecho %d (%s → %s) em espera por transação mais nova",
+		e.CaronaID, e.IndiceTrecho, e.Origem, e.Destino)
+}
+
+func (e *ErroAguarde) Unwrap() error { return ErrAguarde }
+
+func (e *ErroAguarde) TrechoEsgotado() (string, int) { return e.CaronaID, e.IndiceTrecho }
+
+// ErroPrecedencia identifica o trecho cujo portador é mais velho que esta
+// transação, isto é, o trecho em que ela perdeu a precedência.
+type ErroPrecedencia struct {
+	CaronaID     string
+	IndiceTrecho int
+	Origem       string
+	Destino      string
+}
+
+func (e *ErroPrecedencia) Error() string {
+	return fmt.Sprintf("dominio: carona %s, trecho %d (%s → %s) com portador mais velho",
+		e.CaronaID, e.IndiceTrecho, e.Origem, e.Destino)
+}
+
+func (e *ErroPrecedencia) Unwrap() error { return ErrPrecedencia }
+
+func (e *ErroPrecedencia) TrechoEsgotado() (string, int) { return e.CaronaID, e.IndiceTrecho }
 
 // ErroConflitoHorario identifica a reserva ativa que ocupa o período pedido.
 type ErroConflitoHorario struct {
