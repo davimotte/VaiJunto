@@ -32,8 +32,12 @@ const (
 // API). O vocabulário é o da camada 5 (transacao), de onde o coordenador
 // decide; aqui a borda só o reexporta para a tabela de tradução abaixo.
 const (
-	motivoSemAssento          = transacao.MotivoSemAssento
-	motivoPrecedencia         = transacao.MotivoPrecedencia
+	motivoSemAssento  = transacao.MotivoSemAssento
+	motivoPrecedencia = transacao.MotivoPrecedencia
+	// votoAguarde não é motivo de NÃO: é a terceira forma de voto da seção
+	// 4.3. Entra nesta lista porque a tabela abaixo é indexada por código, e
+	// votoDoParticipante o reconhece antes de montar o NÃO.
+	votoAguarde               = string(transacao.VotoAguarde)
 	motivoCaronaNaoEncontrada = transacao.MotivoCaronaNaoEncontrada
 	motivoCaronaCancelada     = transacao.MotivoCaronaCancelada
 	motivoItinerarioInvalido  = transacao.MotivoItinerarioInvalido
@@ -74,7 +78,11 @@ type erroHTTP struct {
 //     mesmo critério que internal/servidor/erros.go usa com ErrEmpresaInvalida.
 var traducaoErros = map[error]erroHTTP{
 	// 1. Motivos do voto NÃO (seção 5.2).
-	dominio.ErrSemAssento:          {http.StatusOK, motivoSemAssento, "Trecho sem assento livre."},
+	dominio.ErrSemAssento: {http.StatusOK, motivoSemAssento, "Trecho sem assento livre."},
+	// Os dois do wait-die (seção 8.2). Nenhum dos dois grava coisa alguma, e
+	// por isso a repetição do coordenador é uma nova avaliação (seção 4.3).
+	dominio.ErrPrecedencia:         {http.StatusOK, motivoPrecedencia, "Transação mais nova que um portador do assento."},
+	dominio.ErrAguarde:             {http.StatusOK, votoAguarde, "Assentos em espera por transações mais novas; o coordenador repete o PREPARAR."},
 	dominio.ErrCaronaNaoEncontrada: {http.StatusOK, motivoCaronaNaoEncontrada, "Carona inexistente nesta empresa."},
 	dominio.ErrCaronaCancelada:     {http.StatusOK, motivoCaronaCancelada, "Carona cancelada."},
 	dominio.ErrItinerarioInvalido:  {http.StatusOK, motivoItinerarioInvalido, "Os trechos pedidos não formam um itinerário válido."},
@@ -124,6 +132,10 @@ var traducaoErros = map[error]erroHTTP{
 	dominio.ErrReservaEmAndamento:   {http.StatusInternalServerError, codigoErroInterno, "Falha inesperada: exclusividade de reserva é do coordenador."},
 	dominio.ErrEmpresaIndisponivel:  {http.StatusInternalServerError, codigoErroInterno, "Falha inesperada: disponibilidade de par é do coordenador."},
 	dominio.ErrOperacaoIndisponivel: {http.StatusInternalServerError, codigoErroInterno, "Falha inesperada: operação indisponível nesta versão."},
+	// DISPUTA_PERDIDA é o resultado da disputa inteira, e nasce no
+	// coordenador depois das três tentativas da D36 — um participante jamais
+	// o produz. O que atravessa esta borda é PRECEDENCIA, trecho a trecho.
+	dominio.ErrDisputaPerdida: {http.StatusInternalServerError, codigoErroInterno, "Falha inesperada: a disputa é decidida pelo coordenador."},
 }
 
 // erroHTTPDeDominio traduz um erro do domínio para a resposta da borda REST.

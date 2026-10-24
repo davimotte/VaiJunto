@@ -191,9 +191,9 @@ func (t *Terminador) rodada(pt dominio.Participacao) {
 	if err == nil && resposta.Papel == PapelCoordenador {
 		switch resposta.Decisao {
 		case dominio.DecisaoConfirmada:
-			t.aplicarConfirmar(pt.TxID, "coordenador")
+			t.aplicarConfirmar(pt.TxID, pt.Carimbo, "coordenador")
 		case dominio.DecisaoAbortada:
-			t.aplicarAbortar(pt.TxID, "coordenador")
+			t.aplicarAbortar(pt.TxID, pt.Carimbo, "coordenador")
 		default:
 			// EM_ANDAMENTO: a votação ainda está de pé, e perguntar de novo é
 			// tudo o que se pode fazer. Abortar aqui seria desfazer uma
@@ -217,14 +217,14 @@ func (t *Terminador) rodada(pt dominio.Participacao) {
 			// Outro dono já está CONFIRMADO. Pelo passo 1 do argumento da
 			// seção 7.4, ele só chegou lá porque houve decisão de confirmar
 			// gravada, então confirmar aqui não pode contradizer ninguém.
-			t.aplicarConfirmar(pt.TxID, empresa)
+			t.aplicarConfirmar(pt.TxID, pt.Carimbo, empresa)
 			return
 		case string(dominio.SituacaoAbortado), SituacaoDesconhecida:
 			// Evidência de que a unanimidade é impossível: ou aquele dono já
 			// abortou, ou acabou de vetar ao ser consultado sobre uma
 			// transação que não conhece. Nos dois casos o coordenador nunca
 			// obterá todos os votos SIM, e abortar aqui é seguro.
-			t.aplicarAbortar(pt.TxID, empresa)
+			t.aplicarAbortar(pt.TxID, pt.Carimbo, empresa)
 			return
 		default:
 			// PREPARADO: tão em dúvida quanto nós. Continua perguntando aos
@@ -268,25 +268,25 @@ func (t *Terminador) consultar(destino, txID string) (RespostaConsulta, error) {
 // entre a nossa consulta e a nossa escrita, e o estado já está no destino
 // certo. Vale registrar e seguir — insistir só repetiria a mesma transição
 // impossível.
-func (t *Terminador) aplicarConfirmar(txID, fonte string) {
+func (t *Terminador) aplicarConfirmar(txID string, carimbo dominio.Carimbo, fonte string) {
 	if _, err := t.estado.Confirmar(txID); err != nil {
-		t.anotar(txID, "TERMINACAO-CONFIRMAR-RECUSADA por "+fonte)
+		t.anotar(txID, carimbo, "TERMINACAO-CONFIRMAR-RECUSADA por "+fonte)
 		return
 	}
-	t.anotar(txID, "TERMINACAO → CONFIRMADO por "+fonte)
+	t.anotar(txID, carimbo, "TERMINACAO → CONFIRMADO por "+fonte)
 }
 
-func (t *Terminador) aplicarAbortar(txID, fonte string) {
+func (t *Terminador) aplicarAbortar(txID string, carimbo dominio.Carimbo, fonte string) {
 	if _, err := t.estado.Abortar(txID); err != nil {
-		t.anotar(txID, "TERMINACAO-ABORTAR-RECUSADA por "+fonte)
+		t.anotar(txID, carimbo, "TERMINACAO-ABORTAR-RECUSADA por "+fonte)
 		return
 	}
-	t.anotar(txID, "TERMINACAO → ABORTADO por "+fonte)
+	t.anotar(txID, carimbo, "TERMINACAO → ABORTADO por "+fonte)
 }
 
-func (t *Terminador) anotar(txID, decisao string) {
+func (t *Terminador) anotar(txID string, carimbo dominio.Carimbo, decisao string) {
 	if t.registro != nil {
-		t.registro.Decisao(txID, decisao)
+		t.registro.Decisao(txID, carimbo, decisao)
 	}
 }
 

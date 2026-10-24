@@ -50,7 +50,12 @@ type Coordenador struct {
 
 // RegistroDecisao recebe a linha de registro de cada decisão (D19; seção 5.2):
 //
-//	2026/11/05 08:15:02.437 [vaijunto] DECISAO tx=vaijunto:res-3f0b11c4 → CONFIRMAR
+//	2026/11/05 08:15:02.437 [vaijunto] DECISAO tx=vaijunto:res-3f0b11c4 carimbo=(41,vaijunto) → CONFIRMAR
+//
+// O carimbo vai na linha para que a demonstração D-3 fique legível também no
+// terminal do coordenador: é por ele que se vê qual das duas transações em
+// disputa era a mais velha, e portanto por que ela ganhou. Os donos já o
+// imprimem na linha do PREPARAR.
 //
 // A interface é declarada aqui, no consumidor, e não importada de
 // internal/federacao: é a federação que importa esta camada (seção 5.3), e
@@ -59,7 +64,7 @@ type Coordenador struct {
 //
 // Um valor nil não escreve nada, e é assim que o registro fica desligado.
 type RegistroDecisao interface {
-	Decisao(txID, decisao string)
+	Decisao(txID string, carimbo dominio.Carimbo, decisao string)
 }
 
 // ConfigCoordenador são as peças que o boot liga ao coordenador. É struct, e
@@ -196,10 +201,10 @@ func (c *Coordenador) Reservar(ctx context.Context, passageiro dominio.Passageir
 		// Passo 6 — se o motivo foi PRECEDENCIA e ainda há tentativas, volta ao
 		// passo 4 com o mesmo carimbo.
 		//
-		// Nesta fase o participante é no-wait e nunca responde PRECEDENCIA nem
-		// AGUARDE (seção 14), então este ramo não dispara: a estrutura está
-		// pronta e a fase 7 a liga junto com o wait-die. Qualquer outro motivo
-		// é definitivo e não se resolve tentando de novo.
+		// Só PRECEDENCIA tenta de novo. Um AGUARDE que sobreviveu ao prazo
+		// não: o prazo de votação já foi gasto esperando, e repetir a reserva
+		// inteira seria esperar outro prazo pelo mesmo portador. Qualquer outro
+		// motivo é definitivo e não se resolve tentando de novo.
 		if ultimo.motivo != MotivoPrecedencia {
 			break
 		}
@@ -255,7 +260,7 @@ func (c *Coordenador) tentar(ctx context.Context, txID string, carimbo dominio.C
 		// receber descobre consultando (D23, abort presumido). Não esperamos por
 		// ele, porque o passageiro não precisa esperar para receber a recusa.
 		c.abortarTodos(txID, participantes)
-		c.anotar(txID, "ABORTAR")
+		c.anotar(txID, carimbo, "ABORTAR")
 		return dominio.Reserva{}, dominio.Itinerario{}, falta, nil
 	}
 
@@ -273,7 +278,7 @@ func (c *Coordenador) tentar(ctx context.Context, txID string, carimbo dominio.C
 
 	if err := dominio.ValidarEncadeamento(pernas); err != nil {
 		c.abortarTodos(txID, participantes)
-		c.anotar(txID, "ABORTAR")
+		c.anotar(txID, carimbo, "ABORTAR")
 		// Sem nova tentativa: o itinerário não melhora tentando de novo.
 		return dominio.Reserva{}, dominio.Itinerario{}, &recusa{definitivo: err}, nil
 	}
@@ -283,14 +288,14 @@ func (c *Coordenador) tentar(ctx context.Context, txID string, carimbo dominio.C
 	reserva, itinerario, err := c.estado.ConfirmarReserva(txID, passageiroID, participantes, itens, pernas, time.Now().In(dominio.FusoDasCidades()))
 	if err != nil {
 		c.abortarTodos(txID, participantes)
-		c.anotar(txID, "ABORTAR")
+		c.anotar(txID, carimbo, "ABORTAR")
 		if errors.Is(err, dominio.ErrFalhaNoLog) {
 			// Falha de disco não é recusa de negócio: sobe como erro.
 			return dominio.Reserva{}, dominio.Itinerario{}, nil, err
 		}
 		return dominio.Reserva{}, dominio.Itinerario{}, &recusa{definitivo: err}, nil
 	}
-	c.anotar(txID, "CONFIRMAR")
+	c.anotar(txID, carimbo, "CONFIRMAR")
 
 	// D31: ponto coord-apos-decidir (TF2). O DECISAO_CONFIRMAR já está no log
 	// com fsync e nenhum CONFIRMAR saiu. A reserva existe, mas o passageiro
@@ -346,29 +351,42 @@ func (c *Coordenador) votar(ctx context.Context, txID string, carimbo dominio.Ca
 		}(empresa)
 	}
 
+	// Esperamos **todas** as goroutines, sem um caso de ctx.Done() aqui. Elas
+	// já respeitam o prazo: prepararComRepeticao retorna em ctx.Done(), e toda
+	// implementação de Rede recebe o mesmo ctx (seção 5.4). Desistir aqui em
+	// paralelo com elas faria a distinção da seção 5.2 da API —
+	// EMPRESA_INDISPONIVEL quando alguém não respondeu, DISPUTA_PERDIDA quando
+	// todos responderam e o último pedia para esperar — depender de quem
+	// ganhasse a corrida entre o ctx e o canal.
 	pernas := make(map[string][]dominio.Perna, len(participantes))
 	for range participantes {
-		select {
-		case r := <-respostas:
-			switch {
-			case r.err != nil:
-				// A goroutine só desiste quando o prazo acaba, então um erro
-				// aqui significa empresa indisponível (D30): ela não respondeu
-				// dentro do prazo de votação.
-				return pernas, &recusa{motivo: MotivoTransacaoAbortada, indisponivel: r.empresa}
-			case r.resposta.Voto == VotoSim:
-				pernas[r.empresa] = r.resposta.Pernas
-			default:
-				// NÃO, ou AGUARDE que não virou SIM dentro do prazo.
-				return pernas, &recusa{
-					motivo:   r.resposta.Motivo,
-					empresa:  r.empresa,
-					caronaID: r.resposta.CaronaID,
-					trecho:   r.resposta.Trecho,
-				}
+		r := <-respostas
+		switch {
+		case r.err != nil:
+			// A goroutine só desiste quando o prazo acaba, então um erro aqui
+			// significa empresa indisponível (D30): ela não respondeu dentro
+			// do prazo de votação.
+			return pernas, &recusa{motivo: MotivoTransacaoAbortada, indisponivel: r.empresa}
+		case r.resposta.Voto == VotoSim:
+			pernas[r.empresa] = r.resposta.Pernas
+		case r.resposta.Voto == VotoAguarde:
+			// O prazo acabou e este participante ainda pedia para esperar: ele
+			// respondeu, então não é empresa indisponível. É a outra metade da
+			// distinção da seção 5.2 da API.
+			return pernas, &recusa{
+				aguardePendente: true,
+				empresa:         r.empresa,
+				caronaID:        r.resposta.CaronaID,
+				trecho:          r.resposta.Trecho,
 			}
-		case <-ctx.Done():
-			return pernas, &recusa{motivo: MotivoTransacaoAbortada}
+		default:
+			// NÃO, com o motivo da seção 5.2.
+			return pernas, &recusa{
+				motivo:   r.resposta.Motivo,
+				empresa:  r.empresa,
+				caronaID: r.resposta.CaronaID,
+				trecho:   r.resposta.Trecho,
+			}
 		}
 	}
 	return pernas, nil
@@ -379,11 +397,10 @@ func (c *Coordenador) votar(ctx context.Context, txID string, carimbo dominio.Ca
 //
 // Dois casos pedem repetição, por motivos diferentes:
 //
-//   - AGUARDE: o participante é mais novo que os portadores do assento e pede
-//     para o coordenador voltar depois (wait-die, seção 8.2). Esperar não
-//     prende o handler nem o lock do dono: ele responde na hora e nós voltamos
-//     em 200 ms (D41). Na fase 5 isto não acontece, porque o participante é
-//     no-wait;
+//   - AGUARDE: esta transação é mais velha que todos os portadores do
+//     assento, e o dono pede que o coordenador volte depois (wait-die, seção
+//     8.2). Esperar não prende o handler nem o lock do dono: ele responde na
+//     hora e nós voltamos em 200 ms (D41);
 //   - falha de comunicação: o PREPARAR é idempotente pelo txID (D28, regra 6),
 //     e a falha pode ter sido só da resposta — o participante pode já estar em
 //     PREPARADO. Repetir é seguro e é o que recupera uma resposta perdida.
@@ -494,8 +511,12 @@ func (c *Coordenador) confirmarTodos(txID string, participantes []string) {
 	}
 
 	// Todos confirmaram: a transação acabou.
+	//
+	// Sem carimbo: a fase 2 não disputa nada, e a retomada do boot (Recuperar)
+	// nem sequer o conhece — o carimbo é da transação em votação, e a reserva
+	// gravada não o guarda. O registro omite o carimbo zerado.
 	_ = c.estado.ConcluirReserva(txID)
-	c.anotar(txID, "CONCLUIDA")
+	c.anotar(txID, dominio.Carimbo{}, "CONCLUIDA")
 }
 
 // abortarTodos leva a decisão de abortar aos participantes, em segundo plano.
@@ -558,9 +579,9 @@ func (c *Coordenador) agrupar(itens []dominio.ItemReserva) (map[string][]dominio
 
 // anotar escreve a linha de decisão no registro de operações (D19). Fora de
 // qualquer seção crítica, como manda a decisão.
-func (c *Coordenador) anotar(txID, decisao string) {
+func (c *Coordenador) anotar(txID string, carimbo dominio.Carimbo, decisao string) {
 	if c.registro != nil {
-		c.registro.Decisao(txID, decisao)
+		c.registro.Decisao(txID, carimbo, decisao)
 	}
 }
 
@@ -597,13 +618,12 @@ type recusa struct {
 	caronaID string
 	trecho   int
 	// indisponivel é a empresa que não respondeu, quando foi esse o motivo.
-	//
-	// A fase 7 acrescenta aqui o oposto dela: um sinalizador de que a última
-	// resposta pendente era AGUARDE, que é o que a seção 5.2 da API usa para
-	// distinguir EMPRESA_INDISPONIVEL (alguém não respondeu) de
-	// DISPUTA_PERDIDA (todos responderam, e o último pedia para esperar). Com
-	// no-wait não há AGUARDE, então a distinção ainda não decide nada.
 	indisponivel string
+	// aguardePendente é o oposto de indisponivel: o prazo de votação acabou e
+	// o participante **respondeu**, pedindo para esperar. É o que a seção 5.2
+	// da API usa para distinguir EMPRESA_INDISPONIVEL (alguém não respondeu)
+	// de DISPUTA_PERDIDA (todos responderam, e o último pedia para esperar).
+	aguardePendente bool
 	// definitivo é o erro de domínio quando a recusa não veio de um voto, e sim
 	// da validação do coordenador (passo 7) ou do commit.
 	definitivo error
@@ -625,11 +645,18 @@ func (r recusa) erro() error {
 	case MotivoItinerarioInvalido:
 		return fmt.Errorf("%w: recusado por %q", dominio.ErrItinerarioInvalido, r.empresa)
 	case MotivoPrecedencia:
-		// Tentativas esgotadas na disputa. Nesta fase o participante é no-wait e
-		// nunca responde PRECEDENCIA, então este caminho não é alcançável; a
-		// fase 7 o troca por DISPUTA_PERDIDA, que é o código próprio da D36.
-		return &dominio.ErroSemAssento{CaronaID: r.caronaID, IndiceTrecho: r.trecho}
+		// As três tentativas da D36 se esgotaram: a transação perdeu a disputa
+		// toda vez, e tentar de novo não a tornaria mais velha do que já é
+		// (seção 8.5).
+		return fmt.Errorf("%w: carona %q, trecho %d", dominio.ErrDisputaPerdida, r.caronaID, r.trecho)
 	default:
+		// O prazo de votação acabou com um AGUARDE pendente: todos
+		// responderam, e o último pedia para esperar. É a espera por uma
+		// transação em dúvida da seção 8.5, e a seção 5.2 da API manda
+		// distingui-la de empresa fora do ar.
+		if r.aguardePendente {
+			return fmt.Errorf("%w: %q ainda pedia para esperar quando o prazo acabou", dominio.ErrDisputaPerdida, r.empresa)
+		}
 		// Inclui TRANSACAO_ABORTADA e o prazo esgotado: alguma empresa não
 		// respondeu, ou respondeu que a transação já estava abortada ali porque
 		// a rede atrasou a ponto de alguém consultar antes (seção 5.2 da API).

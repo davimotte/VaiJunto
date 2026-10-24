@@ -61,22 +61,32 @@ var traducaoErros = map[error]erroTraduzido{
 	// D22: o registro não chegou ao disco e a operação não foi aplicada. Para o
 	// cliente é falha do servidor, e ele pode tentar de novo.
 	dominio.ErrFalhaNoLog: {protocolo.CodigoErroInterno, "Falha interna ao gravar o registro da operação; nada foi alterado."},
-	// Os quatro erros do participante do 2PC (fase 4) nascem de uma chamada de
-	// outra empresa, nunca de uma requisição de cliente, e são tratados pela
-	// tabela da borda REST (internal/federacao/erros.go). Entram aqui pelo
-	// mesmo critério de ErrEmpresaInvalida: se um dia vazarem para o TCP,
-	// aparecem como falha do servidor em vez de um código inventado por
-	// proximidade.
+	// Os erros do participante do 2PC nascem de uma chamada de outra empresa,
+	// nunca de uma requisição de cliente, e são tratados pela tabela da borda
+	// REST (internal/federacao/erros.go). Entram aqui pelo mesmo critério de
+	// ErrEmpresaInvalida: se um dia vazarem para o TCP, aparecem como falha do
+	// servidor em vez de um código inventado por proximidade.
 	dominio.ErrPedidoInvalido:     {protocolo.CodigoErroInterno, "Falha interna: pedido de preparação inválido."},
 	dominio.ErrItemDeOutraEmpresa: {protocolo.CodigoErroInterno, "Falha interna: trecho de carona de outra empresa."},
 	dominio.ErrTransacaoAbortada:  {protocolo.CodigoErroInterno, "Falha interna: transação já abortada."},
 	dominio.ErrViolacaoProtocolo:  {protocolo.CodigoErroInterno, "Falha interna: violação de protocolo entre servidores."},
+	// Os dois do wait-die (seção 8.2) são a avaliação de **um** dono sobre um
+	// trecho, e o passageiro nunca os vê: o coordenador os consome — AGUARDE
+	// repetindo o PREPARAR, PRECEDENCIA tentando de novo (D36) — e só o
+	// resultado da disputa inteira chega aqui, como DISPUTA_PERDIDA.
+	dominio.ErrAguarde:     {protocolo.CodigoErroInterno, "Falha interna: a espera do wait-die é tratada pelo coordenador."},
+	dominio.ErrPrecedencia: {protocolo.CodigoErroInterno, "Falha interna: a precedência do wait-die é tratada pelo coordenador."},
 	// Os erros que o coordenador produz, e que são respostas legítimas ao
 	// passageiro (seção 5.6 do PROJETO_P2.md).
 	dominio.ErrReservaEmAndamento: {protocolo.CodigoReservaEmAndamento, "Você já tem uma reserva em andamento; aguarde o resultado dela."},
 	// D30: algum dono não respondeu no prazo de votação. Nenhum assento fica
 	// preso — o coordenador abortou a transação (D23).
 	dominio.ErrEmpresaIndisponivel: {protocolo.CodigoEmpresaIndisponivel, "Uma das empresas do itinerário não respondeu; nenhum assento foi reservado."},
+	// D36: a disputa pelo assento foi perdida nas três tentativas, ou o prazo
+	// de votação acabou com alguém ainda pedindo para esperar. Diferente de
+	// SEM_ASSENTO, que afirma que o trecho está cheio: aqui havia assento em
+	// disputa, e outra transação levou.
+	dominio.ErrDisputaPerdida: {protocolo.CodigoDisputaPerdida, "O assento foi disputado por outra reserva; nenhum assento foi reservado. Tente de novo."},
 	// Provisório, da fase 5 à 7 (D39 chega na fase 8).
 	dominio.ErrOperacaoIndisponivel: {protocolo.CodigoOperacaoIndisponivel, "Operação ainda não disponível nesta versão."},
 }

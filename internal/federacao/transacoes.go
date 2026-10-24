@@ -119,7 +119,7 @@ func tratarPreparar(w http.ResponseWriter, r *http.Request, p *transacao.Partici
 	}
 
 	voto, falha := votoDoParticipante(p.Preparar(pedido))
-	carimbo := fmt.Sprintf("carimbo=(%d,%s)", pedido.Carimbo.Lamport, pedido.Carimbo.Empresa)
+	carimbo := carimboDoRegistro(pedido.Carimbo)
 	if falha != nil {
 		anotar(w, "tx=%s %s erro=%s", txID, carimbo, falha.Codigo)
 		responderErro(w, *falha)
@@ -170,14 +170,23 @@ func votoDoParticipante(pernas []dominio.Perna, err error) (transacao.RespostaPr
 		return transacao.RespostaPreparar{}, &traducao
 	}
 
+	// AGUARDE não é voto NÃO: é a terceira forma da seção 4.3, e vai sem
+	// motivo. O wait-die o produz quando esta transação é mais velha que todos
+	// os portadores (seção 8.2), e o participante não gravou nada — o
+	// coordenador volta em 200 ms (D41).
 	voto := transacao.RespostaPreparar{Voto: transacao.VotoNao, Motivo: traducao.Codigo}
+	if errors.Is(err, dominio.ErrAguarde) {
+		voto = transacao.RespostaPreparar{Voto: transacao.VotoAguarde}
+	}
+
 	// CaronaID e Trecho saem do erro tipado do domínio, com errors.As, e não de
 	// uma segunda consulta ao estado: quem sabe qual trecho esgotou é quem olhou
-	// o contador sob o lock, e reler depois daria outra resposta.
-	var semAssento *dominio.ErroSemAssento
-	if errors.As(err, &semAssento) {
-		voto.CaronaID = semAssento.CaronaID
-		voto.Trecho = semAssento.IndiceTrecho
+	// o contador sob o lock, e reler depois daria outra resposta. A interface
+	// cobre os três casos em que a seção 4.3 manda informá-los: SEM_ASSENTO,
+	// PRECEDENCIA e AGUARDE.
+	var disputado dominio.TrechoDisputado
+	if errors.As(err, &disputado) {
+		voto.CaronaID, voto.Trecho = disputado.TrechoEsgotado()
 	}
 	return voto, nil
 }

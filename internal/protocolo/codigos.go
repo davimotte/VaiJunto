@@ -32,6 +32,14 @@ const (
 	CodigoReservaEmAndamento  = "RESERVA_EM_ANDAMENTO"
 	CodigoEmpresaIndisponivel = "EMPRESA_INDISPONIVEL"
 
+	// CodigoDisputaPerdida é a D36: as três tentativas do wait-die se
+	// esgotaram, ou o prazo de votação acabou com um participante ainda
+	// pedindo para esperar (seções 8.5 e 5.2 do API_CONSORCIO.md). É o limite
+	// assumido da ausência de inanição: sob contenção extrema o passageiro
+	// recebe isto em vez de esperar indefinidamente. Nenhum assento fica
+	// preso.
+	CodigoDisputaPerdida = "DISPUTA_PERDIDA"
+
 	// CodigoOperacaoIndisponivel é **provisório**, da fase 5 à 7: os dois
 	// cancelamentos que dependem do outbox da D39 ainda não estão ligados.
 	// Sai na fase 8.

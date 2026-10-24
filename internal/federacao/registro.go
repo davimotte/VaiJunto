@@ -161,9 +161,28 @@ func (r *Registro) escrever(texto string) {
 // O txID vem do nosso próprio gerador, mas sai pelo mesmo caminho dos demais
 // identificadores por disciplina: nada que vá para uma linha de registro é
 // escrito sem passar pela montagem desta função.
-func (r *Registro) Decisao(txID, decisao string) {
+//
+// O carimbo zerado é omitido. Nem toda decisão disputa alguma coisa: a
+// CONCLUIDA da fase 2 e a retomada do boot não conhecem carimbo nenhum, e
+// imprimir "carimbo=(0,)" nelas seria afirmar um carimbo que não existe.
+func (r *Registro) Decisao(txID string, carimbo dominio.Carimbo, decisao string) {
 	if r == nil {
 		return
 	}
-	r.escrever(fmt.Sprintf("[%s] DECISAO tx=%s → %s", r.empresa, strconv.Quote(txID), decisao))
+	detalhe := ""
+	if carimbo.Empresa != "" {
+		detalhe = " " + carimboDoRegistro(carimbo)
+	}
+	r.escrever(fmt.Sprintf("[%s] DECISAO tx=%s%s → %s", r.empresa, strconv.Quote(txID), detalhe, decisao))
+}
+
+// carimboDoRegistro formata o carimbo de uma transação para o registro de
+// operações, no formato da seção 5.2 do PROJETO_P2.md: carimbo=(41,vaijunto).
+//
+// Está aqui, e não repetido em cada chamador, porque as duas pontas do 2PC o
+// imprimem — o participante na linha do PREPARAR e o coordenador na linha da
+// DECISAO — e as duas linhas são comparadas lado a lado na demonstração D-3.
+// Divergir no formato tornaria a comparação penosa justamente ali.
+func carimboDoRegistro(c dominio.Carimbo) string {
+	return fmt.Sprintf("carimbo=(%d,%s)", c.Lamport, nomeDeEmpresa(c.Empresa))
 }
