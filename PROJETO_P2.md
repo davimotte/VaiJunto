@@ -1455,7 +1455,7 @@ sessão. Os critérios de pronto são os que a fase precisa demonstrar, com
 | 5 | Coordenador do 2PC | Seção 7.1, ainda com no-wait; `/auditoria` e verificador de invariantes. TR1, TR2 e TR5 passam | ✅ |
 | 6A | Recuperação | Seções 9.3 e 9.4: retomada, `consultar`, veto e terminação. TF9 e TF10 passam | ✅ |
 | 6B | Injeção de falhas | `FALHAR_EM` (seção 9.5). TF1 a TF7 passam | ✅ |
-| 7 | Precedência | Wait-die (seção 8). Em disputa cruzada, a transação mais antiga completa, sem deadlock; TR3 e TR4 passam | ⏳ |
+| 7 | Precedência | Wait-die (seção 8). Em disputa cruzada, a transação mais antiga completa, sem deadlock; TR3 e TR4 passam | ✅ |
 | 8 | Cancelamentos | Seção 10, com outbox. TC1 a TC4 e TF8 passam | ⏳ |
 | 9 | Clientes e protocolo | `PROTOCOL.md` v2 (seção 5.6) e clientes adaptados; fluxo completo pelo CLI | ⏳ |
 | 10 | Simulador | Seção 11.4 contra as três empresas | ⏳ |
@@ -1464,10 +1464,10 @@ sessão. Os critérios de pronto são os que a fase precisa demonstrar, com
 
 Notas de sequência:
 
-- **O 2PC funciona primeiro com no-wait** (fases 4 e 5) e só na fase 7 ganha o
-  wait-die. Se algo der errado na precedência, há um 2PC correto para
-  apresentar, e a precedência por ordem de chegada no dono (camada 1) já está
-  valendo.
+- **O 2PC funcionou primeiro com no-wait** (fases 4 e 5) e ganhou o wait-die na
+  fase 7. A ordem existia para que, se algo desse errado na precedência,
+  houvesse um 2PC correto para apresentar, com a precedência por ordem de
+  chegada no dono (camada 1) já valendo.
 - **O relógio de Lamport nasce na fase 3A**, porque a API exige o cabeçalho
   `X-VaiJunto-Lamport` desde a primeira chamada entre servidores. O carimbo da
   transação nasce na fase 5, e a fase 7 só acrescenta o wait-die.
@@ -1485,8 +1485,6 @@ Notas de sequência:
 |---|---|---|
 | `CANCELAR_RESERVA` e `CANCELAR_CARONA` de carona com reserva respondem `OPERACAO_INDISPONIVEL` | A devolução dos assentos atravessa empresas e depende da decisão unilateral com outbox (D39). Devolver só no coordenador deixaria presos os assentos dos outros donos, contra a I-P2-5; recusar por inteiro é conservador | 8 |
 | Os seis testes do cancelamento ficam em `t.Skip`: T4, T5, `TestSessaoCompletaDoPassageiro_Cancelamento`, `TestCascataDoMotoristaIgnoraOPrazoDoPassageiro`, `TestCancelarReserva_DevolveAssentosDeTodosOsTrechos` e `TestCancelarCarona_CascataDevolveAssentosDeCaronasVizinhas` | Dependem do cancelamento acima. Ficam escritos por inteiro, só com o `Skip` a mais, para a fase 8 reativá-los tirando uma linha | 8 |
-| TR2 afirma **no máximo** um sucesso, e não exatamente um | Com no-wait e 50 tentativas simultâneas, a que ganha o assento único de C é muitas vezes uma das 40 que perdem A, e desiste na hora. Sob wait-die, A esgotada por portadores em `PREPARADO` responde `AGUARDE`/`PRECEDENCIA` em vez de `SEM_ASSENTO`, a D36 tenta de novo, e o vencedor passa a ser determinístico. A atomicidade — nunca dois sucessos, e todo assento de volta — é afirmada já agora | 7 |
-| `DISPUTA_PERDIDA` não existe; tentativas esgotadas respondem `SEM_ASSENTO` | O ramo de `PRECEDENCIA` está escrito e sem gatilho: o participante é no-wait | 7 |
 | `LISTAR_MINHAS_RESERVAS` emite `empresa` por perna sem que a seção 5.10 do `PROTOCOL.md` a documente | O dado vem da cópia da D42 e a perna remota ficaria ilegível sem ele. A seção 5.10 e os clientes mudam juntos na fase 9 | 9 |
 
 - **O TF8 fica na fase 8**, porque o ponto `aviso-apos-registrar` depende do
@@ -1504,6 +1502,11 @@ Notas de sequência:
 |---|---|---|
 | `aviso-apos-registrar` é um nome válido de `FALHAR_EM` sem gatilho nenhum | O outbox nasce com os cancelamentos da D39; armá-lo hoje é um servidor que nunca cai. O nome existe desde já para que a lista aceita seja a da seção 9.5 inteira | 8 |
 | No contêiner, a variável continua armada depois de um `docker compose start` | O ambiente é do contêiner, não da execução. Para `coord-apos-decidir` isso é inofensivo — o ponto só fica no caminho de um `RESERVAR` novo —, mas `coord-durante-confirmar` e `part-apos-confirmar` cairiam outra vez na retomada. Religar é sempre **sem** a variável, e é o que os testes em processo fazem | — |
+
+**Limitações da fase 7:** nenhuma. A seção 8 está implementada por inteiro, e
+as duas limitações da fase 5 que dependiam dela saíram: o TR2 passou a afirmar
+**exatamente** um sucesso, e as tentativas esgotadas respondem
+`DISPUTA_PERDIDA`.
 
 O relatório SBC é escrito fora deste roteiro.
 

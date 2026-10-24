@@ -547,6 +547,22 @@ dentro do prazo de votação (D30). Nenhum assento fica reservado:
  "dados":{}}
 ```
 
+Erro por disputa perdida. O assento existia, mas outra reserva ficou com ele:
+na disputa pelo último assento, a transação mais nova cede à mais velha, e o
+servidor refaz a reserva até três vezes antes de desistir (D36). Nenhum assento
+fica reservado, e tentar de novo é legítimo:
+
+```json
+{"id":"7","status":"ERRO","codigo":"DISPUTA_PERDIDA",
+ "mensagem":"O assento foi disputado por outra reserva; nenhum assento foi reservado. Tente de novo.",
+ "dados":{}}
+```
+
+A diferença para `SEM_ASSENTO` é o que o passageiro pode fazer a seguir:
+`SEM_ASSENTO` afirma que o trecho está cheio de assentos já vendidos, e repetir
+não adianta; `DISPUTA_PERDIDA` diz que havia assento e outra reserva chegou
+antes, então repetir pode dar certo.
+
 Outros erros: `CARONA_NAO_ENCONTRADA`, `CARONA_CANCELADA`,
 `ITINERARIO_INVALIDO`, `CAMPO_INVALIDO`, `PERFIL_INCORRETO`.
 
@@ -635,6 +651,7 @@ vazio, porque a seção 2.2 exige o campo em toda resposta.
 | `PRAZO_CANCELAMENTO_EXPIRADO` | Fora do prazo permitido para cancelar | **`partida`** (5.7 e 5.11) |
 | `RESERVA_EM_ANDAMENTO` | O passageiro já tem uma reserva em andamento (D35) | `{}` |
 | `EMPRESA_INDISPONIVEL` | Uma empresa dona de um trecho não respondeu no prazo (D30) | `{}` |
+| `DISPUTA_PERDIDA` | Outra reserva levou o assento disputado, nas três tentativas (D36) | `{}` |
 | `OPERACAO_INDISPONIVEL` | Operação ainda não disponível nesta versão (**provisório**, ver abaixo) | `{}` |
 | `ERRO_INTERNO` | Falha inesperada | `{}` |
 
