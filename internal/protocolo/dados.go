@@ -192,8 +192,6 @@ type TrechoReserva struct {
 	//
 	// Vem da cópia que a reserva guarda (D42), e não de uma consulta ao dono:
 	// é justamente o que permite listar as reservas com um par fora do ar.
-	// A seção 5.10 do PROTOCOL.md só documenta o campo na fase 9, com o resto
-	// da versão 2 do protocolo e os clientes.
 	Empresa       string    `json:"empresa"`
 	Motorista     string    `json:"motorista"`
 	Origem        string    `json:"origem"`

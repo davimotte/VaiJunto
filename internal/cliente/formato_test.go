@@ -210,6 +210,44 @@ func TestDescreverRota(t *testing.T) {
 	}
 }
 
+func TestFormatarMotoristaEEmpresa(t *testing.T) {
+	if got := FormatarMotoristaEEmpresa("Rafael Mendonça Pires", "rotacapixaba"); got != "Rafael Mendonça Pires (rotacapixaba)" {
+		t.Errorf("FormatarMotoristaEEmpresa = %q", got)
+	}
+}
+
+func TestFormatarAvisoParcial(t *testing.T) {
+	casos := []struct {
+		empresas []string
+		esperado string
+	}{
+		{[]string{"rotacapixaba"}, "Aviso: busca incompleta — sem resposta de: rotacapixaba."},
+		{[]string{"rotacapixaba", "rotafluminense"}, "Aviso: busca incompleta — sem resposta de: rotacapixaba, rotafluminense."},
+	}
+	for _, caso := range casos {
+		if got := FormatarAvisoParcial(caso.empresas); got != caso.esperado {
+			t.Errorf("FormatarAvisoParcial(%v) = %q, want %q", caso.empresas, got, caso.esperado)
+		}
+	}
+}
+
+// TestFormatarUsuarioPassageiro: o prefixo de empresa (D32) só existe no
+// passageiro remoto; o local continua aparecendo sem rótulo nenhum.
+func TestFormatarUsuarioPassageiro(t *testing.T) {
+	casos := []struct {
+		usuario  string
+		esperado string
+	}{
+		{"maria", "maria"},
+		{"rotacapixaba:joao", "joao (de outra empresa)"},
+	}
+	for _, caso := range casos {
+		if got := FormatarUsuarioPassageiro(caso.usuario); got != caso.esperado {
+			t.Errorf("FormatarUsuarioPassageiro(%q) = %q, want %q", caso.usuario, got, caso.esperado)
+		}
+	}
+}
+
 // TestTabela_AlinhaPelaLarguraDoConteudo: a largura de cada coluna sai do
 // conteúdo, e não de uma constante escolhida na mão. Constante precisaria
 // caber o pior caso de todas as cidades e deixaria um vão em toda listagem

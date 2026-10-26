@@ -130,6 +130,12 @@ func buscarEReservar(term *cliente.Terminal, conexao *cliente.Conexao) error {
 	if err != nil {
 		return err
 	}
+
+	// O aviso vem antes do caso de lista vazia: uma empresa fora do ar pode
+	// zerar os itinerários (D-4), e é justamente aí que o aviso mais importa.
+	if resposta.Parcial {
+		term.Imprimir("\n%s\n", cliente.FormatarAvisoParcial(resposta.EmpresasIndisponiveis))
+	}
 	// Lista vazia é resposta OK, e não erro (seção 5.8): não há nada a
 	// oferecer, e isso não é uma falha da consulta.
 	if len(resposta.Itinerarios) == 0 {
@@ -262,7 +268,7 @@ func acrescentarItinerario(tabela *cliente.Tabela, numero int, itinerario protoc
 	for _, trecho := range itinerario.Trechos {
 		acrescentarPerna(tabela, trecho.Origem, trecho.Destino,
 			trecho.Partida, trecho.Chegada, itinerario.Partida,
-			trecho.Motorista, trecho.PrecoCentavos)
+			trecho.Motorista, trecho.Empresa, trecho.PrecoCentavos)
 	}
 }
 
@@ -306,7 +312,7 @@ func acrescentarReserva(tabela *cliente.Tabela, numero int, reserva protocolo.Re
 	for _, trecho := range reserva.Trechos {
 		acrescentarPerna(tabela, trecho.Origem, trecho.Destino,
 			trecho.Partida, trecho.Chegada, reserva.Partida,
-			trecho.Motorista, trecho.PrecoCentavos)
+			trecho.Motorista, trecho.Empresa, trecho.PrecoCentavos)
 	}
 }
 
@@ -315,10 +321,10 @@ func acrescentarReserva(tabela *cliente.Tabela, numero int, reserva protocolo.Re
 //
 // referencia é a partida do itinerário inteiro: horas do mesmo dia saem só
 // como "06:00", e uma perna que caiu no dia seguinte sai com a data junto.
-func acrescentarPerna(tabela *cliente.Tabela, origem, destino string, partida, chegada, referencia time.Time, motorista string, precoCentavos int) {
+func acrescentarPerna(tabela *cliente.Tabela, origem, destino string, partida, chegada, referencia time.Time, motorista, empresa string, precoCentavos int) {
 	tabela.Linha(
 		"    "+origem+" → "+destino,
 		cliente.FormatarIntervalo(partida, chegada, referencia),
-		motorista,
+		cliente.FormatarMotoristaEEmpresa(motorista, empresa),
 		cliente.FormatarCentavos(precoCentavos))
 }

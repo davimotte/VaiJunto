@@ -210,7 +210,7 @@ func detalharCarona(term *cliente.Terminal, conexao *cliente.Conexao) error {
 		}
 		for _, passageiro := range trecho.Passageiros {
 			tabela.LinhaSolta("    %s (%s) — reserva %s",
-				passageiro.Nome, passageiro.Usuario, passageiro.ReservaID)
+				passageiro.Nome, cliente.FormatarUsuarioPassageiro(passageiro.Usuario), passageiro.ReservaID)
 		}
 	}
 	tabela.Escrever(term)

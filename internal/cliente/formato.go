@@ -123,6 +123,42 @@ func DescreverRota(rota []string) string {
 	return strings.Join(rota, " → ")
 }
 
+// FormatarMotoristaEEmpresa escreve o motorista de um trecho junto da
+// empresa dona da carona, como "Rafael Mendonça Pires (rotacapixaba)".
+//
+// A empresa aparece em toda perna, e não só quando difere da empresa do
+// próprio cliente: o cliente nunca recebe o nome da sua própria empresa em
+// nenhuma resposta (D15), então "esconder quando é a mesma" exigiria um
+// canal novo de informação só para isso.
+func FormatarMotoristaEEmpresa(motorista, empresa string) string {
+	return motorista + " (" + empresa + ")"
+}
+
+// FormatarAvisoParcial escreve o aviso de busca federada incompleta
+// (PROTOCOL.md, seção 5.8), quando uma ou mais empresas não responderam a
+// tempo.
+//
+// A frase vale tanto para uma quanto para várias empresas, sem depender de
+// concordância verbal: evita decidir singular/plural só para uma mensagem de
+// aviso.
+func FormatarAvisoParcial(empresas []string) string {
+	return "Aviso: busca incompleta — sem resposta de: " + strings.Join(empresas, ", ") + "."
+}
+
+// FormatarUsuarioPassageiro escreve o usuário de um passageiro no detalhe da
+// carona, rotulando quem é de outra empresa.
+//
+// Por D32, o passageiro remoto chega como referência opaca prefixada
+// ("rotacapixaba:joao"), e não como um campo separado. Detectar o ":" aqui é
+// só rótulo de exibição: o cliente não decide nada a partir dele, apenas
+// explica ao motorista o que o prefixo já significa.
+func FormatarUsuarioPassageiro(usuario string) string {
+	if _, resto, encontrado := strings.Cut(usuario, ":"); encontrado {
+		return resto + " (de outra empresa)"
+	}
+	return usuario
+}
+
 // espacamentoColunas é o respiro entre uma coluna e a seguinte.
 const espacamentoColunas = 2
 
