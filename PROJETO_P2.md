@@ -653,6 +653,7 @@ internal/transacao     2PC, Lamport, wait-die, terminação, recuperação, outb
 internal/dominio       regras, estado, mutex, assentos em espera, catálogo
 internal/persistencia  log em arquivo
 internal/cliente       conexão dos CLIs (P1)
+internal/simulador     carga de passageiros por TCP: cenário, sessões, métricas e CSV (seção 11.4)
 testes/                integração multiempresa, carga e falhas
 dados/<empresa>/       usuarios.json e caronas.json de cada empresa
 ```
@@ -668,6 +669,11 @@ Regras de importação, que eliminam ciclos por construção:
 - `federacao` importa `transacao` (os handlers chamam o participante) e
   `dominio`, e implementa a interface de rede da `transacao`.
 - `servidor` importa `federacao`, `transacao`, `dominio` e `protocolo`.
+- `simulador` importa só `protocolo` e `dominio`, e **nada** do lado servidor:
+  ele é um cliente, e fala a mesma linha de 64 KB que os CLIs falam. Não usa
+  `cliente` porque precisa do `id` do envelope, de cercar o relógio só em volta
+  do socket e do código da recusa separado do erro de transporte — três coisas
+  que a `Conexao` de lá guarda para si (seção 11.4).
 
 ### 5.4 A rede como interface
 
@@ -1252,22 +1258,94 @@ seção 5.4.
 ### 11.4 Simulador de passageiros (E4)
 
 `cmd/simulador` é um binário sem interface que fala o protocolo TCP do
-`PROTOCOL.md`, como os clientes reais, com cada empresa ao mesmo tempo.
+`PROTOCOL.md`, como os clientes reais, com cada empresa ao mesmo tempo. A lógica
+fica em `internal/simulador`, e o `main.go` só lê flags: é o que dá teste
+unitário aos percentis, ao sorteio e ao CSV, e é o que permite ao TS1 chamar
+`simulador.Rodar` com as empresas no próprio processo.
+
+**O simulador fala só TCP.** A API entre servidores e a auditoria da seção 11.2
+não entram nele: ele é um cliente, e a carga que gera é a de um cliente.
+Conferir as invariantes é trabalho de quem observa as três empresas de fora
+(`TestInvariantesDoAmbiente`, abaixo).
 
 - **Preparação:** publica, pelos motoristas da semente, caronas sintéticas em
-  datas futuras e com poucos assentos, para forçar disputa.
+  datas futuras e com poucos assentos, para forçar disputa. No cenário
+  `federado`, as empresas formam uma corrente — a empresa *k* leva da cidade *k*
+  à *k+1* —, e todos os passageiros buscam da primeira à última cidade: o
+  itinerário tem uma perna em cada empresa. No cenário `local`, cada empresa
+  recebe um par de cidades só seu, e os seus passageiros buscam esse par; o
+  itinerário é de uma perna, da própria empresa.
 - **Carga:** cada passageiro virtual (`teste01` a `testeNN` de cada empresa)
   repete, pela duração pedida, uma sessão com busca entre cidades sorteadas,
-  reserva do primeiro itinerário e, com probabilidade configurável,
-  cancelamento.
-- **Flags:** empresas e endereços, passageiros por empresa, duração,
-  probabilidade de cancelamento e semente do sorteio (para rodadas
-  reproduzíveis).
-- **Saída:** tabela no terminal e CSV em `resultados/`, com latência p50, p95 e
-  p99 por operação, vazão e contagem de respostas por código (`OK`,
+  reserva do primeiro itinerário (ordem da D16) e, com probabilidade
+  configurável, cancelamento.
+- **Saída:** tabela no terminal e dois CSVs em `resultados/`, com latência p50,
+  p95 e p99 **por operação**, vazão e contagem de respostas por código (`OK`,
   `SEM_ASSENTO`, `DISPUTA_PERDIDA`, `EMPRESA_INDISPONIVEL`…).
 
 Roda sem `-race`, pelo mesmo motivo da seção 8.3 do `PROJETO.md`.
+
+#### Flags
+
+| Flag | Padrão | Uso |
+|---|---|---|
+| `--empresas` | o compose da seção 13.3 | Empresas e portas TCP, em `empresa=host:porta,…` |
+| `--motoristas` | os da semente | Motorista de cada empresa na preparação, em `empresa=login,…` |
+| `--cenario` | `federado` | `local` ou `federado` |
+| `--passageiros` | 20 | Por empresa, no máximo 50 |
+| `--curva` | vazio | Pontos da curva, em total de passageiros no consórcio |
+| `--duracao` | 60 s | Duração de cada ponto |
+| `--probabilidade-cancelamento` | 0,5 | Chance de cancelar no próprio ciclo |
+| `--fracao-busca-vazia` | 0,1 | Fração das buscas por um par sorteado do catálogo |
+| `--assentos` | 2 | Assentos de cada carona sintética |
+| `--dias` | derivado | Dias que as caronas ocupam |
+| `--dia-base` | derivado | Distância em dias entre hoje e o primeiro dia do cenário |
+| `--semente` | 1 | Semente do sorteio |
+| `--prazo` | 5 s | Prazo de cada requisição TCP |
+| `--saida` | `resultados` | Diretório dos CSVs |
+| `--rotulo` | o cenário | Identifica a rodada no nome do arquivo |
+
+#### Cinco decisões que o cenário impõe
+
+1. **Cada passageiro carrega no máximo uma reserva**, como uma pessoa real: a
+   que sobrou do ciclo anterior é cancelada antes de buscar de novo. Sem isso, a
+   ocupação cresceria sem teto e, passado algum tempo, a carga mediria só
+   `SEM_ASSENTO`.
+2. **A capacidade preparada é o dobro da ocupação máxima.** Como a ocupação não
+   passa do número de passageiros, `--dias` derivado vale
+   `⌈2 × passageiros ÷ assentos⌉`. O cenário não esgota, e a disputa medida é a
+   **instantânea**, e não o fim do estoque.
+3. **O dia base é derivado do relógio, em blocos da largura da rodada.** As
+   caronas da rodada anterior continuam no log (D22); uma rodada nova sobre os
+   mesmos dias encontraria, na busca, caronas já cheias e reservas de pé. Depois
+   de publicar, uma **busca de prova** exige exatamente um itinerário, com o
+   número certo de pernas: ela recusa a rodada tanto quando os dias colidem com
+   uma anterior quanto quando a corrente de cidades não fecha — os dois casos em
+   que a tabela sairia plausível e sem sentido.
+4. **A semente fixa o sorteio de cada passageiro, não a disputa.** Cada
+   passageiro tem um gerador semeado com `semente + índice`, o que dispensa
+   trava no caminho da carga. Duas rodadas com a mesma semente sorteiam igual; o
+   entrelaçamento entre passageiros é do escalonador, e não se repete.
+5. **Códigos de negócio são resultados, não erros.** `SEM_ASSENTO`,
+   `DISPUTA_PERDIDA`, `EMPRESA_INDISPONIVEL`, `RESERVA_EM_ANDAMENTO` e
+   `CONFLITO_HORARIO` entram na contagem por código. Só falha de transporte
+   encerra um passageiro virtual. É a diferença de postura em relação ao teste
+   de carga do P1, que falhava com qualquer recusa.
+
+#### Verificação de invariantes depois da carga
+
+`TestInvariantesDoAmbiente`, em `testes/`, confere I-P2-1 a I-P2-5 num consórcio
+já no ar, com as mesmas funções dos testes em processo:
+
+```bash
+docker compose up -d
+go run ./cmd/simulador --cenario=federado --passageiros=20 --duracao=60s
+VAIJUNTO_AUDITORIA=vaijunto=http://localhost:8081,rotacapixaba=http://localhost:8082,rotafluminense=http://localhost:8083 \
+  go test -run TestInvariantesDoAmbiente ./testes
+```
+
+São dois comandos porque são dois papéis: o simulador usa o consórcio, e o teste
+o observa.
 
 ### 11.5 Teste automatizado com carga e falhas (E5)
 
@@ -1293,6 +1371,64 @@ três configurações: reserva só com pernas locais, reserva com pernas em trê
 empresas, e a mesma com o servidor em outra máquina. A diferença entre as duas
 primeiras é o custo da coordenação distribuída (rede e `fsync`), e entra na
 comparação do relatório.
+
+As duas primeiras são `--cenario=local` e `--cenario=federado`; a terceira é a
+mesma rodada com `--empresas` apontando para outra máquina. **O número de
+passageiros é o total no consórcio**, repartido entre as três empresas (100 vira
+34, 33 e 33), e não o de cada uma: é o que mantém o eixo das curvas do P2 igual
+ao das do P1, cujo CSV também tem uma linha por ponto. A linha de operação
+`total` do CSV é a diretamente comparável com elas.
+
+```bash
+LOG_OPERACOES=false docker compose up -d --force-recreate
+go run ./cmd/simulador --cenario=local    --curva=1,10,50,100 --duracao=5s
+go run ./cmd/simulador --cenario=federado --curva=1,10,50,100 --duracao=5s
+```
+
+Três regras herdadas da seção 8.3 do `PROJETO.md` continuam valendo, e a última
+é nova:
+
+- **sem `-race`**, porque o número medido seria o do detector;
+- **registro de operações desligado** (`LOG_OPERACOES=false` no compose, D19):
+  com ele, cada requisição vira uma escrita síncrona no terminal, que entra na
+  latência e disputa com o mutex do estado;
+- **mesma duração nas duas rodadas**, e só rodadas com a mesma duração são
+  comparáveis;
+- **estado de partida equivalente nas duas rodadas.** O log cresce
+  indefinidamente (seção 15), e com ele crescem o replay do boot e a verificação
+  de sobreposição. Para a comparação do relatório, apagar `estado/` antes de cada
+  cenário: a semente é recarregada em todo boot (D37).
+
+#### Resultado medido
+
+Compose numa máquina, 5 s por ponto, registro desligado, `estado/` limpo antes
+de cada cenário. O p50 é o da operação; a vazão é a do ciclo inteiro.
+
+| Passageiros | Reserva local (p50) | Reserva federada (p50) | Vazão local | Vazão federada |
+|---|---|---|---|---|
+| 1 | 3,4 ms | 7,1 ms | 289 req/s | 184 req/s |
+| 10 | 20,5 ms | 56,7 ms | 691 req/s | 280 req/s |
+| 50 | 135,6 ms | 353,0 ms | 685 req/s | 272 req/s |
+| 100 | 264,9 ms | 658,1 ms | 683 req/s | 272 req/s |
+
+O ponto de 1 passageiro é o que decompõe o custo, porque não há fila. Comparando
+o pool de todas as operações, que é o único número que o CSV do P1 tem: o ciclo
+do P2 local custa **3,4 ms** de p50 contra **0,27 ms** do P1 na mesma imagem
+(`resultados/carga-docker-mesma-maquina-*.csv`), e o que mudou é o `fsync` por
+mudança de estado, que o P1 não tinha (D02 revogada → D22). Federar o mesmo
+ciclo dobra o número, **5,5 ms**, e dobra a reserva isolada, de 3,4 ms para
+7,1 ms: dois `PREPARAR` de rede e três `fsync` em vez de um.
+
+As duas gerações não são idênticas na composição — o ciclo do P1 tinha também um
+`LISTAR_MINHAS_RESERVAS`, e o do P2 tem uma fração de buscas sem resultado —,
+mas a ordem de grandeza é a mesma e o que se compara é o salto, não o dígito.
+
+Sob carga a distância cresce além do dobro — 2,5× no p50 de 100 passageiros — e
+a razão não é a rede. No cenário federado **toda** empresa é participante de
+**toda** transação, então o mutex de cada uma serializa o triplo de trabalho
+(D04 reinterpretada), e a janela em que ele fica tomado passou a incluir uma
+espera de rede. É o argumento da seção 15 para o *group commit* e para o lock
+por carona.
 
 ---
 
@@ -1434,6 +1570,19 @@ demonstração D-5 arma o ponto com
 religa com `docker compose start vaijunto`. Nos outros dois serviços a variável
 não entra, para que uma rodada sabotada seja sempre de uma empresa só.
 
+`LOG_OPERACOES=false` desliga o registro de operações (D19) nas três ao mesmo
+tempo, e serve só para medir (seção 11.6). Na demonstração o registro fica
+ligado, que é o padrão: é nele que o `PREPARAR`, os votos e a decisão aparecem.
+
+O serviço `simulador` fica no perfil `clientes`, como os dois CLIs, e já vem com
+os endereços internos das três empresas e `--saida=/resultados`. As flags
+ajustáveis estão no `command`, então `docker compose run --rm simulador <flags>`
+substitui só elas:
+
+```bash
+docker compose run --rm simulador --cenario=local --duracao=30s
+```
+
 ---
 
 ## 14. Fases e estado
@@ -1458,7 +1607,7 @@ sessão. Os critérios de pronto são os que a fase precisa demonstrar, com
 | 7 | Precedência | Wait-die (seção 8). Em disputa cruzada, a transação mais antiga completa, sem deadlock; TR3 e TR4 passam | ✅ |
 | 8 | Cancelamentos | Seção 10, com outbox. TC1 a TC4 e TF8 passam | ✅ |
 | 9 | Clientes e protocolo | `PROTOCOL.md` v2 (seção 5.6) e clientes adaptados; fluxo completo pelo CLI | ✅ |
-| 10 | Simulador | Seção 11.4 contra as três empresas | ⏳ |
+| 10 | Simulador | Seção 11.4 contra as três empresas | ✅ |
 | 11 | Teste de sistema | TS1 (seção 11.5) passa com `docker kill` e com `FALHAR_EM` | ⏳ |
 | 12 | Documentação final | `README.md`, `ROTEIRO.md` e versão final do `API_CONSORCIO.md` | ⏳ |
 
@@ -1524,6 +1673,22 @@ documenta `empresa` por trecho — resolvendo a única limitação pendente da
 fase 5, listada acima —, e os clientes mostram a empresa de cada perna na
 busca e nas reservas, o aviso de busca parcial e o rótulo de passageiro de
 outra empresa no detalhe da carona.
+
+**Limitações da fase 10:** nenhuma. A curva dos quatro pontos foi medida nos
+dois cenários, com `estado/` limpo e o registro de operações desligado, e os
+números estão na seção 11.6. Falta só a terceira configuração da 11.6 — a mesma
+rodada com o servidor em outra máquina —, que depende do laboratório e é coleta
+da fase 12, não código.
+
+Uma guarda nasceu da primeira medição de verdade, e vale registrar porque é o
+tipo de defeito que não aparece em teste: o dia base derivado do relógio
+avançava **um dia** por minuto, e cada rodada consome tantos dias quantos
+passageiros tem. A segunda rodada caía sobre as caronas da primeira, que
+continuam no log (D22), e media `SEM_ASSENTO` nas caronas velhas e
+`CONFLITO_HORARIO` com as reservas que elas ainda sustentavam — com uma tabela
+de aparência perfeitamente normal. Hoje o bloco tem a largura da rodada e uma
+busca de prova recusa o cenário sujo (seção 11.4, decisão 3), com teste próprio
+em `TestSimuladorRecusaCenarioSujo`.
 
 O relatório SBC é escrito fora deste roteiro.
 
