@@ -154,15 +154,21 @@ var (
 	// borda REST — o que atravessa é PRECEDENCIA, trecho a trecho.
 	ErrDisputaPerdida = errors.New("dominio: disputa pelo assento perdida")
 
-	// ErrOperacaoIndisponivel — operação prevista que ainda não está ligada
-	// nesta versão.
-	//
-	// **Provisório.** Existe só da fase 5 à 7, para os dois cancelamentos que
-	// dependem do outbox da D39: cancelar uma reserva e cancelar uma carona que
-	// tenha reserva. Recusar por inteiro é honesto; devolver os assentos só no
-	// coordenador deixaria os dos outros donos presos para sempre e violaria a
-	// I-P2-5. Sai na fase 8, junto com a seção 10.
-	ErrOperacaoIndisponivel = errors.New("dominio: operação indisponível nesta versão")
+	// ErrCaronaEmTransacao — o motorista tentou cancelar uma carona com
+	// alguma participação em PREPARADO usando-a (D39, seção 10.2). O
+	// cancelamento não pode abortar quem já votou SIM, então é recusado por
+	// inteiro; o motorista tenta de novo em alguns segundos, quando a
+	// transação já tiver confirmado ou abortado.
+	ErrCaronaEmTransacao = errors.New("dominio: carona com participação em preparação")
+
+	// ErrNaoCoordenador — o aviso de carona cancelada (seção 10.2, D39) chegou
+	// para um txID que esta empresa não coordena. Erro de quem chamou:
+	// nenhuma repetição o conserta.
+	ErrNaoCoordenador = errors.New("dominio: esta empresa não coordena a transação")
+
+	// ErrNaoParticipante — quem enviou o aviso de carona cancelada não está
+	// na lista de participantes da reserva (seção 10.2). Erro de quem chamou.
+	ErrNaoParticipante = errors.New("dominio: remetente não participa da transação")
 )
 
 // TodosOsErros lista todos os sentinelas exportados do domínio.
@@ -203,7 +209,9 @@ func TodosOsErros() []error {
 		ErrAguarde,
 		ErrPrecedencia,
 		ErrDisputaPerdida,
-		ErrOperacaoIndisponivel,
+		ErrCaronaEmTransacao,
+		ErrNaoCoordenador,
+		ErrNaoParticipante,
 	}
 }
 

@@ -91,6 +91,15 @@ func (p *Participante) Abortar(txID string) (dominio.Situacao, error) {
 	return p.estado.Abortar(txID)
 }
 
+// Cancelar aplica a decisão de cancelar (D39; seção 10 do PROJETO_P2.md;
+// seção 4.7 da API), devolvendo os assentos em espera ou confirmados.
+//
+// Sem ponto de falha: TF8 (aviso-apos-registrar) é do lado de quem **envia**
+// o aviso — o Entregador —, não deste lado, que só aplica e responde.
+func (p *Participante) Cancelar(txID string) (dominio.Situacao, error) {
+	return p.estado.CancelarParticipacao(txID)
+}
+
 // Consultar responde a consulta da terminação cooperativa (seção 4.6 da API;
 // seção 9.4), no papel que o prefixo do txID dá a esta empresa.
 //

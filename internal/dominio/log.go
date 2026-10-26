@@ -58,6 +58,12 @@ const (
 	// uma transação abortada, então gravar o abort seria gravar o padrão.
 	tipoDecisaoConfirmar = "DECISAO_CONFIRMAR"
 	tipoConcluida        = "CONCLUIDA"
+
+	// Os quatro da Fase 8 (D39, seção 4.8): cancelamento e outbox.
+	tipoPernasCanceladas     = "PERNAS_CANCELADAS"
+	tipoCancelamentoDecidido = "CANCELAMENTO_DECIDIDO"
+	tipoAvisoRegistrado      = "AVISO_REGISTRADO"
+	tipoAvisoEntregue        = "AVISO_ENTREGUE"
 )
 
 // registro é o envelope de cada linha do log (seção 4.8). Lamport é o L da
@@ -81,8 +87,11 @@ type dadosCaronaPublicada struct {
 	PrecosCentavos []int       `json:"precos_centavos"`
 }
 
-// dadosCaronaCancelada: quando existirem transações (Fase 8), o registro
-// também lista as que o cancelamento atinge (seção 4.8).
+// dadosCaronaCancelada guarda só o ID da carona. A cascata sobre as
+// transações atingidas (D29) não entra aqui: cada uma gera o seu próprio
+// PERNAS_CANCELADAS e, quando esta empresa coordena, o seu próprio
+// CANCELAMENTO_DECIDIDO — um registro por transação, nunca uma lista, para
+// que o replay repita sempre a mesma operação (seção 4.8).
 type dadosCaronaCancelada struct {
 	Carona string `json:"carona"`
 }
@@ -163,6 +172,31 @@ type pernaLog struct {
 	Partida       time.Time `json:"partida"`
 	Chegada       time.Time `json:"chegada"`
 	PrecoCentavos int       `json:"preco_centavos"`
+}
+
+// dadosCancelamentoDecidido é o corpo de CANCELAMENTO_DECIDIDO (seção 10.1 e
+// 10.2): o coordenador desativou a reserva Tx. Um registro por reserva, nunca
+// uma lista — a cascata do motorista (10.2) grava um destes por reserva
+// atingida que esta empresa coordene, e não um registro com vários txIDs:
+// assim o replay repete sempre a mesma operação, sem um caso especial.
+type dadosCancelamentoDecidido struct {
+	Tx string `json:"tx"`
+}
+
+// dadosAvisoRegistrado é o corpo de AVISO_REGISTRADO (D39, seção 4.7): o
+// aviso entra no outbox antes de qualquer tentativa de envio.
+type dadosAvisoRegistrado struct {
+	ID       string `json:"id"`
+	Destino  string `json:"destino"`
+	Tipo     string `json:"tipo"`
+	Tx       string `json:"tx"`
+	CaronaID string `json:"carona_id,omitempty"`
+}
+
+// dadosAvisoEntregue é o corpo de AVISO_ENTREGUE: o destino confirmou o
+// recebimento, e o aviso sai do outbox.
+type dadosAvisoEntregue struct {
+	ID string `json:"id"`
 }
 
 func dadosCaronaPublicadaDe(c *Carona) dadosCaronaPublicada {

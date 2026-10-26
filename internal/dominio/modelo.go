@@ -76,6 +76,38 @@ type Reserva struct {
 	Concluida bool
 }
 
+// TipoAviso é o tipo de uma entrada do outbox (D39; seção 4.7 da API).
+type TipoAviso string
+
+const (
+	// AvisoCancelarPernas vai do coordenador a um participante: cancele a
+	// perna local desta transação e devolva o assento (seção 10.1).
+	AvisoCancelarPernas TipoAviso = "CANCELAR_PERNAS"
+	// AvisoCaronaCancelada vai do dono de uma carona ao coordenador de uma
+	// reserva atingida: a carona caiu, cancele o itinerário inteiro
+	// (seção 10.2, D29).
+	AvisoCaronaCancelada TipoAviso = "CARONA_CANCELADA"
+)
+
+// Aviso é uma entrada do outbox: um fato que esta empresa já decidiu e que
+// precisa chegar a outra, de forma confiável, sem que ninguém possa recusá-lo
+// (D39; seção 4.7 da API).
+//
+// Diferente do PREPARAR, nenhuma resposta aqui é voto: a entrega repete até
+// confirmar, e quem recebe só aplica (seção 10.3).
+type Aviso struct {
+	ID       string
+	Destino  string
+	Tipo     TipoAviso
+	TxID     string
+	CaronaID string // só usado quando Tipo == AvisoCaronaCancelada
+}
+
+// copia devolve uma cópia do aviso. Os campos são todos valor, mas a função
+// existe pelo mesmo motivo das outras: nenhum ponteiro para dentro do estado
+// escapa da seção crítica, e um Aviso sempre entra e sai do outbox por valor.
+func (a *Aviso) copia() Aviso { return *a }
+
 // Estado é todo o estado de domínio do servidor, protegido por um único
 // sync.Mutex (D04). Funções de domínio recebem o Estado já travado por quem
 // chama e nunca adquirem mu por conta própria (D05): só a camada de estado
@@ -132,6 +164,13 @@ type Estado struct {
 	// confirmada — o pior erro possível no 2PC. Sob um lock só, esse instante
 	// não existe.
 	transacoesEmVotacao map[string]bool
+	// outbox é o lado de dentro dos avisos pendentes da D39 (seção 4.7),
+	// indexado pelo ID do próprio aviso. Ao contrário de emAndamento e
+	// transacoesEmVotacao, **vai ao log** (AVISO_REGISTRADO/AVISO_ENTREGUE):
+	// um aviso só sai daqui quando a entrega já foi confirmada, e até lá
+	// precisa sobreviver a um reboot (seção 9.3: "aviso no outbox → retoma o
+	// envio").
+	outbox map[string]*Aviso
 	// log recebe cada mudança ANTES de ela ser aplicada (D22, regra 3). Nunca
 	// é nil: os construtores começam com LogMemoria e o servidor troca por
 	// arquivo com UsarLog. seq numera os registros (seção 4.8).

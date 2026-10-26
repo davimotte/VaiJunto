@@ -27,9 +27,6 @@ import (
 // identificador da empresa, nunca uma URL: quem resolve empresa → endereço é a
 // implementação, com a lista estática da D20.
 //
-// cancelar (fase 8) entra aqui quando houver quem a chame. Declará-la antes
-// obrigaria as duas implementações a devolver "não implementado", que é um
-// estado que nenhum teste sabe interpretar.
 type Rede interface {
 	// Preparar é a fase 1 do 2PC (seção 4.3 da API). O txID vai dentro do
 	// pedido; é a implementação HTTP que o põe no caminho da URL.
@@ -50,6 +47,21 @@ type Rede interface {
 	// (seção 1.2 da API), porque quem é consultado sobre uma transação
 	// desconhecida não tem como saber quem participa dela.
 	Consultar(ctx context.Context, destino, txID string) (RespostaConsulta, error)
+
+	// Cancelar é a decisão de cancelar da D39 (seção 4.7 da API): o
+	// coordenador avisa um participante que a transação caiu. Diferente de
+	// Confirmar/Abortar, não há disputa — o participante não pode recusar —,
+	// mas a assinatura é a mesma porque o efeito do lado de quem recebe é
+	// análogo: aplicar e devolver a situação resultante.
+	Cancelar(ctx context.Context, destino, txID string) (dominio.Situacao, error)
+
+	// AvisarCaronaCancelada é o aviso inverso da D39 (seção 4.8 da API; seção
+	// 10.2 do PROJETO_P2.md): o dono de uma carona cancelada avisa o
+	// coordenador de uma reserva atingida, que decide o cancelamento do
+	// itinerário inteiro. Só existe entre empresas diferentes, por definição
+	// — quem avisa nunca é o próprio coordenador —, e por isso não tem
+	// equivalente em Votante. Devolve a situação da reserva ("CANCELADA").
+	AvisarCaronaCancelada(ctx context.Context, destino, txID, caronaID string) (string, error)
 }
 
 // Papel diz em que qualidade um servidor respondeu à consulta (seção 4.6 da
@@ -160,6 +172,11 @@ type Votante interface {
 	Preparar(pedido dominio.PedidoPreparacao) (RespostaPreparar, error)
 	Confirmar(txID string) (dominio.Situacao, error)
 	Abortar(txID string) (dominio.Situacao, error)
+
+	// Cancelar é o equivalente local de Rede.Cancelar — sem ctx e sem
+	// destino, pelo mesmo motivo dos outros três: não há rede, logo não há
+	// prazo de chamada nem par a resolver.
+	Cancelar(txID string) (dominio.Situacao, error)
 }
 
 // erroComStatus é implementado pelos erros que trazem o status HTTP com que um

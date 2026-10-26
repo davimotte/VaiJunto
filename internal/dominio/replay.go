@@ -207,6 +207,60 @@ func reaplicar(e *Estado, registros [][]byte) (uint64, error) {
 			}
 			reserva.Concluida = true
 
+		case tipoPernasCanceladas:
+			var d dadosTransacao
+			if err := json.Unmarshal(r.Dados, &d); err != nil {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): dados ilegíveis: %w", n, r.Tipo, err)
+			}
+			// Só é gravado a partir de PREPARADO ou CONFIRMADO (seção 7.2/10.1),
+			// então qualquer outra situação aqui é log corrompido.
+			pt, conhecida := e.participacoes[d.Tx]
+			if !conhecida || (pt.Situacao != SituacaoPreparado && pt.Situacao != SituacaoConfirmado) {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): transação %q não está preparada nem confirmada", n, r.Tipo, d.Tx)
+			}
+			devolverItens(e, pt.Itens)
+			pt.Situacao = SituacaoCancelado
+
+		case tipoCancelamentoDecidido:
+			var d dadosCancelamentoDecidido
+			if err := json.Unmarshal(r.Dados, &d); err != nil {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): dados ilegíveis: %w", n, r.Tipo, err)
+			}
+			// Só é gravado para reserva ativa que esta empresa coordena
+			// (seções 10.1 e 10.2); reserva desconhecida ou já inativa aqui é
+			// log corrompido.
+			reserva, conhecida := e.reservas[d.Tx]
+			if !conhecida || !reserva.Ativa {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): reserva %q desconhecida ou já cancelada", n, r.Tipo, d.Tx)
+			}
+			reserva.Ativa = false
+
+		case tipoAvisoRegistrado:
+			var d dadosAvisoRegistrado
+			if err := json.Unmarshal(r.Dados, &d); err != nil {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): dados ilegíveis: %w", n, r.Tipo, err)
+			}
+			if _, repetido := e.outbox[d.ID]; repetido {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): aviso %q já existe", n, r.Tipo, d.ID)
+			}
+			e.outbox[d.ID] = &Aviso{
+				ID:       d.ID,
+				Destino:  d.Destino,
+				Tipo:     TipoAviso(d.Tipo),
+				TxID:     d.Tx,
+				CaronaID: d.CaronaID,
+			}
+
+		case tipoAvisoEntregue:
+			var d dadosAvisoEntregue
+			if err := json.Unmarshal(r.Dados, &d); err != nil {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): dados ilegíveis: %w", n, r.Tipo, err)
+			}
+			if _, existe := e.outbox[d.ID]; !existe {
+				return 0, fmt.Errorf("dominio: log, registro %d (%s): aviso %q desconhecido", n, r.Tipo, d.ID)
+			}
+			delete(e.outbox, d.ID)
+
 		default:
 			return 0, fmt.Errorf("dominio: log, registro %d: tipo desconhecido %q", n, r.Tipo)
 		}

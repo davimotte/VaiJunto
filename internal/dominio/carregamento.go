@@ -122,6 +122,7 @@ func CarregarEstado(empresa string, usuariosJSON, caronasJSON []byte) (*Estado, 
 		participacoes:       make(map[string]*Participacao),
 		emAndamento:         make(map[string]bool),
 		transacoesEmVotacao: make(map[string]bool),
+		outbox:              make(map[string]*Aviso),
 		log:                 NovaLogMemoria(),
 		lamport:             relogioParado,
 	}, nil

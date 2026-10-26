@@ -29,6 +29,7 @@ func NovoEstado(empresa string) *Estado {
 		participacoes:       make(map[string]*Participacao),
 		emAndamento:         make(map[string]bool),
 		transacoesEmVotacao: make(map[string]bool),
+		outbox:              make(map[string]*Aviso),
 		log:                 NovaLogMemoria(),
 		lamport:             relogioParado,
 	}
@@ -149,7 +150,7 @@ func (e *Estado) CaronasNaJanela(desde, ate time.Time) []CaronaBusca {
 // reserva concorrente ou entra inteira antes do cancelamento, e é cancelada
 // junto, ou encontra a carona já cancelada e é recusada. Não existe instante
 // observável no meio.
-func (e *Estado) CancelarCarona(caronaID, motoristaID string, agora time.Time) (int, error) {
+func (e *Estado) CancelarCarona(caronaID, motoristaID string, agora time.Time) (int, []Aviso, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return cancelarCarona(e, caronaID, motoristaID, agora)
@@ -231,12 +232,48 @@ func (e *Estado) ReservasDoPassageiro(passageiroID string, incluirCanceladas boo
 	return reservasDoPassageiro(e, passageiroID, incluirCanceladas)
 }
 
-// CancelarReserva desfaz a reserva do passageiro e devolve os assentos
-// (PROTOCOL.md, seção 5.11).
-func (e *Estado) CancelarReserva(reservaID, passageiroID string, agora time.Time) error {
+// CancelarReserva desfaz a reserva do passageiro (PROTOCOL.md, seção 5.11;
+// D39). Devolve os avisos recém-criados, para quem chamou entregá-los fora
+// do lock.
+func (e *Estado) CancelarReserva(reservaID, passageiroID string, agora time.Time) ([]Aviso, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return cancelarReserva(e, reservaID, passageiroID, agora)
+}
+
+// CancelarParticipacao aplica a decisão de cancelar no lado do dono dos
+// assentos (D39; seção 7.2/10 do PROJETO_P2.md), devolvendo os assentos em
+// espera ou confirmados.
+func (e *Estado) CancelarParticipacao(txID string) (Situacao, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return cancelarParticipacao(e, txID)
+}
+
+// AvisarCaronaCancelada aplica o efeito de POST /avisos/carona-cancelada
+// (seção 10.2; D39): o coordenador de txID decide o cancelamento da reserva
+// e enfileira os avisos aos participantes. Devolve a situação da reserva e
+// os avisos recém-criados.
+func (e *Estado) AvisarCaronaCancelada(txID, caronaID, quemAvisou string) (string, []Aviso, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return avisarCaronaCancelada(e, txID, caronaID, quemAvisou)
+}
+
+// AvisosPendentes devolve os avisos do outbox ainda não entregues (D39),
+// para o boot retomar a entrega (seção 9.3).
+func (e *Estado) AvisosPendentes() []Aviso {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return avisosPendentes(e)
+}
+
+// AvisoEntregue grava AVISO_ENTREGUE e retira o aviso do outbox: o destino
+// confirmou o recebimento.
+func (e *Estado) AvisoEntregue(avisoID string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return avisoEntregue(e, avisoID)
 }
 
 // Preparar é a fase 1 do 2PC pelo lado do dono dos assentos (D21;

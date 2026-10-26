@@ -46,10 +46,10 @@ const (
 	PontoPartAposResponder     Ponto = "part-apos-responder"
 	PontoPartAposConfirmar     Ponto = "part-apos-confirmar"
 
-	// PontoAvisoAposRegistrar é o ponto do outbox (TF8). O nome existe desde já,
-	// para que a lista de FALHAR_EM seja a da seção 9.5 inteira, mas ninguém o
-	// aciona: o outbox nasce com os cancelamentos da D39, na fase 8. Armá-lo
-	// hoje é um servidor que nunca cai.
+	// PontoAvisoAposRegistrar é o ponto do outbox (D39; TF8): o
+	// AVISO_REGISTRADO já está no log com fsync e nenhum HTTP saiu ainda.
+	// Dispara dentro do Entregador, na primeira iteração de cada entrega — ver
+	// internal/transacao/entregador.go.
 	PontoAvisoAposRegistrar Ponto = "aviso-apos-registrar"
 )
 
