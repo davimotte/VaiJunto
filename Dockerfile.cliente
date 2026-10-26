@@ -2,12 +2,18 @@ FROM golang:1.23-alpine AS build
 WORKDIR /src
 COPY go.mod ./
 COPY . .
-# /bin/carga é o teste de carga compilado (PROJETO.md, seção 8.3), para que a
-# máquina B meça o servidor pela rede sem precisar de Go instalado.
+# /bin/simulador é o gerador de carga do P2 (E4; PROJETO_P2.md, seção 11.4) e
+# /bin/carga é o teste de carga do P1 (PROJETO.md, seção 8.3), que mede uma
+# empresa só. Os dois entram na imagem para que a máquina que roda clientes
+# meça o consórcio pela rede sem precisar de Go instalado.
+#
+# Nenhum dos dois é compilado com -race: o detector multiplica o custo de cada
+# acesso à memória, e o número medido seria o dele.
 RUN CGO_ENABLED=0 go build -o /bin/motorista ./cmd/motorista && \
     CGO_ENABLED=0 go build -o /bin/passageiro ./cmd/passageiro && \
+    CGO_ENABLED=0 go build -o /bin/simulador ./cmd/simulador && \
     CGO_ENABLED=0 go test -c -o /bin/carga ./testes
 
 FROM alpine:3.20
-COPY --from=build /bin/motorista /bin/passageiro /bin/carga /bin/
+COPY --from=build /bin/motorista /bin/passageiro /bin/simulador /bin/carga /bin/
 ENV VAIJUNTO_SERVIDOR=localhost:9000

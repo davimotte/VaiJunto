@@ -11,6 +11,14 @@
 # Entre conteineres, os pares se encontram pelo nome do servico
 # (http://rotacapixaba:8080) e usam a porta 8080 interna, nao a publicada.
 #
+# LOG_OPERACOES desliga o registro de operacoes (D19) nas tres empresas ao
+# mesmo tempo, e so e usada para medir:
+#   LOG_OPERACOES=false docker compose up -d --force-recreate
+# Com o registro ligado, cada requisicao vira uma escrita sincrona no terminal,
+# e com centenas de milhares delas isso entra na latencia medida e disputa com o
+# mutex do estado (PROJETO.md, secao 8.3). Para a demonstracao o registro fica
+# ligado, que e o padrao: e nele que PREPARAR, votos e decisao aparecem.
+#
 # As tres sobem com --auditoria, que expoe GET /auditoria com o estado completo
 # da empresa (secao 11.2). E instrumento de observacao, como o -race: nao
 # participa de nenhuma decisao, e com ele a demonstracao pode conferir os
@@ -52,6 +60,7 @@ services:
       - "--dados=/dados"
       - "--log=/estado/vaijunto.wal"
       - "--pares=rotacapixaba=http://rotacapixaba:8080,rotafluminense=http://rotafluminense:8080"
+      - "--log-operacoes=${LOG_OPERACOES:-true}"
       - "--auditoria"
     ports:
       - "9001:9000"
@@ -69,6 +78,7 @@ services:
       - "--dados=/dados"
       - "--log=/estado/rotacapixaba.wal"
       - "--pares=vaijunto=http://vaijunto:8080,rotafluminense=http://rotafluminense:8080"
+      - "--log-operacoes=${LOG_OPERACOES:-true}"
       - "--auditoria"
     ports:
       - "9002:9000"
@@ -86,6 +96,7 @@ services:
       - "--dados=/dados"
       - "--log=/estado/rotafluminense.wal"
       - "--pares=vaijunto=http://vaijunto:8080,rotacapixaba=http://rotacapixaba:8080"
+      - "--log-operacoes=${LOG_OPERACOES:-true}"
       - "--auditoria"
     ports:
       - "9003:9000"
@@ -118,3 +129,40 @@ services:
       VAIJUNTO_SERVIDOR: vaijunto:9000
     stdin_open: true
     tty: true
+
+  # O simulador de passageiros (E4, secao 11.4). Fica no mesmo perfil dos
+  # clientes para que `docker compose up` suba so as empresas.
+  #
+  # As flags que nao mudam estao no entrypoint, e as ajustaveis no command:
+  # assim `docker compose run --rm simulador <flags>` substitui o command e
+  # mantem os enderecos e o diretorio de saida. Exemplos:
+  #   docker compose run --rm simulador
+  #   docker compose run --rm simulador --cenario=local --duracao=30s
+  #   docker compose run --rm simulador --curva=1,10,50,100 --duracao=5s --rotulo=rede
+  #
+  # Os enderecos sao os internos (9000), e nao as portas publicadas: entre
+  # conteineres as empresas se encontram pelo nome do servico. O --user evita
+  # que o CSV nasca com dono root, como nos servidores.
+  #
+  # Terminado o simulador, as invariantes se conferem de fora, porque o
+  # simulador fala so TCP (secao 11.2):
+  #   VAIJUNTO_AUDITORIA=vaijunto=http://localhost:8081,rotacapixaba=http://localhost:8082,rotafluminense=http://localhost:8083 \
+  #     go test -run TestInvariantesDoAmbiente ./testes
+  simulador:
+    profiles: ["clientes"]
+    build:
+      context: .
+      dockerfile: Dockerfile.cliente
+    user: "${UID:-1000}:${GID:-1000}"
+    environment:
+      TZ: America/Bahia
+    entrypoint:
+      - "/bin/simulador"
+      - "--empresas=vaijunto=vaijunto:9000,rotacapixaba=rotacapixaba:9000,rotafluminense=rotafluminense:9000"
+      - "--saida=/resultados"
+    command:
+      - "--cenario=federado"
+      - "--passageiros=20"
+      - "--duracao=60s"
+    volumes:
+      - ./resultados:/resultados

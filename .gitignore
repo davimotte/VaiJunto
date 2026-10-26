@@ -3,6 +3,7 @@
 /servidor
 /motorista
 /passageiro
+/simulador
 
 # Artefatos de teste e cobertura
 *.test
