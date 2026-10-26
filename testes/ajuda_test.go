@@ -119,6 +119,7 @@ type empresa struct {
 	participante *transacao.Participante
 	coordenador  *transacao.Coordenador
 	terminador   *transacao.Terminador
+	entregador   *transacao.Entregador
 	rede         transacao.Rede // o cliente HTTP desta empresa
 	rest         *federacao.Servidor
 	tcp          *servidor.Servidor // nil quando a porta dos clientes não sobe
@@ -228,6 +229,15 @@ func montarEmpresa(t *testing.T, nome string, usuarios, caronas []byte, op opcoe
 		e.falha = injetor
 	}
 	e.participante = transacao.NovoParticipante(estado, e.falha)
+	// Nasce sem rede, como em cmd/servidor/main.go: a rede desta empresa só
+	// existe depois que todos os endereços do consórcio são conhecidos
+	// (ligarEmpresa), e UsarRede a injeta então.
+	e.entregador = transacao.NovoEntregador(transacao.ConfigEntregador{
+		Empresa:      nome,
+		Estado:       estado,
+		Falha:        e.falha,
+		PrazoEntrega: op.prazoFase2,
+	})
 	estado.UsarRelogio(e.relogio.Agora)
 	if op.dirLogs != "" {
 		e.wal = instalarWAL(t, estado, filepath.Join(op.dirLogs, nome+".wal"))
@@ -260,6 +270,7 @@ func (e *empresa) configREST(op opcoesConsorcio) federacao.Config {
 		PrazoBusca:   prazoBuscaNosTestes,
 		Falha:        e.falha,
 		Auditoria:    op.auditoria,
+		Entregador:   e.entregador,
 	}
 }
 
@@ -313,8 +324,10 @@ func ligarEmpresa(t *testing.T, e *empresa, consorcio map[string]*empresa, op op
 	// mesma tabela da borda (seção 5.4).
 	if op.redeEmMemoria != nil {
 		op.redeEmMemoria.Registrar(e.nome, e.participante)
+		op.redeEmMemoria.RegistrarFederacao(e.nome, e.estado, e.entregador)
 		e.rede = op.redeEmMemoria.De(e.nome)
 	}
+	e.entregador.UsarRede(e.rede)
 	e.coordenador = transacao.NovoCoordenador(transacao.ConfigCoordenador{
 		Empresa:      e.nome,
 		Estado:       e.estado,
@@ -339,16 +352,17 @@ func ligarEmpresa(t *testing.T, e *empresa, consorcio map[string]*empresa, op op
 	// Antes de fechar os servidores: as tarefas de segundo plano repetem sem
 	// limite (D41), e sem isto continuariam batendo em portas já fechadas
 	// depois do fim do teste.
-	coordenador, terminador := e.coordenador, e.terminador
+	coordenador, terminador, entregador := e.coordenador, e.terminador, e.entregador
 	t.Cleanup(coordenador.Parar)
 	t.Cleanup(terminador.Parar)
+	t.Cleanup(entregador.Parar)
 
 	if op.tcp {
 		var busca servidor.BuscaFederada = buscaQueNaoAcha{}
 		if op.busca {
 			busca = federacao.NovaBusca(cfg, cliente)
 		}
-		s, err := servidor.Escutar("127.0.0.1:0", e.estado, busca, e.coordenador)
+		s, err := servidor.Escutar("127.0.0.1:0", e.estado, busca, e.coordenador, e.entregador)
 		if err != nil {
 			t.Fatalf("empresa %s: escutar porta dos clientes: %v", e.nome, err)
 		}
@@ -364,6 +378,7 @@ func ligarEmpresa(t *testing.T, e *empresa, consorcio map[string]*empresa, op op
 	// trabalho.
 	e.coordenador.Recuperar()
 	e.terminador.Recuperar()
+	e.entregador.Recuperar()
 }
 
 // derrubarEmpresa simula a queda de uma empresa: as portas param de responder,
@@ -396,6 +411,7 @@ func fecharEmpresa(e *empresa) error {
 	e.umaQueda.Do(func() {
 		e.coordenador.Parar()
 		e.terminador.Parar()
+		e.entregador.Parar()
 		if e.tcp != nil {
 			_ = e.tcp.Fechar()
 		}

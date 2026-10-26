@@ -537,9 +537,9 @@ func TestAuditoriaRefleteOEstadoDasTresEmpresas(t *testing.T) {
 			t.Errorf("%s: %d livres e %d confirmados, want 2 e 1",
 				nome, carona.Livres[0], carona.Confirmados[0])
 		}
-		// O outbox é contrato desde já, e vazio até a fase 8 (I-P2-3).
+		// Este cenário não cancela nada, então o outbox fica vazio (I-P2-3).
 		if len(a.Outbox) != 0 {
-			t.Errorf("%s: outbox com %d avisos, want 0 nesta fase", nome, len(a.Outbox))
+			t.Errorf("%s: outbox com %d avisos, want 0", nome, len(a.Outbox))
 		}
 	}
 

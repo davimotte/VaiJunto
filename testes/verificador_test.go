@@ -43,7 +43,15 @@ type auditoria struct {
 	Caronas       []caronaAuditada   `json:"caronas"`
 	Participacoes []participacaoLida `json:"participacoes"`
 	Reservas      []reservaAuditada  `json:"reservas"`
-	Outbox        []json.RawMessage  `json:"outbox"`
+	Outbox        []avisoLido        `json:"outbox"`
+}
+
+// avisoLido é uma entrada do outbox (seção 4.7 da API; D39).
+type avisoLido struct {
+	ID      string `json:"id"`
+	Destino string `json:"destino"`
+	Tipo    string `json:"tipo"`
+	Tx      string `json:"tx"`
 }
 
 type caronaAuditada struct {
@@ -131,12 +139,14 @@ func auditoriasDe(t *testing.T, consorcio map[string]*empresa) map[string]audito
 const prazoDeQuiescencia = 10 * time.Second
 
 // esperarQuiescencia espera até que nenhuma transação esteja em curso: toda
-// reserva confirmada está concluída e nenhuma participação está em PREPARADO.
+// reserva confirmada está concluída, nenhuma participação está em PREPARADO
+// e nenhum aviso do outbox (D39) está pendente.
 //
 // É a condição da seção 11.1 para as invariantes que só valem "após a
-// quiescência": enquanto a fase 2 está no ar, uma empresa pode legitimamente
-// estar em PREPARADO enquanto outra já está CONFIRMADO, e cobrar I-P2-5 nesse
-// instante acusaria uma violação que não existe.
+// quiescência": enquanto a fase 2 ou a propagação de um cancelamento estão no
+// ar, uma empresa pode legitimamente estar em PREPARADO, ou ter a reserva
+// cancelada enquanto um participante remoto ainda não sabe (seção 10.3), e
+// cobrar I-P2-5 ou I-P2-3 nesse instante acusaria uma violação que não existe.
 func esperarQuiescencia(t *testing.T, consorcio map[string]*empresa) {
 	t.Helper()
 	limite := time.Now().Add(prazoDeQuiescencia)
@@ -165,6 +175,10 @@ func esperarQuiescencia(t *testing.T, consorcio map[string]*empresa) {
 				}
 			}
 			if pendente != "" {
+				break
+			}
+			if len(a.Outbox) != 0 {
+				pendente = fmt.Sprintf("%s tem %d aviso(s) pendente(s) no outbox", nome, len(a.Outbox))
 				break
 			}
 		}
@@ -205,9 +219,10 @@ func verificarInvariantesP2(t *testing.T, todas map[string]auditoria) {
 // verificarInvariantesP2 vem depois de esperarQuiescencia: enquanto a fase 2
 // está no ar, PREPARADO é um estado legítimo e transitório.
 //
-// O outbox sai sempre vazio nesta fase, porque ele nasce com os cancelamentos
-// da D39, na fase 8. A verificação já está escrita para que a fase 8 não
-// precise lembrar de acrescentá-la.
+// O outbox pode ficar não vazio **durante** a propagação de um cancelamento
+// (seção 10.3, D39) — é a janela conservadora em que o assento ainda não
+// voltou no participante remoto. Depois da quiescência, porém, todo aviso já
+// foi entregue e confirmado (AVISO_ENTREGUE), e a lista some.
 func verificarIP23(t *testing.T, todas map[string]auditoria) {
 	t.Helper()
 	for nome, a := range todas {

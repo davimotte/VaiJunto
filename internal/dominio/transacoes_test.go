@@ -70,21 +70,6 @@ func prepararNoCenario(t *testing.T, e *Estado, tx string, itens ...ItemReserva)
 	return pernas
 }
 
-// cancelarParticipacaoNoTeste põe uma participação em CANCELADO como o
-// cancelamento da fase 8 fará: a situação muda **e os assentos voltam**, que é
-// o efeito do registro PERNAS_CANCELADAS (seção 4.8). Montar o estado à mão é o
-// que permite cobrir agora as linhas CANCELADO das tabelas das seções 4.3 a 4.5,
-// que esta fase ainda não produz.
-func cancelarParticipacaoNoTeste(t *testing.T, e *Estado, txID string) {
-	t.Helper()
-	pt, existe := e.participacoes[txID]
-	if !existe {
-		t.Fatalf("participação %s não existe", txID)
-	}
-	devolverItens(e, pt.Itens)
-	pt.Situacao = SituacaoCancelado
-}
-
 // conferirIP21 verifica a invariante mestra em todos os trechos de todas as
 // caronas: Livres + confirmados + em espera == Assentos, com Livres >= 0
 // (seção 11.1).
@@ -257,8 +242,7 @@ func TestPreparar_RepeticaoPorSituacao(t *testing.T) {
 			e := estadoDoCenario(t)
 			prepararNoCenario(t, e, txDeTeste, item("vaijunto:car-1", 0, 1))
 			// Cada situação é alcançada pela operação que a produz, para que o
-			// estado do teste seja um estado que o protocolo de fato cria. A
-			// exceção é CANCELADO, que só nasce na fase 8.
+			// estado do teste seja um estado que o protocolo de fato cria.
 			switch caso.situacao {
 			case SituacaoPreparado:
 				// Já está.
@@ -271,7 +255,9 @@ func TestPreparar_RepeticaoPorSituacao(t *testing.T) {
 					t.Fatalf("Abortar: %v", err)
 				}
 			case SituacaoCancelado:
-				cancelarParticipacaoNoTeste(t, e, txDeTeste)
+				if _, err := e.CancelarParticipacao(txDeTeste); err != nil {
+					t.Fatalf("CancelarParticipacao: %v", err)
+				}
 			}
 
 			pernas, err := e.Preparar(pedido(txDeTeste, item("vaijunto:car-1", 0, 1)), aoPreparar())
@@ -536,7 +522,9 @@ func TestConfirmar_PorSituacao(t *testing.T) {
 			nome: "cancelado, o cancelamento chegou antes",
 			montar: func(t *testing.T, e *Estado) {
 				prepararNoCenario(t, e, txDeTeste, item("vaijunto:car-1", 0, 1))
-				cancelarParticipacaoNoTeste(t, e, txDeTeste)
+				if _, err := e.CancelarParticipacao(txDeTeste); err != nil {
+					t.Fatalf("CancelarParticipacao: %v", err)
+				}
 			},
 			querSituaca: SituacaoCancelado,
 		},
@@ -643,7 +631,9 @@ func TestAbortar_PorSituacao(t *testing.T) {
 			nome: "cancelado, impossível pela seção 7.4",
 			montar: func(t *testing.T, e *Estado) {
 				prepararNoCenario(t, e, txDeTeste, item("vaijunto:car-1", 0, 1))
-				cancelarParticipacaoNoTeste(t, e, txDeTeste)
+				if _, err := e.CancelarParticipacao(txDeTeste); err != nil {
+					t.Fatalf("CancelarParticipacao: %v", err)
+				}
 			},
 			querErro: ErrViolacaoProtocolo,
 		},
@@ -689,6 +679,104 @@ func TestAbortar_VetoRecusaPrepararAtrasado(t *testing.T) {
 	}
 	if o := ocupacaoDe(t, e, "vaijunto:car-1", 0); o.Livres != 3 {
 		t.Errorf("o PREPARAR recusado pelo veto descontou assento: livres = %d", o.Livres)
+	}
+	conferirIP21(t, e)
+}
+
+// --- CANCELAR (D39; seção 10 do PROJETO_P2.md; seção 4.7 da API) ---
+
+// TestCancelarParticipacao_PorSituacao cobre a máquina de estados do
+// cancelamento pelo lado do dono: PREPARADO e CONFIRMADO levam ao mesmo
+// efeito (devolve os assentos e vira CANCELADO), CANCELADO é idempotente, e
+// ABORTADO ou desconhecida são violação de protocolo — diferente de
+// confirmar/abortar, cancelar não tem disputa nem voto a disputar (D39), e
+// por isso a tabela é mais curta: não há "preparado, impossível pela seção
+// 7.4" nenhuma, porque cancelar nunca é recusado por quem recebe.
+func TestCancelarParticipacao_PorSituacao(t *testing.T) {
+	for _, caso := range []struct {
+		nome        string
+		montar      func(*testing.T, *Estado)
+		querSituaca Situacao
+		querErro    error
+	}{
+		{
+			nome: "preparado",
+			montar: func(t *testing.T, e *Estado) {
+				prepararNoCenario(t, e, txDeTeste, item("vaijunto:car-1", 0, 1))
+			},
+			querSituaca: SituacaoCancelado,
+		},
+		{
+			nome: "confirmado",
+			montar: func(t *testing.T, e *Estado) {
+				prepararNoCenario(t, e, txDeTeste, item("vaijunto:car-1", 0, 1))
+				if _, err := e.Confirmar(txDeTeste); err != nil {
+					t.Fatalf("Confirmar: %v", err)
+				}
+			},
+			querSituaca: SituacaoCancelado,
+		},
+		{
+			nome: "cancelado, repetição",
+			montar: func(t *testing.T, e *Estado) {
+				prepararNoCenario(t, e, txDeTeste, item("vaijunto:car-1", 0, 1))
+				if _, err := e.CancelarParticipacao(txDeTeste); err != nil {
+					t.Fatalf("CancelarParticipacao: %v", err)
+				}
+			},
+			querSituaca: SituacaoCancelado,
+		},
+		{
+			nome: "abortado, impossível pela seção 7.4",
+			montar: func(t *testing.T, e *Estado) {
+				prepararNoCenario(t, e, txDeTeste, item("vaijunto:car-1", 0, 1))
+				if _, err := e.Abortar(txDeTeste); err != nil {
+					t.Fatalf("Abortar: %v", err)
+				}
+			},
+			querErro: ErrViolacaoProtocolo,
+		},
+		{
+			nome:     "desconhecida, impossível pela seção 7.4",
+			montar:   func(*testing.T, *Estado) {},
+			querErro: ErrViolacaoProtocolo,
+		},
+	} {
+		t.Run(caso.nome, func(t *testing.T) {
+			e := estadoDoCenario(t)
+			caso.montar(t, e)
+
+			situacao, err := e.CancelarParticipacao(txDeTeste)
+			if !errors.Is(err, caso.querErro) {
+				t.Fatalf("err = %v, want %v", err, caso.querErro)
+			}
+			if caso.querErro == nil && situacao != caso.querSituaca {
+				t.Errorf("situação = %q, want %q", situacao, caso.querSituaca)
+			}
+			conferirIP21(t, e)
+		})
+	}
+}
+
+// TestCancelarParticipacao_Idempotente confere que uma segunda chamada não
+// devolve o assento de novo: a conta da I-P2-1 fica estável, e não sobe acima
+// da capacidade do veículo.
+func TestCancelarParticipacao_Idempotente(t *testing.T) {
+	e := estadoDoCenario(t)
+	prepararNoCenario(t, e, txDeTeste, item("vaijunto:car-1", 0, 1))
+
+	if _, err := e.CancelarParticipacao(txDeTeste); err != nil {
+		t.Fatalf("1º CancelarParticipacao: %v", err)
+	}
+	antes := ocupacaoDe(t, e, "vaijunto:car-1", 0).Livres
+
+	if _, err := e.CancelarParticipacao(txDeTeste); err != nil {
+		t.Fatalf("2º CancelarParticipacao: %v", err)
+	}
+	depois := ocupacaoDe(t, e, "vaijunto:car-1", 0).Livres
+
+	if depois != antes {
+		t.Errorf("livres = %d após a repetição, want %d (sem devolver o assento duas vezes)", depois, antes)
 	}
 	conferirIP21(t, e)
 }
@@ -836,7 +924,9 @@ func TestConsultarParticipacao_TabelaDoParticipante(t *testing.T) {
 				if _, err := e.Confirmar(txDeTeste); err != nil {
 					t.Fatalf("Confirmar: %v", err)
 				}
-				cancelarParticipacaoNoTeste(t, e, txDeTeste)
+				if _, err := e.CancelarParticipacao(txDeTeste); err != nil {
+					t.Fatalf("CancelarParticipacao: %v", err)
+				}
 			},
 			querSituaca: SituacaoCancelado,
 			querConheci: true,

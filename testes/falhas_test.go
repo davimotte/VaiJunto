@@ -38,7 +38,10 @@ import (
 //   - prazoDuvida curto quando o teste quer a terminação (TF1, TF5) e folgado
 //     quando quer observar um estado intermediário antes de ela agir (TF3).
 //
-// TF8 (aviso-apos-registrar) fica na fase 8, com o outbox da D39.
+// TF8 (aviso-apos-registrar, D39) está no fim do arquivo: é o único ponto do
+// lado de quem **envia** uma decisão unilateral, e não de quem vota — por
+// isso ele não disputa nada, só precisa confirmar que o outbox entrega
+// sozinho depois de uma queda.
 
 const (
 	// votacaoNosTestes é o prazo de votação (D41, 5 s em produção). Largo o
@@ -648,6 +651,74 @@ func TestTF7_ParticipanteCaiAposGravarConfirmado(t *testing.T) {
 	esperarReservaConcluida(t, consorcio["vaijunto"], tx)
 	conferirSituacoes(t, consorcio, tx, dominio.SituacaoConfirmado, "vaijunto", "rotacapixaba")
 	conferirAssentosLivres(t, rotacapixaba, 2)
+
+	esperarQuiescencia(t, consorcio)
+	verificarInvariantesP2(t, auditoriasDe(t, consorcio))
+}
+
+// TF8 — a empresa cai depois de registrar o aviso no outbox, antes do
+// primeiro envio (seção 9.5; D39).
+//
+// O cancelamento é decisão unilateral: ao contrário dos TF1–TF7, não há
+// disputa nem voto a aguardar — o coordenador (que aqui também participa de
+// si mesma, D21) decide, grava CANCELAMENTO_DECIDIDO, cancela a perna local e
+// grava AVISO_REGISTRADO no mesmo instante, tudo na mesma seção crítica. É só
+// depois disso, já fora do lock, que a entrega por HTTP começa — e é bem
+// nesse ponto que a empresa cai.
+//
+// O estado que fica no ar é conservador por construção (seção 10.3): o
+// coordenador já está com a perna local cancelada e o assento devolvido, mas
+// o participante remoto continua CONFIRMADO, porque o CANCELAR_PERNAS nunca
+// chegou. Na volta, o replay recria o aviso pendente a partir do
+// AVISO_REGISTRADO sem AVISO_ENTREGUE correspondente, e o Entregador.Recuperar
+// do boot entrega sozinho, sem que nada de fora precise pedir de novo.
+func TestTF8_EmpresaCaiAposRegistrarAviso(t *testing.T) {
+	assentos := map[string]int{"vaijunto": 3, "rotacapixaba": 3}
+	op := opcoesDeFalha(t, assentos, map[string]string{
+		"vaijunto": string(transacao.PontoAvisoAposRegistrar),
+	})
+	consorcio := subirConsorcioP2(t, op)
+
+	passageiro := conectar(t, consorcio["vaijunto"].endereco)
+	passageiro.entrar("maria", "abcd")
+	var confirmada protocolo.ReservarResposta
+	passageiro.exigirOK(protocolo.TipoReservar, reserva(
+		trecho("vaijunto:car-1", 0, 1),
+		trecho("rotacapixaba:car-1", 0, 1)), &confirmada)
+	tx := confirmada.ReservaID
+
+	// Em segundo plano, como nos outros TF: a queda pode acontecer antes de a
+	// resposta do CANCELAR_RESERVA sair, e a conexão do passageiro morreria
+	// sem resposta — o que é um resultado possível aqui, não uma falha.
+	go func() {
+		_, _ = enviarTolerandoQueda(passageiro, protocolo.TipoCancelarReserva,
+			protocolo.CancelarReservaRequisicao{ReservaID: tx})
+	}()
+
+	if ponto := esperarQueda(t, consorcio["vaijunto"]); ponto != transacao.PontoAvisoAposRegistrar {
+		t.Fatalf("caiu em %q, want %q", ponto, transacao.PontoAvisoAposRegistrar)
+	}
+
+	// O ponto é este: o aviso está gravado com fsync, e nenhum HTTP saiu.
+	if conteudo := lerLog(t, op, "vaijunto"); !strings.Contains(conteudo, `"tipo":"AVISO_REGISTRADO"`) {
+		t.Fatalf("log da vaijunto = %q, want um registro AVISO_REGISTRADO", conteudo)
+	}
+
+	// A perna local já foi cancelada na mesma seção crítica que decidiu e
+	// gravou o aviso — o assento da vaijunto já voltou ao mercado.
+	conferirAssentosLivres(t, consorcio["vaijunto"], 3)
+
+	// A rotacapixaba continua CONFIRMADO: o aviso ainda não chegou, e é
+	// conservador que continue assim até chegar (seção 10.3).
+	conferirSituacoes(t, consorcio, tx, dominio.SituacaoConfirmado, "rotacapixaba")
+	conferirAssentosLivres(t, consorcio["rotacapixaba"], 2)
+
+	religarEmpresa(t, consorcio, "vaijunto", op)
+
+	// O outbox retoma sozinho (Entregador.Recuperar, seção 9.3) e entrega o
+	// CANCELAR_PERNAS sem que nenhum par precise pedir de novo.
+	esperarSituacao(t, consorcio["rotacapixaba"], tx, dominio.SituacaoCancelado)
+	conferirAssentosLivres(t, consorcio["rotacapixaba"], 3)
 
 	esperarQuiescencia(t, consorcio)
 	verificarInvariantesP2(t, auditoriasDe(t, consorcio))

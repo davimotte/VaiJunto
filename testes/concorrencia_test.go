@@ -576,15 +576,10 @@ func duracaoDoAmbiente(t *testing.T, variavel string, padrao time.Duration) time
 // por SEM_ASSENTO se intercalam com os cancelamentos, e é nessa intercalação
 // que um contador mal sincronizado se perderia.
 //
-// **Suspenso na fase 5.** O laço depende de CANCELAR_RESERVA, que responde
-// recusa provisória até a fase 8 (D39): sem cancelamento não há o que devolver,
-// e o laço viraria uma sequência de SEM_ASSENTO. O teste fica inteiro, com o
-// Skip a mais, porque é a regressão que a fase 8 precisa reativar — e ele é o
-// teste que mais valor tem sobre o outbox, por rodar reserva e cancelamento em
-// disputa por segundos seguidos.
+// Como as duas caronas são desta mesma empresa, o cancelamento de cada ciclo
+// não gera aviso de outbox: a perna local é cancelada na mesma seção crítica
+// que decide, sem nenhuma chamada de rede.
 func TestT4ReservarECancelarEmLacoDevolveTudo(t *testing.T) {
-	t.Skip("o laço depende do cancelamento de reserva, que chega na fase 8 (D39)")
-
 	endereco := subirServidor(t)
 	duracao := duracaoT4(t)
 
@@ -619,8 +614,14 @@ func TestT4ReservarECancelarEmLacoDevolveTudo(t *testing.T) {
 			for time.Now().Before(fim) {
 				resp := c.enviar(protocolo.TipoReservar, pedido)
 				if resp.Status != protocolo.StatusOK {
-					if resp.Codigo != protocolo.CodigoSemAssento {
-						t.Errorf("RESERVAR: codigo = %q, want OK ou SEM_ASSENTO (mensagem: %q)", resp.Codigo, resp.Mensagem)
+					// DISPUTA_PERDIDA é a saída legítima sob contenção extrema
+					// (D36, seção 8.5): as três tentativas do wait-die se
+					// esgotaram. O laço roda reserva e cancelamento em disputa
+					// por segundos seguidos, e é esperado encontrá-la de vez em
+					// quando — o passageiro de verdade simplesmente tentaria de
+					// novo, como este laço já faz na próxima iteração.
+					if resp.Codigo != protocolo.CodigoSemAssento && resp.Codigo != protocolo.CodigoDisputaPerdida {
+						t.Errorf("RESERVAR: codigo = %q, want OK, SEM_ASSENTO ou DISPUTA_PERDIDA (mensagem: %q)", resp.Codigo, resp.Mensagem)
 						return
 					}
 					recusas.Add(1)
@@ -694,13 +695,11 @@ func TestT4ReservarECancelarEmLacoDevolveTudo(t *testing.T) {
 // cascata (D13). Se aplicasse, cancelar uma carona a menos de uma hora da
 // partida travaria as reservas dos passageiros de um veículo que não vai sair.
 //
-// **Suspenso na fase 5.** A cascata atravessa empresas e depende do outbox da
-// D39 (fase 8): cancelar a carona só nas pernas locais deixaria as outras
-// vendidas, contra a D29. Até lá, CANCELAR_CARONA de carona com reserva é
-// recusado, e é o TestCancelarCarona_Provisorio que verifica a recusa.
+// As duas caronas são desta mesma empresa (coordenadora e dona ao mesmo
+// tempo), então a cascata decide tudo na mesma seção crítica, sem outbox: é
+// o mutex único (D04), e não a rede, que serializa cancelamento e reservas
+// aqui.
 func TestT5CancelamentoEmCascataSobConcorrencia(t *testing.T) {
-	t.Skip("cascata entre empresas chega na fase 8 (D29, D39)")
-
 	endereco := subirServidor(t)
 
 	const assentos, antes, durante = 20, 8, 12
@@ -758,8 +757,28 @@ func TestT5CancelamentoEmCascataSobConcorrencia(t *testing.T) {
 	go func() {
 		defer espera.Done()
 		<-largada
-		motorista.exigirOK(protocolo.TipoCancelarCarona,
-			protocolo.CancelarCaronaRequisicao{CaronaID: primeira}, &cancelamento)
+		// CARONA_EM_TRANSACAO é a recusa esperada quando o cancelamento
+		// encontra uma participação em PREPARADO (D39): cancelar não pode
+		// abortar quem já votou SIM, então o motorista tenta de novo — a
+		// espera dura segundos, nunca mais que isso, porque toda transação
+		// em PREPARADO confirma ou aborta em pouco tempo.
+		limite := time.Now().Add(prazoDeQuiescencia)
+		for time.Now().Before(limite) {
+			resp := motorista.enviar(protocolo.TipoCancelarCarona,
+				protocolo.CancelarCaronaRequisicao{CaronaID: primeira})
+			if resp.Status == protocolo.StatusOK {
+				if err := json.Unmarshal(resp.Dados, &cancelamento); err != nil {
+					t.Errorf("decodificar CANCELAR_CARONA %s: %v", resp.Dados, err)
+				}
+				return
+			}
+			if resp.Codigo != protocolo.CodigoCaronaEmTransacao {
+				t.Errorf("CANCELAR_CARONA: codigo = %q, want OK ou CARONA_EM_TRANSACAO (mensagem: %q)", resp.Codigo, resp.Mensagem)
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Errorf("CANCELAR_CARONA: continuou CARONA_EM_TRANSACAO até o fim do prazo de %s", prazoDeQuiescencia)
 	}()
 
 	close(largada)

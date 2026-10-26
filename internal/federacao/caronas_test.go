@@ -152,7 +152,7 @@ func TestCaronas_CanceladaNaoSai(t *testing.T) {
 
 	// O cancelamento usa o relógio real, e a carona é de 2026: o prazo da D14
 	// está cumprido enquanto a data do cenário não passar.
-	if _, err := estado.CancelarCarona("vaijunto:car-1", "rafael", time.Now().In(fuso())); err != nil {
+	if _, _, err := estado.CancelarCarona("vaijunto:car-1", "rafael", time.Now().In(fuso())); err != nil {
 		t.Fatalf("CancelarCarona: %v", err)
 	}
 

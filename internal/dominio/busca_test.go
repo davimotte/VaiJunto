@@ -83,7 +83,7 @@ func TestCaronasNaJanela(t *testing.T) {
 	}
 
 	// Cancelada não sai.
-	if _, err := e.CancelarCarona(noDia, "joao", as(0, 0)); err != nil {
+	if _, _, err := e.CancelarCarona(noDia, "joao", as(0, 0)); err != nil {
 		t.Fatalf("CancelarCarona: %v", err)
 	}
 	if ids := idsDe(e.CaronasNaJanela(meiaNoite, meiaNoite.Add(JANELA_BUSCA))); len(ids) != 1 || ids[0] != atravessa {

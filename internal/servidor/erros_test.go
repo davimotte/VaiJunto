@@ -50,8 +50,8 @@ func TestTraducaoUsaCodigosDoProtocolo(t *testing.T) {
 		// Códigos do P2 (seção 5.6 do PROJETO_P2.md), documentados na seção 6.
 		protocolo.CodigoReservaEmAndamento: true, protocolo.CodigoEmpresaIndisponivel: true,
 		protocolo.CodigoDisputaPerdida: true,
-		// Provisório, da fase 5 à 7.
-		protocolo.CodigoOperacaoIndisponivel: true,
+		// Fase 8 (D39, seção 10.2).
+		protocolo.CodigoCaronaEmTransacao: true,
 	}
 	for sentinela, traducao := range traducaoErros {
 		if !conhecidos[traducao.Codigo] {

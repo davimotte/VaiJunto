@@ -81,7 +81,7 @@ func TestCancelarCarona_FalhaDoLogNaoAlteraEstado(t *testing.T) {
 	c := publicarDeTeste(t, e)
 	e.UsarLog(logQueFalha{})
 
-	if _, err := e.CancelarCarona(c.ID, "joao", agoraDaPublicacao()); !errors.Is(err, ErrFalhaNoLog) {
+	if _, _, err := e.CancelarCarona(c.ID, "joao", agoraDaPublicacao()); !errors.Is(err, ErrFalhaNoLog) {
 		t.Fatalf("erro = %v, want ErrFalhaNoLog", err)
 	}
 	if got := e.CaronasDoMotorista("joao", false); len(got) != 1 {
@@ -118,7 +118,7 @@ func TestReaplicar_PublicadaVolta(t *testing.T) {
 func TestReaplicar_CanceladaContinuaCancelada(t *testing.T) {
 	e := estadoDeTeste()
 	c := publicarDeTeste(t, e)
-	if _, err := e.CancelarCarona(c.ID, "joao", agoraDaPublicacao()); err != nil {
+	if _, _, err := e.CancelarCarona(c.ID, "joao", agoraDaPublicacao()); err != nil {
 		t.Fatalf("CancelarCarona: %v", err)
 	}
 

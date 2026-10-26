@@ -47,7 +47,7 @@ func TestReinicioPreservaCaronas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PublicarCarona: %v", err)
 	}
-	if _, err := antes.CancelarCarona(outra.ID, "joao", time.Now()); err != nil {
+	if _, _, err := antes.CancelarCarona(outra.ID, "joao", time.Now()); err != nil {
 		t.Fatalf("CancelarCarona: %v", err)
 	}
 	arq.Fechar()

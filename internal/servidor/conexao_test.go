@@ -319,7 +319,7 @@ func TestAceitar_FalhaTransitoriaNaoEncerra(t *testing.T) {
 // novo para sempre.
 func TestAceitar_RetornaQuandoOListenerFecha(t *testing.T) {
 	estado := dominio.NovoEstado("vaijunto")
-	s, err := Escutar("127.0.0.1:0", estado, buscaVazia{}, coordenadorDeTeste(estado))
+	s, err := Escutar("127.0.0.1:0", estado, buscaVazia{}, coordenadorDeTeste(estado), nil)
 	if err != nil {
 		t.Fatalf("escutar: %v", err)
 	}

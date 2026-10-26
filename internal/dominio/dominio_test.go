@@ -525,7 +525,7 @@ func TestCaronasDoMotorista_LimiteCortaDepoisDeOrdenar(t *testing.T) {
 		ids[i] = c.ID
 	}
 	for _, id := range ids[:canceladas] {
-		if _, err := e.CancelarCarona(id, "joao", agoraDaPublicacao()); err != nil {
+		if _, _, err := e.CancelarCarona(id, "joao", agoraDaPublicacao()); err != nil {
 			t.Fatalf("CancelarCarona(%s): %v", id, err)
 		}
 	}
