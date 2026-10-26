@@ -119,12 +119,32 @@ func tentarAuditoria(urlBase string) (auditoria, error) {
 	return a, nil
 }
 
-// auditoriasDe consulta todas as empresas do consórcio.
+// auditoriasDe consulta todas as empresas de um consórcio em processo.
 func auditoriasDe(t *testing.T, consorcio map[string]*empresa) map[string]auditoria {
 	t.Helper()
-	todas := make(map[string]auditoria, len(consorcio))
+	return auditoriasDeURLs(t, urlsDe(consorcio))
+}
+
+// urlsDe é o endereço base de cada empresa de um consórcio em processo.
+//
+// Existe porque as duas formas de observar o consórcio — em processo, com
+// httptest, e em contêineres, pelas portas publicadas — precisam das mesmas
+// verificações. O que varia entre elas é só de onde vêm as URLs, e é só isso
+// que esta função isola.
+func urlsDe(consorcio map[string]*empresa) map[string]string {
+	urls := make(map[string]string, len(consorcio))
 	for nome, e := range consorcio {
-		todas[nome] = lerAuditoria(t, e.urlBase())
+		urls[nome] = e.urlBase()
+	}
+	return urls
+}
+
+// auditoriasDeURLs consulta a auditoria de cada empresa pelo endereço base.
+func auditoriasDeURLs(t *testing.T, urls map[string]string) map[string]auditoria {
+	t.Helper()
+	todas := make(map[string]auditoria, len(urls))
+	for nome, urlBase := range urls {
+		todas[nome] = lerAuditoria(t, urlBase)
 	}
 	return todas
 }
@@ -149,12 +169,20 @@ const prazoDeQuiescencia = 10 * time.Second
 // cobrar I-P2-5 ou I-P2-3 nesse instante acusaria uma violação que não existe.
 func esperarQuiescencia(t *testing.T, consorcio map[string]*empresa) {
 	t.Helper()
-	limite := time.Now().Add(prazoDeQuiescencia)
+	esperarQuiescenciaEm(t, prazoDeQuiescencia, urlsDe(consorcio))
+}
+
+// esperarQuiescenciaEm é a mesma espera sobre endereços base, com o teto
+// explícito: contra contêineres sob carga, os prazos da D41 valem inteiros, e
+// os 10 s dos testes em processo não bastam.
+func esperarQuiescenciaEm(t *testing.T, teto time.Duration, urls map[string]string) {
+	t.Helper()
+	limite := time.Now().Add(teto)
 	var pendente string
 	for time.Now().Before(limite) {
 		pendente = ""
-		for nome, e := range consorcio {
-			a, err := tentarAuditoria(e.urlBase())
+		for nome, urlBase := range urls {
+			a, err := tentarAuditoria(urlBase)
 			if err != nil {
 				pendente = fmt.Sprintf("%s: %v", nome, err)
 				break
@@ -187,7 +215,7 @@ func esperarQuiescencia(t *testing.T, consorcio map[string]*empresa) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatalf("quiescência não alcançada em %s: %s", prazoDeQuiescencia, pendente)
+	t.Fatalf("quiescência não alcançada em %s: %s", teto, pendente)
 }
 
 // verificarInvariantesP2 confere as cinco invariantes da seção 11.1 sobre os
