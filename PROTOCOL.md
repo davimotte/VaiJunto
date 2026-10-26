@@ -343,16 +343,35 @@ Requisição: `{"carona_id":"vaijunto:car-3f2a1b7c"}`
 
 Permitido até o instante de partida da carona.
 
-Efeito, tudo dentro de uma única seção crítica: marca a carona como cancelada;
-para cada reserva ativa que use qualquer trecho dela, marca a reserva como
-cancelada e devolve os assentos de **todos** os seus trechos, inclusive os de
-outras caronas.
+Efeito, tudo dentro de uma única seção crítica: marca a carona como cancelada
+e cancela a perna local de cada transação atingida, devolvendo os assentos de
+**todos** os seus trechos desta empresa, inclusive os de outras caronas
+(D29). Se esta empresa coordena a reserva, ela é decidida cancelada aqui
+mesmo; se não, um aviso é enfileirado para o coordenador remoto decidir
+(D39, seção 10.2 do PROJETO_P2.md) — a entrega é assíncrona e confiável, e a
+reserva pode continuar aparecendo ativa no coordenador por um instante, até o
+aviso chegar.
 
 O cancelamento em cascata **ignora** o prazo de uma hora do passageiro: aquele
 prazo protege o motorista, não o contrário.
 
 ```json
 {"id":"5","status":"OK","dados":{"carona_id":"vaijunto:car-3f2a1b7c","reservas_canceladas":2}}
+```
+
+`reservas_canceladas` conta as transações com perna local cancelada **nesta
+chamada** — o estrago imediato que o motorista pode observar —, não as
+reservas já fechadas em coordenadores remotos, que ainda dependem do aviso
+chegar.
+
+Se alguma transação usando a carona está em preparação (`PREPARADO`), o
+cancelamento é recusado por inteiro, sem cancelar nada: cancelar não pode
+abortar quem já votou SIM (D39). O motorista tenta de novo em alguns
+segundos, quando a transação já tiver confirmado ou abortado:
+
+```json
+{"id":"5","status":"ERRO","codigo":"CARONA_EM_TRANSACAO",
+ "mensagem":"A carona tem uma reserva em preparação; tente cancelar novamente em alguns segundos."}
 ```
 
 Fora do prazo, o erro traz a partida da qual o prazo foi contado, no mesmo
@@ -365,7 +384,8 @@ formato da seção 5.11:
 ```
 
 Erros: `CARONA_NAO_ENCONTRADA`, `NAO_E_DONO`, `CARONA_CANCELADA`,
-`PRAZO_CANCELAMENTO_EXPIRADO`, `PERFIL_INCORRETO`, `CAMPO_INVALIDO`.
+`CARONA_EM_TRANSACAO`, `PRAZO_CANCELAMENTO_EXPIRADO`, `PERFIL_INCORRETO`,
+`CAMPO_INVALIDO`.
 
 ### 5.8 `BUSCAR_ITINERARIOS`
 
@@ -652,19 +672,12 @@ vazio, porque a seção 2.2 exige o campo em toda resposta.
 | `RESERVA_EM_ANDAMENTO` | O passageiro já tem uma reserva em andamento (D35) | `{}` |
 | `EMPRESA_INDISPONIVEL` | Uma empresa dona de um trecho não respondeu no prazo (D30) | `{}` |
 | `DISPUTA_PERDIDA` | Outra reserva levou o assento disputado, nas três tentativas (D36) | `{}` |
-| `OPERACAO_INDISPONIVEL` | Operação ainda não disponível nesta versão (**provisório**, ver abaixo) | `{}` |
+| `CARONA_EM_TRANSACAO` | A carona tem alguma transação em `PREPARADO`; cancelar não pode abortar quem já votou SIM (D39, seção 10.2 do `PROJETO_P2.md`) | `{}` |
 | `ERRO_INTERNO` | Falha inesperada | `{}` |
 
 Os três com conteúdo são os que o cliente precisa para montar uma mensagem
 acionável: qual trecho esgotou, qual reserva ocupa o período, e de que partida o
 prazo foi contado. Nos demais, a `mensagem` basta.
-
-**`OPERACAO_INDISPONIVEL` é provisório.** Ele responde, da fase 5 à 7, as duas
-operações de cancelamento que dependem do outbox da D39: `CANCELAR_RESERVA` e
-`CANCELAR_CARONA` de uma carona que tenha reserva. Recusá-las por inteiro é
-conservador de propósito — devolver o assento só no coordenador deixaria os das
-outras empresas presos para sempre, contra a I-P2-5. O código sai do protocolo
-na fase 8, quando a seção 10 do `PROJETO_P2.md` entra.
 
 ---
 
