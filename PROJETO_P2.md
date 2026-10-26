@@ -1457,7 +1457,7 @@ sessão. Os critérios de pronto são os que a fase precisa demonstrar, com
 | 6B | Injeção de falhas | `FALHAR_EM` (seção 9.5). TF1 a TF7 passam | ✅ |
 | 7 | Precedência | Wait-die (seção 8). Em disputa cruzada, a transação mais antiga completa, sem deadlock; TR3 e TR4 passam | ✅ |
 | 8 | Cancelamentos | Seção 10, com outbox. TC1 a TC4 e TF8 passam | ✅ |
-| 9 | Clientes e protocolo | `PROTOCOL.md` v2 (seção 5.6) e clientes adaptados; fluxo completo pelo CLI | ⏳ |
+| 9 | Clientes e protocolo | `PROTOCOL.md` v2 (seção 5.6) e clientes adaptados; fluxo completo pelo CLI | ✅ |
 | 10 | Simulador | Seção 11.4 contra as três empresas | ⏳ |
 | 11 | Teste de sistema | TS1 (seção 11.5) passa com `docker kill` e com `FALHAR_EM` | ⏳ |
 | 12 | Documentação final | `README.md`, `ROTEIRO.md` e versão final do `API_CONSORCIO.md` | ⏳ |
@@ -1483,7 +1483,7 @@ Notas de sequência:
 
 | Limitação | Por quê | Saiu na |
 |---|---|---|
-| `LISTAR_MINHAS_RESERVAS` emite `empresa` por perna sem que a seção 5.10 do `PROTOCOL.md` a documente | O dado vem da cópia da D42 e a perna remota ficaria ilegível sem ele. A seção 5.10 e os clientes mudam juntos na fase 9 | 9 |
+| `LISTAR_MINHAS_RESERVAS` emite `empresa` por perna sem que a seção 5.10 do `PROTOCOL.md` a documente | O dado vem da cópia da D42 e a perna remota ficaria ilegível sem ele. A seção 5.10 e os clientes mudam juntos na fase 9 | 9 ✅ |
 
 As duas outras limitações da fase 5 — `CANCELAR_RESERVA`/`CANCELAR_CARONA`
 respondendo `OPERACAO_INDISPONIVEL` e os seis testes em `t.Skip` — saíram na
@@ -1518,6 +1518,12 @@ as duas limitações da fase 5 que dependiam dela saíram: o TR2 passou a afirma
 sentidos (D39), com outbox persistido, retomada no boot e TC1 a TC4 e TF8
 passando; as quatro limitações pendentes das fases 5, 6A e 6B que dependiam
 dela saíram todas, listadas acima.
+
+**Limitações da fase 9:** nenhuma. O `PROTOCOL.md` está na v2, a seção 5.10
+documenta `empresa` por trecho — resolvendo a única limitação pendente da
+fase 5, listada acima —, e os clientes mostram a empresa de cada perna na
+busca e nas reservas, o aviso de busca parcial e o rótulo de passageiro de
+outra empresa no detalhe da carona.
 
 O relatório SBC é escrito fora deste roteiro.
 

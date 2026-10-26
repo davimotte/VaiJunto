@@ -1,4 +1,4 @@
-# Protocolo de aplicação VAIJUNTO — v1
+# Protocolo de aplicação VAIJUNTO — v2
 
 Especificação do protocolo de aplicação entre clientes e servidor central.
 Este documento é o contrato: um cliente escrito em qualquer linguagem que o
@@ -335,6 +335,12 @@ Requisição: `{"carona_id":"vaijunto:car-3f2a1b7c"}`
 ]}}
 ```
 
+Um passageiro de outra empresa aparece com `usuario` no formato
+`<empresa>:<usuario>` (seção 3), em vez do nome de usuário puro — é a mesma
+referência opaca que a empresa dona da reserva remota guarda (D32). O cliente
+só usa esse prefixo para rotular a linha como "de outra empresa"; nunca para
+decidir nada.
+
 Erros: `CARONA_NAO_ENCONTRADA`, `NAO_E_DONO`, `PERFIL_INCORRETO`, `CAMPO_INVALIDO`.
 
 ### 5.7 `CANCELAR_CARONA`
@@ -599,17 +605,22 @@ opcional e vale `false` quando ausente.
   "partida":"2026-10-01T06:00:00-03:00",
   "chegada":"2026-10-01T14:30:00-03:00",
   "trechos":[
-    {"carona_id":"vaijunto:car-1","motorista":"João Silva",
+    {"carona_id":"vaijunto:car-1","empresa":"vaijunto","motorista":"João Silva",
      "origem":"Salvador","destino":"Jequié",
      "partida":"2026-10-01T06:00:00-03:00","chegada":"2026-10-01T10:45:00-03:00",
      "preco_centavos":6000},
-    {"carona_id":"vaijunto:car-2","motorista":"Carlos Lima",
+    {"carona_id":"rotacapixaba:car-2","empresa":"rotacapixaba","motorista":"Carlos Lima",
      "origem":"Jequié","destino":"Vitória da Conquista",
      "partida":"2026-10-01T12:15:00-03:00","chegada":"2026-10-01T14:30:00-03:00",
      "preco_centavos":4000}
   ]
 }]}}
 ```
+
+`empresa` é a dona da carona daquele trecho — igual ao campo de mesmo nome em
+`BUSCAR_ITINERARIOS` (seção 5.8) —, útil para o cliente identificar o trecho
+remoto se o par cair antes de o aviso assíncrono de cancelamento chegar
+(seção 10.2 do `PROJETO_P2.md`).
 
 Ordenação, nesta ordem: reservas ativas primeiro, depois por partida, depois por
 `reserva_id`. Máximo de **50** reservas, cortadas depois da ordenação. O
@@ -687,21 +698,26 @@ prazo foi contado. Nos demais, a `mensagem` basta.
 → {"id":"1","tipo":"LOGIN","dados":{"usuario":"maria","senha":"abcd"}}
 ← {"id":"1","status":"OK","dados":{"usuario":"maria","nome":"Maria Souza","perfil":"PASSAGEIRO"}}
 
-→ {"id":"2","tipo":"BUSCAR_ITINERARIOS","dados":{"origem":"Salvador","destino":"Vitória da Conquista","data":"2026-10-01"}}
-← {"id":"2","status":"OK","dados":{"itinerarios":[ ... 4 opções ... ]}}
+→ {"id":"2","tipo":"BUSCAR_ITINERARIOS","dados":{"origem":"Salvador","destino":"Petrópolis","data":"2026-11-05"}}
+← {"id":"2","status":"OK","dados":{"parcial":false,"empresas_indisponiveis":[],"itinerarios":[ ... o itinerário de 3 pernas da seção 5.8, por vaijunto, rotacapixaba e rotafluminense ... ]}}
 
-→ {"id":"3","tipo":"RESERVAR","dados":{"trechos":[{"carona_id":"vaijunto:car-1","de":0,"ate":1},{"carona_id":"vaijunto:car-4","de":0,"ate":1},{"carona_id":"vaijunto:car-2","de":0,"ate":1}]}}
-← {"id":"3","status":"ERRO","codigo":"SEM_ASSENTO","mensagem":"...","dados":{"carona_id":"vaijunto:car-4","indice_trecho":0}}
+→ {"id":"3","tipo":"RESERVAR","dados":{"trechos":[{"carona_id":"vaijunto:car-1","de":0,"ate":2},{"carona_id":"rotacapixaba:car-1","de":0,"ate":2},{"carona_id":"rotafluminense:car-1","de":0,"ate":2}]}}
+← {"id":"3","status":"ERRO","codigo":"DISPUTA_PERDIDA","mensagem":"O assento foi disputado por outra reserva; nenhum assento foi reservado. Tente de novo.","dados":{}}
 
-→ {"id":"4","tipo":"RESERVAR","dados":{"trechos":[{"carona_id":"vaijunto:car-1","de":0,"ate":2},{"carona_id":"vaijunto:car-2","de":0,"ate":1}]}}
-← {"id":"4","status":"OK","dados":{"reserva_id":"vaijunto:res-91c4e2d8","preco_total_centavos":10000}}
+→ {"id":"4","tipo":"RESERVAR","dados":{"trechos":[{"carona_id":"vaijunto:car-1","de":0,"ate":2},{"carona_id":"rotacapixaba:car-1","de":0,"ate":2},{"carona_id":"rotafluminense:car-1","de":0,"ate":2}]}}
+← {"id":"4","status":"OK","dados":{"reserva_id":"vaijunto:res-91c4e2d8","preco_total_centavos":43000}}
 
 → {"id":"5","tipo":"LOGOUT","dados":{}}
 ← {"id":"5","status":"OK","dados":{}}
 ```
 
-As caronas são as do cenário do `PROJETO.md` (seção 9.2). A requisição 3
-falhando e a 4 tendo sucesso demonstra o comportamento exigido: o passageiro
-perdeu a disputa pelo assento único de `vaijunto:car-4`, nada foi reservado pela metade —
-nem o trecho de `vaijunto:car-1`, que tinha assento sobrando —, e ele escolheu outro
-itinerário.
+O itinerário é o interestadual da seção 12.2 do `PROJETO_P2.md`, com pernas de
+três empresas (seção 5.8). A requisição 3 falhando e a 4 tendo sucesso
+demonstra o comportamento exigido pelo *two-phase commit* entre empresas
+(seção 5.9): maria perdeu a disputa pelo último assento de um dos trechos,
+nada ficou reservado pela metade em nenhuma das três empresas — cada dona
+desfez o assento que havia descontado ao votar — e ela repetiu exatamente a
+mesma requisição, que teve sucesso na segunda tentativa (D36). O
+`reserva_id` sai com o prefixo `vaijunto`, a empresa do passageiro, porque é
+ela que coordena a transação (D21) — mesmo quando, como aqui, só uma das três
+pernas é dela.
