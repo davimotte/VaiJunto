@@ -34,7 +34,7 @@ func rotear(req protocolo.Requisicao, n *nucleo, s *sessao) protocolo.Resposta {
 	case protocolo.TipoDetalharCarona:
 		return tratarDetalharCarona(req, n.estado, s)
 	case protocolo.TipoCancelarCarona:
-		return tratarCancelarCarona(req, n.estado, s)
+		return tratarCancelarCarona(req, n, s)
 	case protocolo.TipoBuscarItinerarios:
 		return tratarBuscarItinerarios(req, n, s)
 	case protocolo.TipoReservar:
@@ -42,7 +42,7 @@ func rotear(req protocolo.Requisicao, n *nucleo, s *sessao) protocolo.Resposta {
 	case protocolo.TipoListarMinhasReservas:
 		return tratarListarMinhasReservas(req, n.estado, s)
 	case protocolo.TipoCancelarReserva:
-		return tratarCancelarReserva(req, n.estado, s)
+		return tratarCancelarReserva(req, n, s)
 	default:
 		// Inalcançável: autorizar já recusou todo tipo fora da tabela de
 		// perfis. Fica como rede de segurança para o caso de a tabela ganhar

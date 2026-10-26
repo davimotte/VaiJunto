@@ -40,8 +40,9 @@ const (
 	// preso.
 	CodigoDisputaPerdida = "DISPUTA_PERDIDA"
 
-	// CodigoOperacaoIndisponivel é **provisório**, da fase 5 à 7: os dois
-	// cancelamentos que dependem do outbox da D39 ainda não estão ligados.
-	// Sai na fase 8.
-	CodigoOperacaoIndisponivel = "OPERACAO_INDISPONIVEL"
+	// CodigoCaronaEmTransacao é a recusa do motorista cancelar uma carona com
+	// alguma participação em PREPARADO usando-a (D39, seção 10.2). Cancelar
+	// não pode abortar quem já votou SIM, então a operação é recusada por
+	// inteiro; o motorista tenta de novo em alguns segundos.
+	CodigoCaronaEmTransacao = "CARONA_EM_TRANSACAO"
 )

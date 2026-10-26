@@ -87,8 +87,14 @@ var traducaoErros = map[error]erroTraduzido{
 	// SEM_ASSENTO, que afirma que o trecho está cheio: aqui havia assento em
 	// disputa, e outra transação levou.
 	dominio.ErrDisputaPerdida: {protocolo.CodigoDisputaPerdida, "O assento foi disputado por outra reserva; nenhum assento foi reservado. Tente de novo."},
-	// Provisório, da fase 5 à 7 (D39 chega na fase 8).
-	dominio.ErrOperacaoIndisponivel: {protocolo.CodigoOperacaoIndisponivel, "Operação ainda não disponível nesta versão."},
+	// Fase 8 (D39): a carona tem participação em preparação, e cancelar não
+	// pode abortar quem já votou SIM. O motorista tenta de novo depois.
+	dominio.ErrCaronaEmTransacao: {protocolo.CodigoCaronaEmTransacao, "A carona tem uma reserva em preparação; tente cancelar novamente em alguns segundos."},
+	// Os dois do aviso de carona cancelada nascem só entre servidores
+	// (internal/federacao), nunca de um cliente TCP. Entram aqui pelo mesmo
+	// critério dos demais deste grupo, para a cobertura do teste.
+	dominio.ErrNaoCoordenador:  {protocolo.CodigoErroInterno, "Falha interna: aviso de carona cancelada é tratado entre servidores."},
+	dominio.ErrNaoParticipante: {protocolo.CodigoErroInterno, "Falha interna: aviso de carona cancelada é tratado entre servidores."},
 }
 
 // respostaDeErroDeDominio monta a resposta de erro correspondente ao erro

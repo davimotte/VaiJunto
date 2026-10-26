@@ -184,6 +184,26 @@ func (c *Cliente) Abortar(ctx context.Context, destino, txID string) (dominio.Si
 	return c.decidir(ctx, destino, txID, "abortar")
 }
 
+// Cancelar envia a decisão de cancelar (D39; seção 4.7 da API).
+func (c *Cliente) Cancelar(ctx context.Context, destino, txID string) (dominio.Situacao, error) {
+	return c.decidir(ctx, destino, txID, "cancelar")
+}
+
+// AvisarCaronaCancelada envia o aviso inverso da D39 (seção 4.8 da API):
+// avisa o coordenador de txID que a carona caronaID caiu, para que ele
+// decida o cancelamento do itinerário inteiro (seção 10.2 do PROJETO_P2.md).
+func (c *Cliente) AvisarCaronaCancelada(ctx context.Context, destino, txID, caronaID string) (string, error) {
+	corpo := pedidoAvisoCaronaCancelada{Tx: txID, CaronaID: caronaID}
+	var resposta respostaAvisoCaronaCancelada
+	if err := c.chamar(ctx, destino, http.MethodPost, "/avisos/carona-cancelada", corpo, &resposta); err != nil {
+		return "", err
+	}
+	if resposta.SituacaoReserva == "" {
+		return "", fmt.Errorf("%w: %s: resposta do aviso sem situacao_reserva", ErrRespostaInvalida, destino)
+	}
+	return resposta.SituacaoReserva, nil
+}
+
 // Consultar pergunta a um par a situação de uma transação (seção 4.6 da API).
 //
 // Quem a chama é o Terminador de um participante em dúvida: primeiro o

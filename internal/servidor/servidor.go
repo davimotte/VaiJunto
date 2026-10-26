@@ -50,6 +50,10 @@ type nucleo struct {
 	estado      *dominio.Estado
 	busca       BuscaFederada
 	coordenador *transacao.Coordenador
+	// entregador é o outbox da D39 (seção 4.7): quem cancela entrega os avisos
+	// recém-criados a ele, fora do lock do estado, para que os pares recebam
+	// CANCELAR_PERNAS/CARONA_CANCELADA mesmo que o par esteja fora do ar agora.
+	entregador *transacao.Entregador
 }
 
 // Servidor aceita conexões TCP e despacha cada uma para sua própria
@@ -75,12 +79,12 @@ type Servidor struct {
 // O coordenador é obrigatório, e não opcional como o registro de operações:
 // sem ele o RESERVAR não tem como funcionar, e é melhor o compilador exigir um
 // de cada chamador do que descobrir isso com um pânico na primeira reserva.
-func Escutar(endereco string, estado *dominio.Estado, busca BuscaFederada, coordenador *transacao.Coordenador) (*Servidor, error) {
+func Escutar(endereco string, estado *dominio.Estado, busca BuscaFederada, coordenador *transacao.Coordenador, entregador *transacao.Entregador) (*Servidor, error) {
 	l, err := net.Listen("tcp", endereco)
 	if err != nil {
 		return nil, err
 	}
-	return &Servidor{listener: l, nucleo: &nucleo{estado: estado, busca: busca, coordenador: coordenador}}, nil
+	return &Servidor{listener: l, nucleo: &nucleo{estado: estado, busca: busca, coordenador: coordenador, entregador: entregador}}, nil
 }
 
 // Endereco devolve o endereço em que o servidor está escutando.

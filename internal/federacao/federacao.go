@@ -96,6 +96,13 @@ type Config struct {
 	// o padrão, desliga todos.
 	Falha *transacao.Injetor
 
+	// Entregador é o outbox da D39 (seção 4.7): quem recebe
+	// POST /avisos/carona-cancelada decide o cancelamento da reserva e
+	// precisa entregar os avisos recém-criados aos demais participantes, por
+	// isso o handler precisa dele. Nunca enfileira nada sozinho além do que o
+	// domínio acabou de registrar.
+	Entregador *transacao.Entregador
+
 	// Auditoria liga GET /auditoria, o estado completo desta empresa para o
 	// verificador de invariantes (seção 11.2; flag --auditoria).
 	//
@@ -139,6 +146,19 @@ func NovoHandler(cfg Config) http.Handler {
 	})
 	mux.HandleFunc("POST /transacoes/{tx}/abortar", func(w http.ResponseWriter, r *http.Request) {
 		tratarAbortar(w, r, cfg.Participante)
+	})
+	// D39: cancelamento não é 2PC, mas usa o mesmo recurso de transação do
+	// coordenador para o participante — é por isso que leva o mesmo papel de
+	// confirmar/abortar (seção 4.7 da API).
+	mux.HandleFunc("POST /transacoes/{tx}/cancelar", func(w http.ResponseWriter, r *http.Request) {
+		tratarCancelar(w, r, cfg.Participante)
+	})
+	// O único recurso de transação em que a direção é invertida: quem chama é
+	// um participante avisando o coordenador, não o contrário (seção 4.8 da
+	// API; seção 10.2 do PROJETO_P2.md). Por isso fica fora do namespace
+	// /transacoes/{tx} e não confere papel de coordenador.
+	mux.HandleFunc("POST /avisos/carona-cancelada", func(w http.ResponseWriter, r *http.Request) {
+		tratarAvisoCaronaCancelada(w, r, cfg.Estado, cfg.Entregador)
 	})
 	// Único recurso de transação aceito de qualquer empresa do consórcio
 	// (seção 1.2 da API), e único que pode gravar sem ser o coordenador quem

@@ -85,9 +85,22 @@ type respostaVoto struct {
 	Trecho   *int         `json:"trecho,omitempty"`
 }
 
-// respostaSituacao é o corpo 200 de confirmar e abortar (seções 4.4 e 4.5).
+// respostaSituacao é o corpo 200 de confirmar, abortar e cancelar (seções
+// 4.4, 4.5 e 4.7).
 type respostaSituacao struct {
 	Situacao string `json:"situacao"`
+}
+
+// pedidoAvisoCaronaCancelada é o corpo de POST /avisos/carona-cancelada
+// (seção 4.8 da API; seção 10.2 do PROJETO_P2.md, D39).
+type pedidoAvisoCaronaCancelada struct {
+	Tx       string `json:"tx"`
+	CaronaID string `json:"carona_id"`
+}
+
+// respostaAvisoCaronaCancelada é o corpo 200 desse recurso.
+type respostaAvisoCaronaCancelada struct {
+	SituacaoReserva string `json:"situacao_reserva"`
 }
 
 // respostaConsulta é o corpo 200 do consultar, nas suas duas formas
@@ -222,6 +235,60 @@ func tratarDecisao(w http.ResponseWriter, r *http.Request, operacao string, apli
 
 	anotar(w, "tx=%s %s situacao=%s", txID, operacao, situacao)
 	responderJSON(w, http.StatusOK, respostaSituacao{Situacao: string(situacao)})
+}
+
+// tratarCancelar responde POST /transacoes/{tx}/cancelar: a decisão de
+// cancelar da D39 (seção 4.7 da API).
+//
+// Mesma forma de confirmar e abortar — corpo vazio, mesma exigência de papel
+// (só o coordenador decide a transação) — porque o participante não ramifica
+// por que ela foi cancelada: ele só cancela a perna local e devolve o
+// assento. Por isso reaproveita tratarDecisao sem nenhum campo extra no
+// corpo.
+func tratarCancelar(w http.ResponseWriter, r *http.Request, p *transacao.Participante) {
+	tratarDecisao(w, r, "CANCELAR", p.Cancelar)
+}
+
+// tratarAvisoCaronaCancelada responde POST /avisos/carona-cancelada: o aviso
+// inverso da D39 (seção 4.8 da API; seção 10.2 do PROJETO_P2.md) — do
+// participante para o coordenador, e não o contrário, o que é o motivo de
+// este recurso ficar fora do namespace /transacoes/{tx} e de não usar
+// txDoCoordenador: quem chama não precisa ser o coordenador, precisa ser
+// participante da reserva, e só o domínio sabe quem está nessa lista.
+func tratarAvisoCaronaCancelada(w http.ResponseWriter, r *http.Request, estado *dominio.Estado, entregador *transacao.Entregador) {
+	var corpo pedidoAvisoCaronaCancelada
+	if err := json.NewDecoder(r.Body).Decode(&corpo); err != nil {
+		responderErro(w, erroHTTP{http.StatusBadRequest, codigoCorpoInvalido, "Corpo não é um JSON válido do aviso."})
+		return
+	}
+	if corpo.Tx == "" || corpo.CaronaID == "" {
+		responderErro(w, erroHTTP{http.StatusBadRequest, codigoCorpoInvalido, "Informe tx e carona_id."})
+		return
+	}
+	if _, err := dominio.EmpresaDoID(corpo.Tx); err != nil {
+		responderErro(w, erroHTTP{http.StatusBadRequest, codigoCorpoInvalido,
+			"O identificador de transação precisa do prefixo da empresa coordenadora."})
+		return
+	}
+
+	quemAvisou := r.Header.Get(cabecalhoEmpresa)
+	situacao, avisos, err := estado.AvisarCaronaCancelada(corpo.Tx, corpo.CaronaID, quemAvisou)
+	if err != nil {
+		traducao := erroHTTPDeDominio(err)
+		anotar(w, "tx=%s AVISO_CARONA_CANCELADA erro=%s", corpo.Tx, traducao.Codigo)
+		responderErro(w, traducao)
+		return
+	}
+
+	anotar(w, "tx=%s AVISO_CARONA_CANCELADA situacao_reserva=%s", corpo.Tx, situacao)
+	responderJSON(w, http.StatusOK, respostaAvisoCaronaCancelada{SituacaoReserva: situacao})
+
+	// A entrega dos avisos recém-criados acontece fora do lock (regra 2), e
+	// depois de a resposta já ter sido escrita: quem avisou não precisa
+	// esperar o coordenador terminar de avisar os outros participantes.
+	if entregador != nil && len(avisos) > 0 {
+		entregador.Enfileirar(avisos)
+	}
 }
 
 // tratarConsultar responde POST /transacoes/{tx}/consultar: a base da
@@ -481,4 +548,8 @@ func (v *VotanteLocal) Confirmar(txID string) (dominio.Situacao, error) {
 
 func (v *VotanteLocal) Abortar(txID string) (dominio.Situacao, error) {
 	return v.p.Abortar(txID)
+}
+
+func (v *VotanteLocal) Cancelar(txID string) (dominio.Situacao, error) {
+	return v.p.Cancelar(txID)
 }

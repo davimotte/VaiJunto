@@ -64,13 +64,10 @@ type reservaAuditadaDeFio struct {
 	Participantes []string `json:"participantes"`
 }
 
-// avisoDeFio é uma entrada do outbox (seção 4.7).
-//
-// A lista sai sempre vazia nesta fase: o outbox nasce com os cancelamentos da
-// D39, na fase 8. O campo já existe no contrato para que o verificador e o
-// teste de sistema não precisem mudar de forma depois — a I-P2-3 exige
-// justamente "outbox vazio em todas as empresas", e uma ausência de campo não
-// se distingue de uma lista vazia sem combinar antes.
+// avisoDeFio é uma entrada do outbox (seção 4.7, D39): um aviso de
+// cancelamento ainda não confirmado pelo destino. A lista fica vazia fora da
+// janela de propagação da seção 10.3 — é o que a I-P2-3 verifica após a
+// quiescência.
 type avisoDeFio struct {
 	ID      string `json:"id"`
 	Destino string `json:"destino"`
@@ -106,7 +103,7 @@ func auditoriaDeFio(a dominio.Auditoria) auditoriaDeFioResposta {
 		Caronas:       make([]caronaAuditadaDeFio, 0, len(a.Caronas)),
 		Participacoes: make([]participacaoDeFio, 0, len(a.Participacoes)),
 		Reservas:      make([]reservaAuditadaDeFio, 0, len(a.Reservas)),
-		Outbox:        []avisoDeFio{},
+		Outbox:        make([]avisoDeFio, 0, len(a.Outbox)),
 	}
 
 	for _, c := range a.Caronas {
@@ -142,6 +139,15 @@ func auditoriaDeFio(a dominio.Auditoria) auditoriaDeFioResposta {
 			Ativa:         r.Ativa,
 			Concluida:     r.Concluida,
 			Participantes: r.Participantes,
+		})
+	}
+
+	for _, av := range a.Outbox {
+		resposta.Outbox = append(resposta.Outbox, avisoDeFio{
+			ID:      av.ID,
+			Destino: av.Destino,
+			Tipo:    string(av.Tipo),
+			Tx:      av.TxID,
 		})
 	}
 

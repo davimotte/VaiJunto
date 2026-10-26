@@ -146,13 +146,17 @@ func tratarListarMinhasReservas(req protocolo.Requisicao, estado *dominio.Estado
 	return respostaOK(req.ID, protocolo.ListarMinhasReservasResposta{Reservas: resumos})
 }
 
-// tratarCancelarReserva desfaz a reserva do passageiro autenticado e devolve
-// os assentos (PROTOCOL.md, seção 5.11; RF10).
+// tratarCancelarReserva desfaz a reserva do passageiro autenticado
+// (PROTOCOL.md, seção 5.11; PROJETO_P2.md, seção 10.1; D39; RF10).
 //
 // Quem confere que a reserva é dele é o domínio, e não este handler: "esta
 // reserva é da maria" é propriedade do estado. O que a camada de sessão decide
 // é apenas que perfil pode chamar a operação.
-func tratarCancelarReserva(req protocolo.Requisicao, estado *dominio.Estado, s *sessao) protocolo.Resposta {
+//
+// Os avisos recém-criados (D39) são entregues pelo outbox depois da resposta
+// ao passageiro, com o lock do estado já solto (regra 2): ele não espera os
+// participantes remotos confirmarem para saber que a reserva caiu.
+func tratarCancelarReserva(req protocolo.Requisicao, n *nucleo, s *sessao) protocolo.Resposta {
 	var pedido protocolo.CancelarReservaRequisicao
 	if err := json.Unmarshal(req.Dados, &pedido); err != nil {
 		return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "O campo reserva_id precisa ser string.")
@@ -161,8 +165,12 @@ func tratarCancelarReserva(req protocolo.Requisicao, estado *dominio.Estado, s *
 		return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "Informe reserva_id.")
 	}
 
-	if err := estado.CancelarReserva(pedido.ReservaID, s.usuario.Usuario, time.Now().In(dominio.FusoDasCidades())); err != nil {
+	avisos, err := n.estado.CancelarReserva(pedido.ReservaID, s.usuario.Usuario, time.Now().In(dominio.FusoDasCidades()))
+	if err != nil {
 		return respostaDeErroDeDominio(req.ID, err)
+	}
+	if n.entregador != nil {
+		n.entregador.Enfileirar(avisos)
 	}
 
 	return respostaOK(req.ID, protocolo.CancelarReservaResposta{ReservaID: pedido.ReservaID})

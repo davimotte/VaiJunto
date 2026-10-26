@@ -37,10 +37,18 @@ import (
 type RedeEmMemoria struct {
 	mu            sync.Mutex
 	participantes map[string]*transacao.Participante
-	atraso        map[string]time.Duration
-	particoes     map[parDeEmpresas]bool
-	perdas        map[chaveDePerda]int
-	gancho        func(Chamada)
+	// estados e entregadores servem só ao aviso de carona cancelada (D39,
+	// seção 10.2): é o único recurso cujo efeito mora no Estado do
+	// COORDENADOR (as reservas), não no Participante, e cuja decisão gera
+	// avisos que precisam ser entregues pelo Entregador do destino — o
+	// equivalente, na rede em memória, do handler HTTP chamar
+	// cfg.Entregador.Enfileirar depois de decidir.
+	estados      map[string]*dominio.Estado
+	entregadores map[string]*transacao.Entregador
+	atraso       map[string]time.Duration
+	particoes    map[parDeEmpresas]bool
+	perdas       map[chaveDePerda]int
+	gancho       func(Chamada)
 }
 
 // Chamada é o que o gancho de Interceptar vê de uma mensagem prestes a ser
@@ -70,16 +78,20 @@ type chaveDePerda struct{ origem, destino, operacao string }
 
 // Nomes das operações, usados nas chaves de perda.
 const (
-	OperacaoPreparar  = "preparar"
-	OperacaoConfirmar = "confirmar"
-	OperacaoAbortar   = "abortar"
-	OperacaoConsultar = "consultar"
+	OperacaoPreparar              = "preparar"
+	OperacaoConfirmar             = "confirmar"
+	OperacaoAbortar               = "abortar"
+	OperacaoConsultar             = "consultar"
+	OperacaoCancelar              = "cancelar"
+	OperacaoAvisarCaronaCancelada = "avisar-carona-cancelada"
 )
 
 // NovaRedeEmMemoria cria um hub vazio, sem falha nenhuma injetada.
 func NovaRedeEmMemoria() *RedeEmMemoria {
 	return &RedeEmMemoria{
 		participantes: make(map[string]*transacao.Participante),
+		estados:       make(map[string]*dominio.Estado),
+		entregadores:  make(map[string]*transacao.Entregador),
 		atraso:        make(map[string]time.Duration),
 		particoes:     make(map[parDeEmpresas]bool),
 		perdas:        make(map[chaveDePerda]int),
@@ -92,6 +104,17 @@ func (h *RedeEmMemoria) Registrar(empresa string, p *transacao.Participante) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.participantes[empresa] = p
+}
+
+// RegistrarFederacao liga uma empresa ao seu Estado e ao seu Entregador, para
+// que redeDe.AvisarCaronaCancelada (D39, seção 10.2) consiga decidir o
+// cancelamento no coordenador certo e repassar os avisos ao outbox dele —
+// exatamente o que a borda HTTP faz com cfg.Estado e cfg.Entregador.
+func (h *RedeEmMemoria) RegistrarFederacao(empresa string, estado *dominio.Estado, entregador *transacao.Entregador) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.estados[empresa] = estado
+	h.entregadores[empresa] = entregador
 }
 
 // De devolve a rede do ponto de vista de uma empresa, equivalente ao Cliente
@@ -204,6 +227,53 @@ func (r redeDe) Confirmar(ctx context.Context, destino, txID string) (dominio.Si
 // Abortar entrega a decisão de abortar.
 func (r redeDe) Abortar(ctx context.Context, destino, txID string) (dominio.Situacao, error) {
 	return r.decidir(ctx, destino, txID, OperacaoAbortar)
+}
+
+// Cancelar entrega a decisão de cancelar (D39).
+func (r redeDe) Cancelar(ctx context.Context, destino, txID string) (dominio.Situacao, error) {
+	return r.decidir(ctx, destino, txID, OperacaoCancelar)
+}
+
+// AvisarCaronaCancelada entrega o aviso inverso da D39 (seção 10.2): quem
+// chama é um participante, nunca o coordenador, então a exigência de papel é
+// deTodoOConsorcio — a checagem de "participa da reserva" é inteiramente do
+// domínio (estado.AvisarCaronaCancelada), não desta borda.
+func (r redeDe) AvisarCaronaCancelada(ctx context.Context, destino, txID, caronaID string) (string, error) {
+	// entregar aplica partição, perda, gancho e atraso como qualquer outra
+	// chamada; o *Participante que ela devolve não serve a este recurso — o
+	// efeito mora no Estado do coordenador (as reservas), por isso o estado
+	// vem do mapa próprio logo abaixo.
+	if _, err := r.entregar(ctx, Chamada{
+		Origem:   r.empresa,
+		Destino:  destino,
+		Operacao: OperacaoAvisarCaronaCancelada,
+		TxID:     txID,
+	}, deTodoOConsorcio); err != nil {
+		return "", err
+	}
+
+	r.hub.mu.Lock()
+	estado := r.hub.estados[destino]
+	r.hub.mu.Unlock()
+	if estado == nil {
+		return "", fmt.Errorf("%w: %q sem Estado registrado na rede em memória", ErrParDesconhecido, destino)
+	}
+
+	situacao, avisos, erroDominio := estado.AvisarCaronaCancelada(txID, caronaID, r.empresa)
+	if erroDominio != nil {
+		return "", erroDeBorda(erroHTTPDeDominio(erroDominio))
+	}
+	// A rede em memória entrega direto ao domínio do destino, sem passar por
+	// internal/federacao — por isso é esta função, e não um handler HTTP,
+	// que precisa repassar os avisos recém-criados ao entregador do destino,
+	// exatamente como o handler tratarAvisoCaronaCancelada faz pelo HTTP.
+	r.hub.mu.Lock()
+	entregadorDoDestino := r.hub.entregadores[destino]
+	r.hub.mu.Unlock()
+	if entregadorDoDestino != nil && len(avisos) > 0 {
+		entregadorDoDestino.Enfileirar(avisos)
+	}
+	return situacao, nil
 }
 
 // Consultar entrega a consulta da terminação cooperativa (seção 4.6 da API).

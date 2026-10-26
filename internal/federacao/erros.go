@@ -129,13 +129,21 @@ var traducaoErros = map[error]erroHTTP{
 	// Os três do coordenador: decididos na empresa do passageiro, na borda TCP,
 	// e por isso nunca atravessam esta borda. Entram pelo mesmo critério dos
 	// demais deste grupo, para a cobertura do teste.
-	dominio.ErrReservaEmAndamento:   {http.StatusInternalServerError, codigoErroInterno, "Falha inesperada: exclusividade de reserva é do coordenador."},
-	dominio.ErrEmpresaIndisponivel:  {http.StatusInternalServerError, codigoErroInterno, "Falha inesperada: disponibilidade de par é do coordenador."},
-	dominio.ErrOperacaoIndisponivel: {http.StatusInternalServerError, codigoErroInterno, "Falha inesperada: operação indisponível nesta versão."},
+	dominio.ErrReservaEmAndamento:  {http.StatusInternalServerError, codigoErroInterno, "Falha inesperada: exclusividade de reserva é do coordenador."},
+	dominio.ErrEmpresaIndisponivel: {http.StatusInternalServerError, codigoErroInterno, "Falha inesperada: disponibilidade de par é do coordenador."},
 	// DISPUTA_PERDIDA é o resultado da disputa inteira, e nasce no
 	// coordenador depois das três tentativas da D36 — um participante jamais
 	// o produz. O que atravessa esta borda é PRECEDENCIA, trecho a trecho.
 	dominio.ErrDisputaPerdida: {http.StatusInternalServerError, codigoErroInterno, "Falha inesperada: a disputa é decidida pelo coordenador."},
+	// CARONA_EM_TRANSACAO é recusa do cliente TCP (D39, seção 10.2): decidida
+	// inteiramente dentro da empresa dona da carona, nunca atravessa esta
+	// borda entre empresas.
+	dominio.ErrCaronaEmTransacao: {http.StatusInternalServerError, codigoErroInterno, "Falha inesperada: cancelamento de carona em transação é decidido na borda TCP."},
+
+	// 4. Aviso de carona cancelada (seção 4.8 da API; seção 10.2 do
+	// PROJETO_P2.md). Os dois só nascem de POST /avisos/carona-cancelada.
+	dominio.ErrNaoCoordenador:  {http.StatusBadRequest, codigoNaoCoordenador, "Esta empresa não coordena a transação informada."},
+	dominio.ErrNaoParticipante: {http.StatusForbidden, codigoPapelInvalido, "Quem avisou não participa desta transação."},
 }
 
 // erroHTTPDeDominio traduz um erro do domínio para a resposta da borda REST.

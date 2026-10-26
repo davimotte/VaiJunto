@@ -188,17 +188,24 @@ func tratarDetalharCarona(req protocolo.Requisicao, estado *dominio.Estado, s *s
 }
 
 // tratarCancelarCarona cancela a carona do motorista autenticado e propaga o
-// cancelamento às reservas que dependem dela (PROTOCOL.md, seção 5.7; RF05).
+// cancelamento às reservas que dependem dela (PROTOCOL.md, seção 5.7;
+// PROJETO_P2.md, seção 10.2; RF05).
 //
 // A resposta traz reservas_canceladas porque o motorista precisa saber quantas
 // pessoas ele acabou de deixar sem viagem — o protocolo é estritamente
 // requisição/resposta e o servidor nunca notifica o passageiro por conta
-// própria (seção 1), então esse número é a única medida imediata do estrago.
+// própria (seção 1), então esse número é a única medida imediata do estrago:
+// as transações com perna local cancelada **agora**, não as já fechadas em
+// coordenadores remotos, que ainda dependem do aviso chegar (seção 10.3).
 //
 // O prazo do motorista vai até o instante da partida, e não até uma hora antes:
 // é um prazo diferente do prazo do passageiro (D13), e o domínio é quem o
 // aplica. Aqui só se lê o relógio na borda e se passa adiante.
-func tratarCancelarCarona(req protocolo.Requisicao, estado *dominio.Estado, s *sessao) protocolo.Resposta {
+//
+// Os avisos recém-criados (D39) são entregues pelo outbox depois da resposta
+// ao motorista, com o lock do estado já solto (regra 2) — ele não espera o
+// consórcio inteiro confirmar para saber quantas pernas liberou.
+func tratarCancelarCarona(req protocolo.Requisicao, n *nucleo, s *sessao) protocolo.Resposta {
 	var pedido protocolo.CancelarCaronaRequisicao
 	if err := json.Unmarshal(req.Dados, &pedido); err != nil {
 		return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "O campo carona_id precisa ser string.")
@@ -207,9 +214,12 @@ func tratarCancelarCarona(req protocolo.Requisicao, estado *dominio.Estado, s *s
 		return respostaErro(req.ID, protocolo.CodigoCampoInvalido, "Informe carona_id.")
 	}
 
-	canceladas, err := estado.CancelarCarona(pedido.CaronaID, s.usuario.Usuario, time.Now().In(dominio.FusoDasCidades()))
+	canceladas, avisos, err := n.estado.CancelarCarona(pedido.CaronaID, s.usuario.Usuario, time.Now().In(dominio.FusoDasCidades()))
 	if err != nil {
 		return respostaDeErroDeDominio(req.ID, err)
+	}
+	if n.entregador != nil {
+		n.entregador.Enfileirar(avisos)
 	}
 
 	return respostaOK(req.ID, protocolo.CancelarCaronaResposta{

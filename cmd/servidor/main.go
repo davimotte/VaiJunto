@@ -123,6 +123,18 @@ func main() {
 	// (D21; seção 7.1, passo 5).
 	participante := transacao.NovoParticipante(estado, falha)
 
+	// O entregador é o outbox da D39 (seção 4.7): quem leva os avisos de
+	// cancelamento a quem falta, repetindo até confirmar, mesmo que o destino
+	// esteja fora do ar agora. Nasce sem rede, porque o cliente HTTP ainda não
+	// existe neste ponto do boot; UsarRede o injeta logo abaixo, no mesmo
+	// padrão de dominio.Estado.UsarLog/UsarRelogio.
+	entregador := transacao.NovoEntregador(transacao.ConfigEntregador{
+		Empresa:      *empresa,
+		Estado:       estado,
+		Falha:        falha,
+		PrazoEntrega: *prazoFase2,
+	})
+
 	cfgREST := federacao.Config{
 		Empresa: *empresa,
 		Pares:   pares,
@@ -137,17 +149,20 @@ func main() {
 		PrazoBusca:   *prazoBusca,
 		Falha:        falha,
 		Auditoria:    *auditoria,
+		Entregador:   entregador,
 	}
 	if *logOperacoes {
 		cfgREST.Registro = federacao.NovoRegistro(os.Stderr, *empresa)
 	}
 
-	// O cliente dos pares é construído uma vez e compartilhado pelos seus dois
-	// chamadores: a busca federada (D26) e o coordenador do 2PC (D21). Dois
-	// clientes funcionariam, mas teriam dois http.Client e, com eles, dois
-	// pools de conexão para os mesmos pares.
+	// O cliente dos pares é construído uma vez e compartilhado pelos seus três
+	// chamadores: a busca federada (D26), o coordenador do 2PC (D21) e o
+	// entregador do outbox (D39). Um cliente só, e não um por chamador,
+	// porque dois teriam dois http.Client e, com eles, dois pools de conexão
+	// para os mesmos pares.
 	cliente := federacao.NovoCliente(cfgREST)
 	busca := federacao.NovaBusca(cfgREST, cliente)
+	entregador.UsarRede(cliente)
 
 	// O coordenador é o lado que decide do 2PC (seção 7.1). Recebe a rede para
 	// falar com os pares e o votante local para a própria empresa, que é
@@ -186,7 +201,7 @@ func main() {
 		log.Fatalf("servidor: não foi possível escutar em %s (porta dos pares): %v", *enderecoPares, err)
 	}
 
-	s, err := servidor.Escutar(*endereco, estado, busca, coordenador)
+	s, err := servidor.Escutar(*endereco, estado, busca, coordenador, entregador)
 	if err != nil {
 		log.Fatalf("servidor: não foi possível escutar em %s: %v", *endereco, err)
 	}
@@ -213,8 +228,9 @@ func main() {
 	// num servidor que parou limpo as duas listas vêm vazias e nada acontece.
 	retomadas := coordenador.Recuperar()
 	emDuvida := terminador.Recuperar()
-	log.Printf("servidor: recuperação: %d reserva(s) com a fase 2 a retomar, %d participação(ões) em PREPARADO com o prazo de dúvida armado",
-		retomadas, emDuvida)
+	avisosPendentes := entregador.Recuperar()
+	log.Printf("servidor: recuperação: %d reserva(s) com a fase 2 a retomar, %d participação(ões) em PREPARADO com o prazo de dúvida armado, %d aviso(s) no outbox a entregar",
+		retomadas, emDuvida, avisosPendentes)
 
 	// A porta dos pares roda em sua própria goroutine, e a dos clientes
 	// continua na principal. Se a porta dos pares cai, o processo cai: um
