@@ -1456,7 +1456,7 @@ sessão. Os critérios de pronto são os que a fase precisa demonstrar, com
 | 6A | Recuperação | Seções 9.3 e 9.4: retomada, `consultar`, veto e terminação. TF9 e TF10 passam | ✅ |
 | 6B | Injeção de falhas | `FALHAR_EM` (seção 9.5). TF1 a TF7 passam | ✅ |
 | 7 | Precedência | Wait-die (seção 8). Em disputa cruzada, a transação mais antiga completa, sem deadlock; TR3 e TR4 passam | ✅ |
-| 8 | Cancelamentos | Seção 10, com outbox. TC1 a TC4 e TF8 passam | ⏳ |
+| 8 | Cancelamentos | Seção 10, com outbox. TC1 a TC4 e TF8 passam | ✅ |
 | 9 | Clientes e protocolo | `PROTOCOL.md` v2 (seção 5.6) e clientes adaptados; fluxo completo pelo CLI | ⏳ |
 | 10 | Simulador | Seção 11.4 contra as três empresas | ⏳ |
 | 11 | Teste de sistema | TS1 (seção 11.5) passa com `docker kill` e com `FALHAR_EM` | ⏳ |
@@ -1476,37 +1476,48 @@ Notas de sequência:
   2PC substituir o `RESERVAR`. Consequência da fase 2: só as caronas vão ao
   log; após um reinício toda carona volta com todos os assentos livres e as
   reservas somem, inclusive as atingidas por um cancelamento já gravado. Da
-  fase 5 à 7, os cancelamentos que envolvem
-  reservas respondem um erro provisório, até a fase 8.
+  fase 5 à 7, os cancelamentos que envolviam reservas respondiam um erro
+  provisório; a fase 8 substituiu esse erro pelo efeito real (D39).
 
-**Limitações da fase 5**, todas removidas nas fases que as resolvem:
+**Limitações da fase 5**, todas removidas nas fases que as resolviam:
 
-| Limitação | Por quê | Sai na |
+| Limitação | Por quê | Saiu na |
 |---|---|---|
-| `CANCELAR_RESERVA` e `CANCELAR_CARONA` de carona com reserva respondem `OPERACAO_INDISPONIVEL` | A devolução dos assentos atravessa empresas e depende da decisão unilateral com outbox (D39). Devolver só no coordenador deixaria presos os assentos dos outros donos, contra a I-P2-5; recusar por inteiro é conservador | 8 |
-| Os seis testes do cancelamento ficam em `t.Skip`: T4, T5, `TestSessaoCompletaDoPassageiro_Cancelamento`, `TestCascataDoMotoristaIgnoraOPrazoDoPassageiro`, `TestCancelarReserva_DevolveAssentosDeTodosOsTrechos` e `TestCancelarCarona_CascataDevolveAssentosDeCaronasVizinhas` | Dependem do cancelamento acima. Ficam escritos por inteiro, só com o `Skip` a mais, para a fase 8 reativá-los tirando uma linha | 8 |
 | `LISTAR_MINHAS_RESERVAS` emite `empresa` por perna sem que a seção 5.10 do `PROTOCOL.md` a documente | O dado vem da cópia da D42 e a perna remota ficaria ilegível sem ele. A seção 5.10 e os clientes mudam juntos na fase 9 | 9 |
 
-- **O TF8 fica na fase 8**, porque o ponto `aviso-apos-registrar` depende do
-  outbox.
+As duas outras limitações da fase 5 — `CANCELAR_RESERVA`/`CANCELAR_CARONA`
+respondendo `OPERACAO_INDISPONIVEL` e os seis testes em `t.Skip` — saíram na
+fase 8: o cancelamento agora tem efeito real por outbox (D39), o código do
+erro provisório foi removido do protocolo, e os seis testes (T4, T5,
+`TestSessaoCompletaDoPassageiro_Cancelamento`,
+`TestCascataDoMotoristaIgnoraOPrazoDoPassageiro`,
+`TestCancelarReserva_DevolveAssentosDeTodosOsTrechos` e
+`TestCancelarCarona_CascataDevolveAssentosDeCaronasVizinhas`) estão
+reativados e passam.
 
-**Limitações da fase 6A**, pelo mesmo critério:
-
-| Limitação | Por quê | Sai na |
-|---|---|---|
-| A parte "outbox vazio" da I-P2-3 é verificada contra uma lista que está sempre vazia | O outbox nasce com os cancelamentos da D39. A verificação já está escrita para que a fase 8 não precise lembrar de acrescentá-la | 8 |
+**Limitações da fase 6A**: a única — a parte "outbox vazio" da I-P2-3
+verificada contra uma lista sempre vazia — saiu na fase 8: o outbox agora
+nasce com os cancelamentos da D39, e `esperarQuiescencia`/`verificarIP23`
+checam o esvaziamento de verdade.
 
 **Limitações da fase 6B:**
 
 | Limitação | Por quê | Sai na |
 |---|---|---|
-| `aviso-apos-registrar` é um nome válido de `FALHAR_EM` sem gatilho nenhum | O outbox nasce com os cancelamentos da D39; armá-lo hoje é um servidor que nunca cai. O nome existe desde já para que a lista aceita seja a da seção 9.5 inteira | 8 |
 | No contêiner, a variável continua armada depois de um `docker compose start` | O ambiente é do contêiner, não da execução. Para `coord-apos-decidir` isso é inofensivo — o ponto só fica no caminho de um `RESERVAR` novo —, mas `coord-durante-confirmar` e `part-apos-confirmar` cairiam outra vez na retomada. Religar é sempre **sem** a variável, e é o que os testes em processo fazem | — |
+
+A outra limitação da fase 6B — `aviso-apos-registrar` sem gatilho — saiu na
+fase 8: o TF8 arma o ponto de verdade e passa.
 
 **Limitações da fase 7:** nenhuma. A seção 8 está implementada por inteiro, e
 as duas limitações da fase 5 que dependiam dela saíram: o TR2 passou a afirmar
 **exatamente** um sucesso, e as tentativas esgotadas respondem
 `DISPUTA_PERDIDA`.
+
+**Limitações da fase 8:** nenhuma. O cancelamento tem efeito real nos dois
+sentidos (D39), com outbox persistido, retomada no boot e TC1 a TC4 e TF8
+passando; as quatro limitações pendentes das fases 5, 6A e 6B que dependiam
+dela saíram todas, listadas acima.
 
 O relatório SBC é escrito fora deste roteiro.
 
