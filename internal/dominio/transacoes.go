@@ -417,6 +417,40 @@ func abortar(e *Estado, txID string) (Situacao, error) {
 	}
 }
 
+// cancelarParticipacao é a fase de cancelamento pelo lado do dono, quando a
+// decisão é cancelar (D39; seção 10 do PROJETO_P2.md; seção 4.7 da API).
+//
+// Diferente de confirmar/abortar, não há disputa nem votação: cancelamento
+// não pode ser recusado por ninguém (D39), então a única pergunta é "em que
+// situação a participação está". PREPARADO e CONFIRMADO levam ao mesmo
+// efeito — devolver os assentos em espera ou confirmados, pois o 2PC não
+// desfaz um CONFIRMADO por compensação (regra 4 do CLAUDE.md); é o
+// cancelamento, decisão própria da D39, que desfaz, nunca um abort.
+func cancelarParticipacao(e *Estado, txID string) (Situacao, error) {
+	pt, conhecida := e.participacoes[txID]
+	if !conhecida {
+		return "", fmt.Errorf("%w: CANCELAR de transação desconhecida %q", ErrViolacaoProtocolo, txID)
+	}
+
+	switch pt.Situacao {
+	case SituacaoPreparado, SituacaoConfirmado:
+		if err := gravar(e, tipoPernasCanceladas, dadosTransacao{Tx: txID}); err != nil {
+			return "", err
+		}
+		devolverItens(e, pt.Itens)
+		pt.Situacao = SituacaoCancelado
+		return SituacaoCancelado, nil
+
+	case SituacaoCancelado:
+		// Repetição do CANCELAR, ou CANCELAR que chega antes do CONFIRMAR
+		// atrasado (seção 10, nota): nada a fazer, mesma resposta.
+		return SituacaoCancelado, nil
+
+	default: // SituacaoAbortado
+		return "", fmt.Errorf("%w: CANCELAR de transação abortada %q", ErrViolacaoProtocolo, txID)
+	}
+}
+
 // decisaoDaTransacao responde a consulta pelo lado do **coordenador**
 // (seção 9.4; tabela da seção 4.6 da API).
 //
@@ -778,6 +812,9 @@ type Auditoria struct {
 	Caronas       []CaronaAuditada
 	Participacoes []Participacao
 	Reservas      []Reserva
+	// Outbox são os avisos ainda pendentes de entrega (D39). A I-P2-3 exige
+	// que, após a quiescência, esta lista esteja vazia em todas as empresas.
+	Outbox []Aviso
 }
 
 // CaronaAuditada são os contadores de uma carona, trecho a trecho. A I-P2-1 é
@@ -804,6 +841,7 @@ func auditoria(e *Estado) Auditoria {
 		Caronas:       make([]CaronaAuditada, 0, len(e.caronas)),
 		Participacoes: make([]Participacao, 0, len(e.participacoes)),
 		Reservas:      make([]Reserva, 0, len(e.reservas)),
+		Outbox:        avisosPendentes(e),
 	}
 
 	for _, c := range e.caronas {

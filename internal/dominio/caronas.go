@@ -240,6 +240,22 @@ func caronasDoMotorista(e *Estado, motoristaID string, incluirCanceladas bool) [
 // A checagem de dono é do domínio, e não do roteador: "esta carona é do joão"
 // é uma propriedade do estado, não do protocolo. O que o roteador decide é
 // apenas que perfil pode chamar a operação.
+//
+// Duas fontes, porque um passageiro desta carona pode estar em qualquer uma
+// das duas, nunca nas duas ao mesmo tempo:
+//
+//   - e.reservas, a visão de **coordenador**, para passageiros desta mesma
+//     empresa — resolvidos pelo login local, sem nenhuma fronteira de
+//     privacidade a respeitar;
+//   - e.participacoes, a visão de **dono**, para passageiros de **outra**
+//     empresa: a reserva deles não existe aqui, só a participação que o
+//     PREPARAR criou, e o único dado que atravessa a fronteira é a referência
+//     opaca e o nome de exibição (D32, RF14) — nunca o login nem o perfil.
+//
+// Quando esta empresa coordena e participa da mesma transação (D21), o
+// passageiro aparece pelas duas fontes com o mesmo TxID; por isso a segunda
+// varredura pula toda participação cujo coordenador é esta empresa — ela já
+// foi coberta pela primeira, com os dados completos do login local.
 func detalharCarona(e *Estado, caronaID, motoristaID string) (Carona, [][]PassageiroConfirmado, error) {
 	c, ok := e.caronas[caronaID]
 	if !ok {
@@ -255,26 +271,41 @@ func detalharCarona(e *Estado, caronaID, motoristaID string) (Carona, [][]Passag
 		porTrecho[i] = []PassageiroConfirmado{}
 	}
 
-	// Varredura linear sobre as reservas em vez de um índice carona → reservas
-	// mantido junto com o estado: DETALHAR_CARONA é operação de motorista,
-	// rara e fora do caminho crítico da reserva, e um índice a mais seria
-	// mais uma estrutura a manter consistente dentro da seção crítica.
-	for _, r := range e.reservas {
-		if !r.Ativa {
-			continue
-		}
-		for _, item := range r.Itens {
+	adicionar := func(itens []ItemReserva, passageiro PassageiroConfirmado) {
+		for _, item := range itens {
 			if item.CaronaID != caronaID {
 				continue
-			}
-			passageiro := PassageiroConfirmado{ReservaID: r.ID, Usuario: r.PassageiroID}
-			if u, ok := e.usuarios[r.PassageiroID]; ok {
-				passageiro.Nome = u.Nome
 			}
 			for t := item.De; t < item.Ate && t < trechos; t++ {
 				porTrecho[t] = append(porTrecho[t], passageiro)
 			}
 		}
+	}
+
+	// Varredura linear sobre as reservas e as participações, em vez de um
+	// índice carona → passageiros mantido junto com o estado: DETALHAR_CARONA
+	// é operação de motorista, rara e fora do caminho crítico da reserva, e um
+	// índice a mais seria mais uma estrutura a manter consistente dentro da
+	// seção crítica.
+	for _, r := range e.reservas {
+		if !r.Ativa {
+			continue
+		}
+		passageiro := PassageiroConfirmado{ReservaID: r.ID, Usuario: r.PassageiroID}
+		if u, ok := e.usuarios[r.PassageiroID]; ok {
+			passageiro.Nome = u.Nome
+		}
+		adicionar(r.Itens, passageiro)
+	}
+	for _, pt := range e.participacoes {
+		if pt.Situacao != SituacaoConfirmado || pt.Coordenador == e.empresa {
+			continue
+		}
+		adicionar(pt.Itens, PassageiroConfirmado{
+			ReservaID: pt.TxID,
+			Usuario:   pt.Passageiro.Ref,
+			Nome:      pt.Passageiro.Nome,
+		})
 	}
 
 	for t := range porTrecho {

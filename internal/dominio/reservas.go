@@ -431,11 +431,12 @@ func reservasDoPassageiro(e *Estado, passageiroID string, incluirCanceladas bool
 // invariante e mascararia um defeito de verdade no próximo teste que a
 // verificasse.
 //
-// Opera sobre itens, e não sobre uma Reserva, porque na fase 5 o único usuário é
-// o abort do participante (seção 7.2), que libera os assentos em espera de uma
-// participação — ela tem itens, mas não é uma Reserva. O caminho que a chamava
-// pela reserva inteira era o cancelamento do P1, suspenso até a fase 8
-// (cancelarReserva, abaixo); quando ele voltar, volta por aqui.
+// Opera sobre itens, e não sobre uma Reserva, porque quem chama é sempre uma
+// Participacao: o abort do participante (seção 7.2) e o cancelamento
+// (cancelarParticipacao, D39) liberam os assentos em espera ou confirmados de
+// uma participação, que tem itens, mas não é uma Reserva — a devolução da
+// reserva inteira passa por cancelarParticipacao em cada empresa dona,
+// nunca por um desconto direto no coordenador.
 //
 // Não marca nada como inativo — quem chama decide isso —, mas só deve ser
 // chamada junto com essa marcação, ou o assento seria devolvido duas vezes.
@@ -451,121 +452,207 @@ func devolverItens(e *Estado, itens []ItemReserva) {
 	}
 }
 
-// cancelarReserva desfaz uma reserva do passageiro (PROTOCOL.md, seção 5.11).
+// cancelarReserva desfaz uma reserva do passageiro (PROTOCOL.md, seção 5.11;
+// PROJETO_P2.md, seção 10.1; D39).
 //
-// **Limitação temporária da fase 5** (seção 14). Uma reserva do P2 tem pernas
-// em outras empresas, e cancelá-la exige a decisão unilateral com outbox da
-// D39: gravar CANCELAMENTO_DECIDIDO, cancelar as pernas locais e retransmitir
-// CANCELAR_PERNAS a cada participante até ele confirmar. Enquanto o aviso não
-// chega, o assento continua ocupado no dono — conservador de propósito, para
-// nunca causar venda dupla.
+// Cancelar não pode ser recusado por ninguém — diferente de confirmar, que
+// precisa da unanimidade do 2PC —, então a atomicidade entre empresas não
+// vem de votação: vem de decisão unilateral mais entrega confiável (outbox).
+// Tudo o que esta empresa decide acontece numa seção crítica só: grava
+// CANCELAMENTO_DECIDIDO, desativa a reserva, cancela a perna local se esta
+// empresa também participa, e enfileira um aviso CANCELAR_PERNAS para cada
+// participante remoto. Devolve esses avisos para quem chamou entregá-los
+// fora do lock (regra 2) — a entrega em si, com retentativa, é da camada 5.
 //
-// Devolver os assentos só aqui, como o P1 fazia, deixaria a reserva cancelada
-// no coordenador e os assentos em espera presos nos donos para sempre, o que
-// violaria a I-P2-5. Então, até a fase 8, a operação é recusada por inteiro:
-// recusar é honesto, devolver pela metade não.
-//
-// As validações de posse e de prazo ficam escritas, porque continuam valendo e
-// a fase 8 as reaproveita; só o efeito está suspenso.
-func cancelarReserva(e *Estado, reservaID, passageiroID string, agora time.Time) error {
+// Enquanto o aviso não chega, o assento continua ocupado no participante
+// remoto: é conservador de propósito (seção 10.3), para nunca causar venda
+// dupla — a devolução lá chega quando o POST /transacoes/{tx}/cancelar for
+// confirmado, nunca antes.
+func cancelarReserva(e *Estado, reservaID, passageiroID string, agora time.Time) ([]Aviso, error) {
 	r, ok := e.reservas[reservaID]
 	if !ok {
-		return fmt.Errorf("%w: %q", ErrReservaNaoEncontrada, reservaID)
+		return nil, fmt.Errorf("%w: %q", ErrReservaNaoEncontrada, reservaID)
 	}
 	if r.PassageiroID != passageiroID {
-		return fmt.Errorf("%w: reserva %q", ErrNaoEDono, reservaID)
+		return nil, fmt.Errorf("%w: reserva %q", ErrNaoEDono, reservaID)
 	}
 	if !r.Ativa {
-		return fmt.Errorf("%w: %q", ErrReservaJaCancelada, reservaID)
+		return nil, fmt.Errorf("%w: %q", ErrReservaJaCancelada, reservaID)
 	}
 
 	it := itinerarioDasPernas(r.Pernas)
 	if len(it.Pernas) > 0 {
 		limite := it.Partida.Add(-ANTECEDENCIA_CANCELAMENTO)
 		if agora.After(limite) {
-			return &ErroPrazoCancelamento{Partida: it.Partida}
+			return nil, &ErroPrazoCancelamento{Partida: it.Partida}
 		}
 	}
 
-	return fmt.Errorf("%w: cancelamento de reserva chega na fase 8 (D39)", ErrOperacaoIndisponivel)
+	return decidirCancelamentoDaReserva(e, r)
+}
+
+// decidirCancelamentoDaReserva grava CANCELAMENTO_DECIDIDO, desativa a
+// reserva, cancela a perna local quando esta empresa também participa, e
+// enfileira um aviso CANCELAR_PERNAS a cada participante remoto.
+//
+// É o passo comum entre cancelarReserva (10.1, com o prazo do passageiro já
+// conferido por quem chama) e a cascata de cancelarCarona (10.2, sem esse
+// prazo — a assimetria da D13): as duas só diferem em QUEM decide cancelar e
+// SOB QUE PRAZO, nunca no efeito da decisão em si.
+func decidirCancelamentoDaReserva(e *Estado, r *Reserva) ([]Aviso, error) {
+	if err := gravar(e, tipoCancelamentoDecidido, dadosCancelamentoDecidido{Tx: r.ID}); err != nil {
+		return nil, err
+	}
+	r.Ativa = false
+
+	if _, souParticipante := e.participacoes[r.ID]; souParticipante {
+		if _, err := cancelarParticipacao(e, r.ID); err != nil {
+			return nil, err
+		}
+	}
+
+	avisos := make([]Aviso, 0, len(r.Participantes))
+	for _, empresa := range r.Participantes {
+		if empresa == e.empresa {
+			continue
+		}
+		aviso, err := registrarAviso(e, empresa, AvisoCancelarPernas, r.ID, "")
+		if err != nil {
+			return nil, err
+		}
+		avisos = append(avisos, aviso.copia())
+	}
+	return avisos, nil
+}
+
+// usaCarona responde se algum item consome a carona indicada.
+func usaCarona(itens []ItemReserva, caronaID string) bool {
+	for _, item := range itens {
+		if item.CaronaID == caronaID {
+			return true
+		}
+	}
+	return false
 }
 
 // cancelarCarona cancela a carona do motorista e propaga o cancelamento às
-// reservas que dependem dela (PROTOCOL.md, seção 5.7). Devolve quantas reservas
-// caíram na cascata.
+// reservas que dependem dela (PROTOCOL.md, seção 5.7; PROJETO_P2.md,
+// seção 10.2; D29, D39). Devolve quantas transações tiveram a perna local
+// cancelada **nesta chamada** — é o estrago imediato que o motorista observa,
+// não quantas reservas já estão, de fato, fechadas em coordenadores remotos
+// (essas ainda dependem do aviso chegar, seção 10.3) — mais os avisos
+// recém-criados, que quem chamou entrega fora do lock.
 //
-// Três pontos que costumam passar despercebidos:
+// Quatro pontos que costumam passar despercebidos:
 //
-//   - a cascata devolve os assentos de **todos** os trechos de cada reserva
-//     atingida, inclusive os de caronas que não foram canceladas. Uma reserva
-//     de duas pernas que perde a primeira deixa de existir por inteiro, e o
-//     assento que ela ocupava na segunda perna precisa voltar ao mercado — do
-//     contrário ele fica órfão, reservado por ninguém e invendável para sempre;
-//   - o prazo de uma hora do passageiro **não** se aplica aqui (D13). Ele
+//   - uma participação em PREPARADO usando a carona recusa o cancelamento
+//     por inteiro, com ErrCaronaEmTransacao: cancelar não pode abortar quem
+//     já votou SIM (D39), então o motorista tenta de novo em alguns segundos;
+//   - a cascata cancela **todas** as pernas locais de cada transação
+//     atingida, mesmo em outra carona desta empresa — do contrário um
+//     assento ficaria órfão, reservado por ninguém e invendável para sempre;
+//   - o prazo de uma hora do passageiro (D13) **não** se aplica aqui: ele
 //     protege o motorista contra desistência de última hora, e usá-lo para
 //     impedir a cascata inverteria a proteção;
-//   - o motorista pode cancelar até o instante da partida, e não até uma hora
-//     antes. É o prazo dele, e é diferente.
+//   - quando esta empresa coordena a transação atingida, a reserva é
+//     decidida cancelada aqui mesmo; quando não, um aviso CARONA_CANCELADA é
+//     enfileirado para o coordenador remoto decidir (D29).
 //
 // Tudo em uma seção crítica só, como manda a seção 7 do PROJETO.md: em nenhum
-// instante observável existe carona cancelada com reserva ativa pendurada (I4),
-// nem assento devolvido pela metade (I1).
-func cancelarCarona(e *Estado, caronaID, motoristaID string, agora time.Time) (int, error) {
+// instante observável existe carona cancelada com participação PREPARADO
+// pendurada, nem assento devolvido pela metade.
+func cancelarCarona(e *Estado, caronaID, motoristaID string, agora time.Time) (int, []Aviso, error) {
 	c, ok := e.caronas[caronaID]
 	if !ok {
-		return 0, fmt.Errorf("%w: %q", ErrCaronaNaoEncontrada, caronaID)
+		return 0, nil, fmt.Errorf("%w: %q", ErrCaronaNaoEncontrada, caronaID)
 	}
 	if c.MotoristaID != motoristaID {
-		return 0, fmt.Errorf("%w: carona %q", ErrNaoEDono, caronaID)
+		return 0, nil, fmt.Errorf("%w: carona %q", ErrNaoEDono, caronaID)
 	}
 	if c.Cancelada {
-		return 0, fmt.Errorf("%w: %q", ErrCaronaCancelada, caronaID)
+		return 0, nil, fmt.Errorf("%w: %q", ErrCaronaCancelada, caronaID)
 	}
 
 	partida := c.Horarios[0]
 	if agora.After(partida) {
-		return 0, &ErroPrazoCancelamento{Partida: partida}
+		return 0, nil, &ErroPrazoCancelamento{Partida: partida}
 	}
 
-	// **Limitação temporária da fase 5** (seção 14). A cascata da D29/D39 — o
-	// dono avisa o coordenador de cada reserva atingida, que cancela o
-	// itinerário inteiro — depende do outbox, que chega na fase 8. Uma carona
-	// usada por reserva de outra empresa não pode ser cancelada só aqui: as
-	// outras pernas do itinerário ficariam vendidas, contra a D29.
-	//
-	// Também não há ainda o CARONA_EM_TRANSACAO da D39 para participação em
-	// PREPARADO; nesta fase as duas situações respondem a mesma recusa.
+	// D39: participação em PREPARADO usando a carona recusa por inteiro, sem
+	// gravar nada. Esperar o PREPARADO decidir é mais simples do que abortar
+	// quem já votou SIM, e a espera é de segundos.
 	for _, pt := range e.participacoes {
-		if pt.Situacao != SituacaoPreparado && pt.Situacao != SituacaoConfirmado {
-			continue
+		if pt.Situacao == SituacaoPreparado && usaCarona(pt.Itens, caronaID) {
+			return 0, nil, fmt.Errorf("%w: %q", ErrCaronaEmTransacao, caronaID)
 		}
-		for _, item := range pt.Itens {
-			if item.CaronaID == caronaID {
-				return 0, fmt.Errorf("%w: a carona %q tem reserva e a cascata chega na fase 8 (D29, D39)",
-					ErrOperacaoIndisponivel, caronaID)
-			}
+	}
+
+	// Transações atingidas: participações CONFIRMADO desta carona (o dono
+	// decide por elas) e reservas ativas desta empresa cujo itinerário usa a
+	// carona (a cascata entre caronas da mesma empresa, D29) — a interseção é
+	// o caso comum de empresa coordenadora e participante da mesma transação.
+	atingidas := map[string]bool{}
+	for _, pt := range e.participacoes {
+		if pt.Situacao == SituacaoConfirmado && usaCarona(pt.Itens, caronaID) {
+			atingidas[pt.TxID] = true
 		}
 	}
 	for _, r := range e.reservas {
-		if !r.Ativa {
+		if r.Ativa && usaCarona(r.Itens, caronaID) {
+			atingidas[r.ID] = true
+		}
+	}
+
+	// D22, regra 3: o registro é gravado antes de qualquer mudança.
+	if err := gravar(e, tipoCaronaCancelada, dadosCaronaCancelada{Carona: caronaID}); err != nil {
+		return 0, nil, err
+	}
+	c.Cancelada = true
+
+	txIDs := make([]string, 0, len(atingidas))
+	for txID := range atingidas {
+		txIDs = append(txIDs, txID)
+	}
+	sort.Strings(txIDs)
+
+	canceladas := 0
+	var todosOsAvisos []Aviso
+	for _, txID := range txIDs {
+		if _, souParticipante := e.participacoes[txID]; souParticipante {
+			if _, err := cancelarParticipacao(e, txID); err != nil {
+				return 0, nil, err
+			}
+			canceladas++
+		}
+
+		coordenador, err := EmpresaDoID(txID)
+		if err != nil {
+			return 0, nil, err
+		}
+		if coordenador != e.empresa {
+			// Não coordenamos esta transação: avisa quem coordena, sem o
+			// prazo do passageiro (assimetria D13) — a decisão é dele.
+			aviso, err := registrarAviso(e, coordenador, AvisoCaronaCancelada, txID, caronaID)
+			if err != nil {
+				return 0, nil, err
+			}
+			todosOsAvisos = append(todosOsAvisos, aviso.copia())
 			continue
 		}
-		for _, item := range r.Itens {
-			if item.CaronaID == caronaID {
-				return 0, fmt.Errorf("%w: a carona %q tem reserva e a cascata chega na fase 8 (D29, D39)",
-					ErrOperacaoIndisponivel, caronaID)
-			}
+
+		// Coordenamos: decide o cancelamento da reserva agora, sem o prazo de
+		// uma hora do passageiro (D13) — ele protege o motorista, não o
+		// contrário, e aqui quem cancela é o motorista.
+		r, existe := e.reservas[txID]
+		if !existe || !r.Ativa {
+			continue // já decidida por outro caminho, nada a fazer de novo
 		}
+		avisos, err := decidirCancelamentoDaReserva(e, r)
+		if err != nil {
+			return 0, nil, err
+		}
+		todosOsAvisos = append(todosOsAvisos, avisos...)
 	}
 
-	// D22, regra 3: o registro é gravado antes de qualquer mudança. É a última
-	// coisa que pode falhar; depois dela a aplicação é só atribuição em memória.
-	if err := gravar(e, tipoCaronaCancelada, dadosCaronaCancelada{Carona: caronaID}); err != nil {
-		return 0, err
-	}
-
-	// A partir daqui nada mais pode falhar. Nenhuma reserva é atingida: as que
-	// seriam já fizeram a função recusar acima.
-	c.Cancelada = true
-	return 0, nil
+	return canceladas, todosOsAvisos, nil
 }
