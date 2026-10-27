@@ -1349,20 +1349,62 @@ o observa.
 
 ### 11.5 Teste automatizado com carga e falhas (E5)
 
-O TS1 fica em `testes/` e só roda com `VAIJUNTO_SISTEMA=1`, porque precisa do
-Docker:
+O TS1 fica em `testes/sistema_test.go` e só roda com `VAIJUNTO_SISTEMA=1`,
+porque precisa do Docker, constrói uma imagem e leva um minuto:
 
-1. Sobe as três empresas em contêineres, com `--auditoria`.
+```bash
+VAIJUNTO_SISTEMA=1 go test -race -run TestSistemaSobCargaEFalhas -v -timeout 20m ./testes
+```
+
+São duas rodadas, em sequência, com os mesmos seis passos:
+
+1. Sobe as três empresas em contêineres, com `--auditoria`, prazos curtos e um
+   diretório de estado só seu.
 2. Roda o simulador.
-3. No meio da carga, derruba uma empresa: numa rodada com `docker kill`, noutra
-   com um ponto de `FALHAR_EM`.
-4. Religa a empresa com o mesmo volume e espera a quiescência.
-5. Consulta a auditoria das três e verifica as invariantes.
+3. No meio da carga, derruba uma empresa: numa rodada a `rotafluminense`, com
+   `docker kill`; noutra a `vaijunto`, com `FALHAR_EM=coord-apos-decidir`.
+4. Religa a empresa sobre o mesmo diretório de estado, depois de uma janela
+   maior que o `--prazo-duvida`, para que a dúvida e a terminação cooperativa
+   (D38) rodem de verdade antes de ela voltar.
+5. Roda uma carga limpa, curta, com as três no ar.
+6. Espera a quiescência, consulta a auditoria das três e verifica as
+   invariantes.
 
 As três propriedades que o enunciado pede correspondem às invariantes: nenhum
 assento confirmado para dois passageiros (I-P2-1), nenhum itinerário confirmado
 pela metade (I-P2-2 e I-P2-5) e nenhum assento bloqueado após a queda e a
-recuperação (I-P2-3).
+recuperação (I-P2-3). O TS1 relata uma linha por propriedade no log, com a
+invariante que a prova, e um subteste por propriedade, para que um "FALHOU"
+numa linha diga logo qual das três garantias o consórcio quebrou. A I-P2-4 entra
+como quarta linha: ela é parte do verificador da fase 5, que o TS1 reusa sem
+escrever um segundo.
+
+Os dois alvos do passo 3 são diferentes de propósito. O `docker kill` cai num
+**participante** das transações que as outras duas coordenam: é a queda do dono
+de um trecho, detectada por timeout (D30). O ponto de falha cai numa
+**coordenadora**, com a `DECISAO_CONFIRMAR` já no log e nenhum `CONFIRMAR`
+enviado (TF2, demonstração D-5): é o caso em que o 2PC bloqueia de verdade
+(seção 9.6) e o único que deixa assento em espera em duas empresas ao mesmo
+tempo.
+
+Quatro decisões do TS1, todas com alternativa plausível:
+
+| Decisão | Por quê |
+|---|---|
+| **O simulador roda em processo**, e não como um quarto contêiner | É o uso que a seção 11.4 já previa. Ele fala só TCP, e TCP contra uma porta publicada é igual de dentro ou de fora; em troca, o teste cronometra a queda no meio da carga sem combinar nada com um contêiner. O `-race` fica ligado, e é inofensivo: aqui não se mede nada — `Saida` é vazia e nenhum CSV sai daqui |
+| **`docker run` por empresa, e não `docker compose`** | É o comando da seção 13.2, o do laboratório. O compose é de desenvolvimento e aponta para `./estado/`, que é do usuário e não do teste; e um teste preso a ele passaria a falhar a cada mudança de porta nele |
+| **Religar é sempre sem `FALHAR_EM`**, recriando o contêiner | A variável é do contêiner, não da execução — é a limitação da fase 6B registrada na seção 14. Com o ponto rearmado, o `RESERVAR` seguinte, que a carga em curso produz em milissegundos, mataria a empresa outra vez. O estado não é do contêiner: é do diretório montado |
+| **A carga limpa do passo 5**, que não estava entre os cinco passos originais | As invariantes são afirmações sobre o estado parado, e uma empresa que religasse e recusasse **tudo** passaria em todas elas. A carga limpa é o que afirma que ela voltou a *servir*, e que um itinerário federado novo fecha depois da recuperação. Ela tem de terminar sem erro e passa pela lista branca de códigos da seção 11.4 |
+
+**O erro do simulador é esperado, e é verificado.** Derrubar uma empresa derruba
+as sessões TCP dos passageiros **dela**: o ciclo devolve erro de transporte e o
+simulador desiste do ponto. Os passageiros das outras duas continuam, e para
+eles a queda aparece como `EMPRESA_INDISPONIVEL` (D30), que é código de resposta
+e não erro — o simulador é um cliente, e a queda da empresa dele é observação da
+falha, não falha do teste. O TS1 não o tolera em branco: aceita o erro só com o
+prefixo `<empresa derrubada>:`, com que o simulador identifica o passageiro que
+falhou. Um erro da preparação, ou de um passageiro de uma empresa que nunca foi
+derrubada, continua reprovando.
 
 ### 11.6 Medição de desempenho
 
@@ -1608,7 +1650,7 @@ sessão. Os critérios de pronto são os que a fase precisa demonstrar, com
 | 8 | Cancelamentos | Seção 10, com outbox. TC1 a TC4 e TF8 passam | ✅ |
 | 9 | Clientes e protocolo | `PROTOCOL.md` v2 (seção 5.6) e clientes adaptados; fluxo completo pelo CLI | ✅ |
 | 10 | Simulador | Seção 11.4 contra as três empresas | ✅ |
-| 11 | Teste de sistema | TS1 (seção 11.5) passa com `docker kill` e com `FALHAR_EM` | ⏳ |
+| 11 | Teste de sistema | TS1 (seção 11.5) passa com `docker kill` e com `FALHAR_EM` | ✅ |
 | 12 | Documentação final | `README.md`, `ROTEIRO.md` e versão final do `API_CONSORCIO.md` | ⏳ |
 
 Notas de sequência:
@@ -1689,6 +1731,28 @@ continuam no log (D22), e media `SEM_ASSENTO` nas caronas velhas e
 de aparência perfeitamente normal. Hoje o bloco tem a largura da rodada e uma
 busca de prova recusa o cenário sujo (seção 11.4, decisão 3), com teste próprio
 em `TestSimuladorRecusaCenarioSujo`.
+
+**Limitações da fase 11:** nenhuma. O TS1 passa nas duas rodadas — `docker kill`
+e `FALHAR_EM=coord-apos-decidir` — em três execuções seguidas, e reusa o
+verificador da fase 5 sem acrescentar um segundo. Três detalhes do ambiente do
+teste valem registrar, porque cada um deles foi uma alternativa descartada:
+
+- **imagem com tag própria** (`vaijunto-ts1-servidor`), construída pelo próprio
+  teste. Exigir uma imagem pronta testaria a sobra do último
+  `docker compose up`, e não o código da árvore;
+- **portas fixas no host** (29001-29003 e 28081-28083), e não efêmeras. O
+  `docker start` da empresa religada escolhe outra porta quando ela é efêmera, e
+  o verificador perderia justamente a empresa cuja recuperação o teste existe
+  para observar;
+- **sem `--rm`**. Com ele, o `docker kill` apagaria o contêiner e não haveria o
+  que religar.
+
+A fase 11 também mostrou, na primeira execução, por que o roteiro da queda não
+pode ser o mesmo nas duas rodadas: com `FALHAR_EM` armado, a empresa morre
+dentro do **primeiro** `RESERVAR` que ela coordena, e esperar a auditoria dela
+acusar transação — o que torna "no meio da carga" verdade na rodada do
+`docker kill` — é esperar uma empresa que já morreu. A morte é a própria prova
+de que a carga chegou: nenhum outro caminho do servidor passa por aquele ponto.
 
 O relatório SBC é escrito fora deste roteiro.
 
