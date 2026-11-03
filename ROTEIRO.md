@@ -1,293 +1,754 @@
-# Roteiro de operação, apresentação e experimento
+# Roteiro de operação, demonstração e experimento
 
-Documento único de operação do VAIJUNTO em duas máquinas. Três partes, na ordem:
+Documento único de operação do consórcio VAIJUNTO em **três máquinas**, uma
+empresa em cada. Cinco partes, na ordem:
 
 | Parte | O que cobre | Quando |
 |---|---|---|
-| **0** | Preparar as duas máquinas: imagens, servidor, clientes, conectividade | Antes, fora do tempo |
-| **1** | As 12 telas de `docs/apresentacao.html` (capa + 11 itens do Barema) | ~10 min |
-| **2** | Demonstração ao vivo, sem interrupções | ~6 min |
-| **3** | Experimento guiado: carga com e sem rede, e coleta para o relatório | Fora da apresentação |
+| **0** | Preparar as três máquinas: IPs, firewall, imagens, prazos | Antes, fora do tempo |
+| **1** | Subir as três empresas e provar que elas se enxergam | ~3 min |
+| **2** | Demonstrações D-1 a D-6, mais o abort presumido com `curl` | ~12 min |
+| **3** | Medição com os servidores em máquinas distintas | Fora da apresentação |
+| **4** | O que fazer quando o tutor derrubar uma empresa | Durante, a qualquer momento |
 
-As Partes 1 e 2 somam cerca de 16 minutos. A Parte 3 é o teste laboratorial do
-`PROJETO.md` §8.3 e não cabe no tempo da apresentação: rode antes e leve os
-resultados.
+A especificação do que cada demonstração precisa exercitar é a seção 12.3 do
+`PROJETO_P2.md`; aqui está o procedimento. Toda saída reproduzida neste
+documento foi copiada de uma execução real.
 
 ---
 
 # Parte 0: preparação
 
-## 0.1 Montar as imagens (com internet)
+## 0.1 As três máquinas
 
-A montagem baixa as imagens base `golang:1.23-alpine` e `alpine:3.20`. Na raiz do
-repositório, com as duas máquinas no mesmo commit (`git log -1 --oneline`):
+Uma empresa por máquina, e cada uma com **duas** portas: 9000 para os clientes
+dela e 8080 para os pares.
+
+| Máquina | Empresa | IP | Variável |
+|---|---|---|---|
+| A | `vaijunto` | | `IP_A` |
+| B | `rotacapixaba` | | `IP_B` |
+| C | `rotafluminense` | | `IP_C` |
+
+Anote os IPs com `hostname -I` e exporte os três **em todos os terminais** de
+todas as máquinas — os comandos abaixo os usam:
 
 ```bash
-# Máquina A: as duas imagens — a do cliente também roda a carga da Parte 3
-docker build -f Dockerfile.servidor -t vaijunto-servidor .
-docker build -f Dockerfile.cliente  -t vaijunto-cliente  .
+export IP_A=192.168.0.10 IP_B=192.168.0.11 IP_C=192.168.0.12
+```
 
-# Máquina B: só a do cliente
+As três máquinas precisam estar no **mesmo commit** (`git log -1 --oneline`).
+Os relógios **não** precisam estar sincronizados, e isso faz parte do argumento
+da seção 8 do `PROJETO_P2.md`: nenhuma decisão entre servidores usa o relógio
+físico.
+
+## 0.2 Firewall: 9000 e 8080
+
+Cada contêiner fica na rede *bridge* da sua máquina, e redes *bridge* de
+máquinas diferentes não se enxergam. O que resolve é publicar as portas no host
+— por isso as duas precisam estar liberadas nas três máquinas:
+
+```bash
+sudo ufw allow 9000/tcp && sudo ufw allow 8080/tcp     # ou o firewall da distro
+```
+
+Esquecer a 8080 é a falha mais provável desta demonstração, e ela se disfarça:
+os clientes conectam normalmente, a busca volta **parcial** e toda reserva
+federada responde `EMPRESA_INDISPONIVEL`, como se os outros servidores
+estivessem fora do ar.
+
+## 0.3 Montar as imagens
+
+A montagem baixa `golang:1.23-alpine` e `alpine:3.20`. Na raiz do repositório:
+
+```bash
+# Nas três máquinas: a imagem do servidor
+docker build -f Dockerfile.servidor -t vaijunto-servidor .
+
+# Onde for rodar cliente ou simulador (as três, por segurança)
 docker build -f Dockerfile.cliente -t vaijunto-cliente .
 ```
 
-Se o laboratório não tiver internet, monte antes e leve as imagens num pendrive:
+Sem internet no laboratório, monte antes e leve num pendrive:
 
 ```bash
-docker save vaijunto-servidor vaijunto-cliente | gzip > vaijunto.tar.gz   # onde montou
-docker load < vaijunto.tar.gz                                             # no laboratório
+docker save vaijunto-servidor vaijunto-cliente | gzip > vaijunto.tar.gz
+docker load < vaijunto.tar.gz
 ```
 
-## 0.2 Subir o servidor na máquina A
+A imagem do cliente traz `/bin/passageiro`, `/bin/motorista`, `/bin/simulador` e
+`/bin/carga` já compilados, então a máquina que só roda clientes não precisa de
+Go instalado.
 
-Anote o IP (`hostname -I`) e suba o servidor **recém-iniciado** num terminal que
-fique visível durante todo o teste:
+## 0.4 Diretório de estado
+
+O log write-ahead (D22) fica num diretório **da máquina**, não dentro do
+contêiner. É o que torna o `--rm` seguro: o contêiner é descartável, o estado
+não. Em cada máquina, na raiz do repositório:
 
 ```bash
-docker run --rm --name vaijunto-servidor -p 9000:9000 -e TZ=America/Bahia \
-  -v "$(pwd)/dados:/dados" vaijunto-servidor \
-  --usuarios /dados/usuarios.json --caronas /dados/caronas.json
+mkdir -p estado && rm -f estado/*.wal     # começa do zero; a semente recarrega (D37)
 ```
 
-Esperado: `servidor: escutando em [::]:9000 (registro de operações: true)`. Se o
-trecho entre parênteses não aparecer, a imagem é anterior ao registro: monte-a de
-novo.
+## 0.5 Prazos desta semente
 
-Cada operação sai assim (D19):
+A semente tem caronas em **05 e 06/11/2026** e os prazos de cancelamento são
+aplicados com o relógio **real** (D13). Confira antes de ensaiar:
 
-```
-2026/10/01 08:15:02.431 [192.168.0.20:51234] maria    RESERVAR               id="3" → OK (0.312 ms)
-```
-
-Os campos são instante, endereço do cliente, usuário (`-` antes do login),
-operação, `id` da requisição, resultado (`OK`, ou `ERRO` com o código) e duração.
-A senha nunca aparece.
-
-O `-e TZ=America/Bahia` só alinha o horário das linhas sem milissegundos — a de
-boot e as de erro de conexão — com o das linhas de operação. O domínio não depende
-de `TZ` (`PROJETO.md`, §10.1).
-
-**Para reiniciar o servidor:** `Ctrl+C` no terminal dele e o comando acima de
-novo. O estado vive só em memória, então reiniciar volta ao cenário inicial.
-
-**Salve o registro antes de reiniciar.** O `--rm` apaga o contêiner no `Ctrl+C`, e
-o `docker logs` vai junto. Em outro terminal da máquina A:
-
-```bash
-docker logs vaijunto-servidor > registro-demonstracao.txt 2>&1
-```
-
-## 0.3 Conferir a conectividade
-
-Na máquina B, antes de abrir qualquer cliente, com `export IP_A=192.168.x.y`:
-
-```bash
-printf '{"id":"1","tipo":"PING","dados":{}}\n' | nc -q1 $IP_A 9000
-```
-
-Esperado: `"status":"OK"` e `servidor_em` terminando em `-03:00`. No terminal do
-servidor, três linhas: `conexão aberta`, `-  PING  id="1" → OK` e
-`conexão encerrada`. É a evidência isolada do item 2 do Barema, e separa "a rede
-está errada" de "o cliente está errado" antes da apresentação.
-
-A conectividade funciona porque o `-p 9000:9000` publica a porta do contêiner no
-IP da máquina A. Redes *bridge* do Docker de máquinas diferentes não se enxergam
-diretamente (`PROJETO.md`, §10.2).
-
-## 0.4 Abrir os clientes e fazer login
-
-`export IP_A=…` em cada terminal:
-
-| Máquina | Terminal | Cliente | Usuário |
-|---|---|---|---|
-| A | servidor | — | — |
-| A | PA | passageiro | `pedro` / `abcd` |
-| B | PB | passageiro | `lucia` / `abcd` |
-| B | MB | motorista | `joao` / `1234` (troca para `ana` só no D7) |
-
-```bash
-docker run --rm -it -e VAIJUNTO_SERVIDOR=$IP_A:9000 vaijunto-cliente /bin/passageiro                     # PA (em A)
-docker run --rm -it --name cliente-pb -e VAIJUNTO_SERVIDOR=$IP_A:9000 vaijunto-cliente /bin/passageiro   # PB (em B)
-docker run --rm -it -e VAIJUNTO_SERVIDOR=$IP_A:9000 vaijunto-cliente /bin/motorista                      # MB (em B)
-```
-
-O `--name cliente-pb` existe só para o D6: se o Ctrl+C não derrubar o cliente,
-`docker kill cliente-pb` em outro terminal da máquina B mata o processo do mesmo
-jeito, e o sistema operacional fecha o socket igual.
-
-Na máquina A, `IP_A` é o IP da própria máquina: o cliente de A também passa pela
-porta publicada. Deixar as sessões abertas é seguro: o servidor não tem prazo de
-leitura, e o prazo do cliente só conta durante uma requisição (D17).
-
-**Por que esses usuários.**
-
-- **joao** é dono da `car-1`, que está em todos os itinerários com baldeação:
-  publica, detalha passageiros por trecho e cancela em cascata sem trocar de
-  usuário.
-- **pedro** e **lucia** começam sem reservas, então disputam o mesmo itinerário
-  sem esbarrar em `CONFLITO_HORARIO`.
-
-## 0.5 Conferências finais
-
-- `docs/apresentacao.html` aberto na capa.
-- Relógio antes de **01/10/2026 às 05:00**. É o prazo do passageiro para cancelar
-  a reserva do D5: uma hora antes da partida das 06:00 (D13). O motorista pode
-  cancelar a `car-1` até as 06:00, a própria partida.
-- Combinado quem aperta o outro Enter no D3 (um colega ou o professor).
-- No ensaio, confirmado que **Ctrl+C** encerra o cliente passageiro no contêiner.
-  Se não encerrar, o D6 usa `docker kill cliente-pb`.
-
----
-
-# Parte 1: apresentação do HTML (cerca de 10 min)
-
-Navegação: `→` e `←` trocam de tela, `Home` volta ao índice, `T` alterna o tema.
-
-| Tela | Tempo | Frase-guia |
+| Demonstração | Depende do relógio? | Limite |
 |---|---|---|
-| Capa | 0:30 | Caronas controladas por trecho, baldeação entre motoristas diferentes, reserva tudo ou nada |
-| 1 Arquitetura | 1:00 | Seis camadas; só a camada de estado conhece o mutex |
-| 2 Comunicação | 0:45 | Uma goroutine por cliente; a conexão é a identidade |
-| 3 Protocolo | 1:00 | JSON por linha, requisição e resposta, `id` ecoado |
-| 4 Encapsulamento | 0:45 | Validação em camadas; erro de formato não derruba a conexão |
-| 5 Busca | 1:15 | Pernas, DFS e ordenação; a busca não reserva nada |
-| 6 Concorrência | 1:00 | Goroutines sobre poucas threads; um mutex protege o estado |
-| 7 Atomicidade | 1:15 | Valida tudo, depois escreve; um recurso só, sem deadlock |
-| 8 Interação | 0:30 | “Vocês vão ver ao vivo” |
-| 9 Confiabilidade | 0:45 | Não existe assento em espera, então nada fica preso |
-| 10 Testes | 0:45 | T2 prova o tudo ou nada; invariantes conferidas pelo protocolo |
-| 11 Emulação | 0:45 | Porta publicada no host; é o que a demonstração usa agora |
+| D-1, D-2, D-3 | Não | Reservar e buscar não conferem se a carona já partiu |
+| D-4, D-5 | Não | — |
+| **D-6** | **Sim** | `rotafluminense:car-1` parte em **06/11/2026 08:00**; depois disso, cancelar a carona é recusado |
+| Cancelar reserva (opcional) | Sim | Uma hora antes da primeira perna: `vaijunto:car-1` parte 05/11 05:00, então o limite é **04/11 04:00** |
+
+Passado o limite da D-6, a saída é deslocar as datas da semente nos três
+`dados/<empresa>/caronas.json` — o que muda a seção 12.2 do `PROJETO_P2.md` e os
+testes que citam 05 e 06/11. Não é mudança para se fazer na véspera.
+
+## 0.6 Conferências finais
+
+- `curl` e `nc` disponíveis nas três máquinas (`nc` é usado só no diagnóstico).
+- Combinado quem aperta o segundo Enter nas disputas D-2 e D-3.
+- `python3` na máquina A, se quiser ler a auditoria formatada (opcional: `curl`
+  cru também serve).
 
 ---
 
-# Parte 2: demonstração ao vivo (cerca de 6 min)
+# Parte 1: subir as três empresas
 
-| # | Barema | Terminal · usuário | Ação | Esperado |
+## 1.1 Um comando por máquina
+
+É o comando da seção 13.2 do `PROJETO_P2.md`, com `--auditoria`. Cada empresa
+monta **só** o seu diretório de dados; nenhum volume é compartilhado (RD07,
+RD11).
+
+```bash
+# Máquina A — vaijunto
+docker run --rm --name vaijunto -p 9000:9000 -p 8080:8080 -e TZ=America/Bahia \
+  -v "$(pwd)/dados/vaijunto:/dados:ro" -v "$(pwd)/estado:/estado" \
+  --user "$(id -u):$(id -g)" vaijunto-servidor \
+  --empresa vaijunto \
+  --pares rotacapixaba=http://$IP_B:8080,rotafluminense=http://$IP_C:8080 \
+  --dados /dados --log /estado/vaijunto.wal --auditoria
+
+# Máquina B — rotacapixaba
+docker run --rm --name rotacapixaba -p 9000:9000 -p 8080:8080 -e TZ=America/Bahia \
+  -v "$(pwd)/dados/rotacapixaba:/dados:ro" -v "$(pwd)/estado:/estado" \
+  --user "$(id -u):$(id -g)" vaijunto-servidor \
+  --empresa rotacapixaba \
+  --pares vaijunto=http://$IP_A:8080,rotafluminense=http://$IP_C:8080 \
+  --dados /dados --log /estado/rotacapixaba.wal --auditoria
+
+# Máquina C — rotafluminense
+docker run --rm --name rotafluminense -p 9000:9000 -p 8080:8080 -e TZ=America/Bahia \
+  -v "$(pwd)/dados/rotafluminense:/dados:ro" -v "$(pwd)/estado:/estado" \
+  --user "$(id -u):$(id -g)" vaijunto-servidor \
+  --empresa rotafluminense \
+  --pares vaijunto=http://$IP_A:8080,rotacapixaba=http://$IP_B:8080 \
+  --dados /dados --log /estado/rotafluminense.wal --auditoria
+```
+
+Deixe cada terminal visível durante toda a demonstração: é nele que o 2PC
+aparece.
+
+**Por que `--auditoria`.** Ela expõe `GET /auditoria`, somente leitura, com os
+contadores por trecho, as participações e o outbox de cada empresa. É o que a
+D-5 usa para mostrar que nenhum assento ficou preso, e o que o verificador de
+invariantes da Parte 3 lê. Não participa de nenhuma decisão: é instrumento de
+observação, como o `-race`. Em produção ficaria desligada, porque mostra também
+as participações, que nenhum par tem o direito de ver (D32).
+
+**Por que `--user`.** Sem ela o `.wal` nasce com dono `root` no host, e o
+próximo `docker run` sem `--user` ou a leitura do arquivo passam a falhar.
+
+## 1.2 Boot esperado
+
+Três linhas, nesta ordem:
+
+```
+servidor: log /estado/vaijunto.wal aberto, 0 registros reaplicados, relógio de Lamport em 0
+servidor: empresa vaijunto atendendo clientes em [::]:9000 e pares em [::]:8080 (pares: 2, registro de operações: true)
+servidor: recuperação: 0 reserva(s) com a fase 2 a retomar, 0 participação(ões) em PREPARADO com o prazo de dúvida armado, 0 aviso(s) no outbox a entregar
+```
+
+A terceira linha sai em **todo** boot, porque todo boot é uma recuperação
+(seção 9.1): num servidor que subiu limpo as três listas vêm vazias. É a mesma
+linha que, na D-5, vai mostrar `1 reserva(s) com a fase 2 a retomar`.
+
+`pares: 2` confirma que o `--pares` foi lido. Se vier `pares: 0`, a lista está
+errada e nenhuma reserva federada vai funcionar.
+
+## 1.3 Provar que as três se enxergam
+
+De cada máquina, pergunte a saúde das outras duas (seção 4.1 da API):
+
+```bash
+curl -s http://$IP_B:8080/saude && echo && curl -s http://$IP_C:8080/saude
+```
+
+```json
+{"empresa":"rotacapixaba","versao_api":1,"instante":"2026-11-03T11:25:47.749706005-03:00"}
+```
+
+Nos terminais dos servidores, nada: `/saude` é diagnóstico e aceita chamada sem
+os cabeçalhos do consórcio (seção 1.1 da API), então o `curl` de uma pessoa
+funciona. Esta é a evidência isolada do item 11 do barema, e separa "a rede está
+errada" de "o cliente está errado" antes de a apresentação começar.
+
+Confirmação pelo caminho que a demonstração usa de verdade — uma busca federada
+na máquina A, com um cliente ou com `nc`:
+
+```bash
+printf '{"id":"1","tipo":"LOGIN","dados":{"usuario":"maria","senha":"abcd"}}\n{"id":"2","tipo":"BUSCAR_ITINERARIOS","dados":{"origem":"Salvador","destino":"Petrópolis","data":"2026-11-05"}}\n' | nc -q1 localhost 9000
+```
+
+Precisa vir **um** itinerário, `"parcial":false` e `"empresas_indisponiveis":[]`.
+No terminal de A aparecem as duas chamadas que ela fez:
+
+```
+[vaijunto] → rotacapixaba GET /federacao/caronas?ate=…&desde=… L=0 → 200 (2.380 ms)
+[vaijunto] → rotafluminense GET /federacao/caronas?ate=…&desde=… L=0 → 200 (2.735 ms)
+```
+
+Se vier `"parcial":true`, pare aqui e volte à 0.2: é a porta 8080.
+
+## 1.4 Abrir os clientes
+
+| Máquina | Terminal | Cliente | Usuário | Usado em |
 |---|---|---|---|---|
-| D1 | **2, 11** | A: servidor | Mostrar o terminal do servidor | Linhas `LOGIN → OK` vindas dos clientes de A e de B |
-| D2 | **8** | MB · joao | Publicar carona: Salvador `2026-10-05` 08:00 → Feira de Santana 10:00, 2 assentos, R$ 30,00. Carona só para demonstrar a publicação: a data 05/10 a mantém fora da busca de 01/10 | `Carona car-… publicada, com 2 assentos.` |
-| D3 | **5, 6, 7** | PA · pedro e PB · lucia | Os dois buscam Salvador → Vitória da Conquista em `2026-10-01` e param em “Reservar qual?”. Na contagem “3, 2, 1”, cada um digita `4` e Enter na sua máquina. A disputa é pelo único assento da `car-4` (Feira de Santana → Jequié, motorista ana), a perna do meio do [4] | 4 itinerários, na ordem da tela 5. **Um** recebe `Reserva … confirmada`; o **outro** recebe `Assento esgotado no trecho Feira de Santana → Jequié.` No servidor: um `OK` e um `ERRO SEM_ASSENTO` |
-| D4 | **7, 8** | MB · joao | Detalhar carona `car-1` | Salvador → Feira de Santana: `2 assentos livres`, **só o vencedor** listado. Feira de Santana → Jequié: `3 assentos livres`. O perdedor não ficou com assento na `car-1`, que tinha vaga: **nada foi reservado pela metade** |
-| D5 | **8** | vencedor do D3 | `Minhas reservas`, depois `Cancelar reserva`, confirmando com `s` | A reserva aparece na lista; depois `Reserva … cancelada. Os assentos voltaram para os trechos.` |
-| D6 | **9** | PB · lucia, depois PA · pedro | lucia busca de novo e para em “Reservar qual?”, vendo o [4], que usa o último assento da `car-4`. **Ctrl+C** no PB. pedro busca e reserva o **[4]** | A reserva do pedro é **confirmada**, com o assento que a lucia via. No servidor, a conexão da lucia termina sem nenhum `RESERVAR` |
-| D7 | **7, 8** | MB · joao, depois ana | joao cancela `car-1`, confirmando com `s`. `Sair`, reabrir o motorista, entrar como `ana` e detalhar `car-4` | `Carona car-1 cancelada. 1 reserva de passageiro cancelada em cascata.` Depois, `car-4` com `1 assento livre` e nenhum passageiro: o assento disputado voltou numa carona de **outro** motorista |
+| A | servidor | — | — | todas |
+| A | PA | passageiro | `maria` / `abcd` | D-1, D-6 |
+| A | PA2 | passageiro | `pedro` / `abcd` | D-2 |
+| A | PA3 | passageiro | `lucia` / `abcd` | D-4 |
+| B | servidor | — | — | todas |
+| B | PB | passageiro | `clara` / `abcd` | D-2 |
+| B | PB2 | passageiro | `paulo` / `abcd` | D-3 |
+| C | servidor | — | — | todas |
+| C | PC | passageiro | `tiago` / `abcd` | D-3 |
+| C | MC | motorista | `marcos` / `1234` | D-6 |
 
-O item 10 (Testes) é coberto pela tela do HTML e pela Parte 3. O item 1
-(Arquitetura) aparece em toda a demonstração.
-
-**O que se disputa no D3.** O [4] é um itinerário de três pernas, com três
-motoristas, e os dois passageiros pedem o itinerário inteiro:
-
-```
-car-1 (joao)     Salvador → Feira de Santana    3 assentos
-car-4 (ana)      Feira de Santana → Jequié      1 assento   ← disputado
-car-2 (carlos)   Jequié → Vitória da Conquista  2 assentos
+```bash
+docker run --rm -it -e VAIJUNTO_SERVIDOR=$IP_A:9000 vaijunto-cliente /bin/passageiro
+docker run --rm -it -e VAIJUNTO_SERVIDOR=$IP_C:9000 vaijunto-cliente /bin/motorista
 ```
 
-Só um leva o assento da `car-4`. O outro é recusado sem ficar com o assento da
-`car-1`, que tinha vaga, e é isso que o D4 mostra: a atomicidade do item 7.
+Na própria máquina da empresa, use o IP dela: o cliente também passa pela porta
+publicada. Os clientes precisam de `-it`, porque leem do terminal; sem isso o
+processo morre ao ler EOF do stdin.
 
-**Sobre o D3 e o D5.** Não importa quem vence: o vencedor cancela no próprio
-terminal e continua logado. No D6 os papéis são fixos, com a lucia caindo e o
-pedro reservando, sem conflito de horário, porque se o pedro venceu ele já
-cancelou. O resultado do D3 também não depende de os dois Enter saírem no mesmo
-milissegundo: o servidor serializa as confirmações, e quem chega depois encontra
-o assento ocupado.
+**Cada passageiro só se conecta ao servidor da própria empresa**, e é por isso
+que a tabela amarra usuário a máquina. `maria` não existe na `rotacapixaba`, e
+`clara` não existe na `vaijunto`: os nomes são únicos dentro da empresa (seção
+12.1), e `vaijunto:teste01` e `rotacapixaba:teste01` são pessoas diferentes.
 
-No terminal do servidor, a ordem entre as duas linhas de `RESERVAR` não prova
-quem entrou primeiro na seção crítica: a linha é escrita depois que o lock é
-liberado, e duas goroutines podem escrever em ordem trocada. O que prova a
-serialização é o resultado, com exatamente um `OK`.
-
-**Sobre o D6.** O cliente não trata sinais: o Ctrl+C mata o processo sem
-`LOGOUT`, o sistema operacional fecha o socket, e o servidor vê o mesmo que numa
-queda abrupta. Como a busca não bloqueia nada, não havia assento preso.
-
-**Estado ao longo da demonstração** (assentos livres por trecho, para responder
-perguntas):
-
-| Depois de | car-1 | car-2 | car-4 |
-|---|---|---|---|
-| início | [3, 3] | [2] | [1] |
-| D3 (disputa pelo #4) | [2, 3] | [1] | [0] |
-| D5 (vencedor cancela) | [3, 3] | [2] | [1] |
-| D6 (pedro reserva o #4) | [2, 3] | [1] | [0] |
-| D7 (cascata) | cancelada | [2] | [1] |
-
-Ao terminar, **salve o registro** (seção 0.2) antes de reiniciar o servidor.
+**Por que estes usuários.** Cada demonstração precisa de um passageiro **sem
+reserva ativa que se sobreponha** ao itinerário pedido, senão a resposta é
+`CONFLITO_HORARIO` e não o que se quer mostrar. maria, pedro e lucia começam
+sem reservas; `lucia` fica reservada à D-4 por isso.
 
 ---
 
-# Parte 3: experimento guiado
+# Parte 2: demonstrações
 
-Mede latência e vazão com e sem rede, para as curvas do relatório
-(`PROJETO.md`, §8.3). É o item 10 do Barema. Não faz parte dos 16 minutos.
+A ordem importa: a D-2 depende do assento que a D-1 consome, e a D-6 cancela o
+que a D-1 e a D-2 criaram.
+
+## D-1 — Busca e reserva entre três empresas
+
+**Onde:** PA (máquina A), `maria`.
+**Ação:** `1) Buscar itinerários`, Salvador → Petrópolis, `2026-11-05`, e
+reservar o único itinerário oferecido.
+
+**Esperado no cliente:** um itinerário, com uma perna em cada empresa e a
+empresa dona visível em cada linha, por **R$ 430,00**, de 05/11 05:00 a 06/11
+14:30. Depois, `Reserva vaijunto:res-… confirmada.`
+
+**Esperado no terminal de A** — é aqui que o 2PC fica visível:
+
+```
+[vaijunto] → rotacapixaba POST /transacoes/vaijunto:res-3c590165/preparar L=105 → 200 (5.697 ms)
+[vaijunto] → rotafluminense POST /transacoes/vaijunto:res-3c590165/preparar L=105 → 200 (7.870 ms)
+[vaijunto] DECISAO tx="vaijunto:res-3c590165" carimbo=(105,vaijunto) → CONFIRMAR
+[172.18.0.1:47596] maria    RESERVAR               id="2" → OK (11.065 ms)
+[vaijunto] → rotacapixaba POST /transacoes/vaijunto:res-3c590165/confirmar L=108 → 200 (2.453 ms)
+[vaijunto] → rotafluminense POST /transacoes/vaijunto:res-3c590165/confirmar L=110 → 200 (2.642 ms)
+[vaijunto] DECISAO tx="vaijunto:res-3c590165" → CONCLUIDA
+```
+
+**Esperado nos terminais de B e de C**, a mesma transação vista de dono:
+
+```
+[rotafluminense] ← vaijunto POST /transacoes/vaijunto:res-3c590165/preparar L=106 tx=vaijunto:res-3c590165 carimbo=(105,vaijunto) voto=SIM → 200 (7.267 ms)
+[rotafluminense] ← vaijunto POST /transacoes/vaijunto:res-3c590165/confirmar L=111 tx=vaijunto:res-3c590165 CONFIRMAR situacao=CONFIRMADO → 200 (2.028 ms)
+```
+
+**O que apontar.** Três coisas, na tela:
+
+1. **Os dois `preparar` saem em paralelo** e os dois votos voltam SIM. É na
+   fase 1, sob o mutex de cada dono, que o assento é descontado — não na fase 2.
+2. **`DECISAO … → CONFIRMAR` é o ponto de commit.** Antes dele nada está
+   decidido: uma queda de A leva ao abort presumido. Depois, à retomada da
+   fase 2.
+3. **`RESERVAR → OK` sai antes dos `confirmar`.** A decisão já está no log com
+   `fsync`, e os assentos em `PREPARADO` já contam como ocupados; maria não
+   precisa esperar a fase 2 terminar.
+
+## D-2 — Último assento disputado entre empresas diferentes
+
+Depois da D-1, resta **um** assento no primeiro trecho de
+`rotafluminense:car-1`.
+
+**Onde:** PA2 (`pedro`, máquina A) e PB (`clara`, máquina B).
+**Ação:** pedro busca **Salvador → Rio de Janeiro** em `2026-11-05`; clara busca
+**Vitória → Rio de Janeiro** em `2026-11-05`. Os dois param em "Reservar
+qual?". Na contagem "3, 2, 1", cada um dá Enter na sua máquina.
+
+Os dois itinerários passam pelo mesmo trecho: `rotafluminense:car-1` de Cachoeiro
+ao Rio, que tem um assento. O de pedro usa também `vaijunto:car-1` e
+`rotacapixaba:car-1`; o de clara, só `rotacapixaba:car-1` — que tem vaga.
+
+**Esperado:** exatamente um confirma. O outro recebe
+
+```
+Assento esgotado no trecho 0 da carona rotafluminense:car-1.
+```
+
+**O que apontar — é a atomicidade (item 5 do barema).** O perdedor **não** ficou
+com o assento da `rotacapixaba`, que estava livre. Na máquina B:
+
+```bash
+curl -s http://localhost:8080/auditoria
+```
+
+A participação da transação perdedora está `ABORTADO` e `rotacapixaba:car-1` tem
+`em_espera: [0,0]`:
+
+```
+rotacapixaba:car-1 livres [1,1] confirmados [2,2] em_espera [0,0]
+participações: rotacapixaba:res-542c6365 ABORTADO, vaijunto:res-… CONFIRMADO, …
+```
+
+Ou todos os trechos, ou nenhum — e o "nenhum" é verificável, não uma afirmação.
+
+**Nota para a arguição.** A ordem das duas linhas de `RESERVAR` no terminal não
+prova quem chegou primeiro: a linha é escrita depois que o lock foi liberado. O
+que prova a serialização é o resultado — exatamente um `OK`.
+
+## D-3 — Disputa cruzada
+
+Duas caronas de **um assento cada**, em empresas diferentes, pedidas na ordem
+inversa por dois passageiros ao mesmo tempo. É o cenário clássico de deadlock
+distribuído (item 7 do barema).
+
+**Onde:** PB2 (`paulo`, máquina B) e PC (`tiago`, máquina C).
+**Ação:** os dois buscam **Vitória → Nilópolis** em `2026-11-06` e param em
+"Reservar qual?". Na contagem, Enter ao mesmo tempo.
+
+O itinerário combina `rotacapixaba:car-2` (beatriz, Vitória → Cachoeiro, 1
+assento) e `rotafluminense:car-2` (fernanda, Cachoeiro → Nilópolis, 1 assento).
+paulo é coordenado por B e tiago por C, então os dois `PREPARAR` cruzam.
+
+**Esperado:** exatamente um confirma; o outro recebe
+
+```
+O assento foi disputado por outra reserva; nenhum assento foi reservado. Tente de novo.
+```
+
+(`DISPUTA_PERDIDA`, depois das três tentativas da D36). **Não importa qual
+vence** — quem vence é a transação de **carimbo mais velho**, e o carimbo é
+atribuído na chegada.
+
+**O que apontar nos terminais.** Os carimbos, que são a resposta ao item 6, e
+as três decisões de abortar, que são a resposta ao item 7:
+
+```
+[rotafluminense] ← rotacapixaba POST …/res-542c6365/preparar  carimbo=(6,rotacapixaba)  voto=AGUARDE → 200
+[rotafluminense] ← rotacapixaba POST …/res-542c6365/preparar  carimbo=(6,rotacapixaba)  voto=NAO motivo=SEM_ASSENTO → 200
+[rotafluminense] ← rotacapixaba POST …/res-f59eb636/preparar  carimbo=(20,rotacapixaba) voto=SIM → 200
+[rotafluminense] DECISAO tx="rotafluminense:res-f7c35691" carimbo=(22,rotafluminense) → ABORTAR
+[rotafluminense] DECISAO tx="rotafluminense:res-4a6accba" carimbo=(22,rotafluminense) → ABORTAR
+[rotafluminense] DECISAO tx="rotafluminense:res-248fb240" carimbo=(22,rotafluminense) → ABORTAR
+```
+
+`(20,rotacapixaba)` é mais velho que `(22,rotafluminense)`: a mais velha
+**espera** (`AGUARDE`) e a mais nova **morre** (`PRECEDENCIA`) — é o wait-die, e
+é o que garante que não há espera circular, logo não há deadlock. As três linhas
+`ABORTAR` com o mesmo carimbo são as três tentativas da mesma reserva (D36): o
+carimbo é o **mesmo** nas três, e é isso que faz uma transação que desistiu
+envelhecer em vez de competir de novo em pé de igualdade.
+
+**Honestidade sobre o que o terminal mostra.** `AGUARDE` e `PRECEDENCIA`
+aparecem no registro REST só quando o voto perdedor vem de um dono **remoto**.
+Se o trecho esgotado for de uma carona da própria empresa do perdedor, o voto é
+decidido localmente, sem rede, e não gera linha REST — as três linhas `ABORTAR`
+e os carimbos continuam lá. A prova determinística da disputa cruzada é o teste
+TR3, com a rede em memória forçando a ordem de chegada; ao vivo, a ordem não é
+garantida.
+
+## D-4 — Queda de uma empresa
+
+**Onde:** o tutor derruba a máquina B, ou:
+
+```bash
+docker kill rotacapixaba
+```
+
+Três coisas, nesta ordem, em PA3 (`lucia`, máquina A):
+
+**(a) A busca volta parcial.** Salvador → Petrópolis em `2026-11-05`:
+
+```
+Aviso: busca incompleta — sem resposta de: rotacapixaba.
+```
+
+E nenhum itinerário, porque o único que existia tinha perna capixaba. A busca
+**não** falha: ela entrega o que ouviu e diz quem não respondeu (D26, D30).
+
+**(b) Reserva com perna capixaba é recusada, sem deixar nada preso:**
+
+```
+Uma das empresas do itinerário não respondeu; nenhum assento foi reservado.
+```
+
+(`EMPRESA_INDISPONIVEL`, depois do prazo de votação de 5 s.) No terminal de A,
+duas linhas `→ rotacapixaba … → sem resposta`.
+
+**(c) Reserva sem perna capixaba funciona normalmente.** lucia reserva
+**Feira de Santana → Jequié** em `2026-11-05` (`vaijunto:car-2`, de carlos):
+`Reserva vaijunto:res-… confirmada.` A queda de uma empresa não para o
+consórcio; para só os passageiros dela (seção 9.7).
+
+**(d) A empresa volta, e o estado volta com ela.** Religar é repetir o mesmo
+comando da 1.1:
+
+```
+servidor: log /estado/rotacapixaba.wal aberto, 16 registros reaplicados, relógio de Lamport em 33
+servidor: recuperação: 0 reserva(s) com a fase 2 a retomar, 0 participação(ões) em PREPARADO com o prazo de dúvida armado, 0 aviso(s) no outbox a entregar
+```
+
+`16 registros reaplicados` é o replay (D37, seção 9.2), e `relógio de Lamport em
+33` é o relógio restaurado no maior valor do log, para nunca andar para trás. A
+auditoria de B mostra as reservas da D-1 e da D-2 ainda `CONFIRMADO`. Repita a
+busca do item (a): o itinerário voltou, e `"parcial":false`.
+
+## D-5 — Queda no meio de uma reserva
+
+O caso em que o 2PC bloqueia de verdade (seção 9.6): a decisão de confirmar está
+no log do coordenador, e nenhum `CONFIRMAR` saiu.
+
+**(a) Armar o ponto de falha na máquina A.** Pare o servidor de A e suba-o de
+novo com a variável, acrescentando ao comando da 1.1:
+
+```bash
+docker run --rm --name vaijunto -p 9000:9000 -p 8080:8080 -e TZ=America/Bahia \
+  -e FALHAR_EM=coord-apos-decidir \
+  -v "$(pwd)/dados/vaijunto:/dados:ro" -v "$(pwd)/estado:/estado" \
+  --user "$(id -u):$(id -g)" vaijunto-servidor \
+  --empresa vaijunto \
+  --pares rotacapixaba=http://$IP_B:8080,rotafluminense=http://$IP_C:8080 \
+  --dados /dados --log /estado/vaijunto.wal --auditoria
+```
+
+O servidor avisa na subida que vai morrer de propósito:
+
+```
+servidor: ATENÇÃO: FALHAR_EM=coord-apos-decidir armado (D31); o servidor vai morrer de propósito neste ponto
+```
+
+**(b) Uma reserva derruba o coordenador.** Em PA, com `teste01` / `teste`
+(maria já tem reserva no período), reserve Salvador → Cachoeiro de Itapemirim em
+`2026-11-05`. O cliente **não recebe resposta**: o processo morreu entre gravar
+a decisão e enviar o primeiro `CONFIRMAR`.
+
+```
+servidor: FALHAR_EM=coord-apos-decidir (D31): encerrando neste ponto do protocolo
+```
+
+**(c) O assento ficou em espera na outra empresa.** Na máquina B:
+
+```bash
+curl -s http://localhost:8080/auditoria
+```
+
+```
+rotacapixaba:car-1 assentos 3 livres [0,0] confirmados [2,2] em_espera [1,1]
+em PREPARADO: vaijunto:res-c4db8ba5
+```
+
+É o bloqueio residual, ao vivo: B votou SIM, descontou o assento, e **não pode
+decidir sozinha** — ninguém sabe se A gravou a decisão antes de cair, e qualquer
+escolha unilateral poderia contradizê-la.
+
+**(d) A empresa volta e retoma a fase 2.** Repita o comando da 1.1, **sem**
+`FALHAR_EM`:
+
+```
+servidor: log /estado/vaijunto.wal aberto, 16 registros reaplicados, relógio de Lamport em 41
+servidor: recuperação: 1 reserva(s) com a fase 2 a retomar, 1 participação(ões) em PREPARADO com o prazo de dúvida armado, 0 aviso(s) no outbox a entregar
+[vaijunto] → rotacapixaba POST /transacoes/vaijunto:res-c4db8ba5/confirmar L=41 → 200 (2.874 ms)
+[vaijunto] DECISAO tx="vaijunto:res-c4db8ba5" → CONCLUIDA
+```
+
+**(e) Nenhum assento ficou preso.** A auditoria de B, de novo:
+
+```
+rotacapixaba:car-1 assentos 3 livres [0,0] confirmados [3,3] em_espera [0,0]
+em PREPARADO: []
+```
+
+O assento saiu de `em_espera` e entrou em `confirmados`: a decisão chegou. É
+exatamente o que o enunciado pede — nenhum assento bloqueado **após a queda e a
+recuperação**.
+
+**O que apontar.** O passageiro perdeu a resposta de uma operação que **deu
+certo**, e isso é inerente a sistemas distribuídos (seção 9.5, TF2). O resultado
+é observável depois: `2) Minhas reservas` em PA mostra a reserva de `teste01`.
+
+**Cuidado.** Religar **sem** `FALHAR_EM`. Com a variável ainda armada, o próximo
+`RESERVAR` mataria o servidor outra vez — é a limitação da fase 6B registrada na
+seção 14: a variável é do contêiner, não da execução.
+
+## D-6 — Cancelamento em cascata entre empresas
+
+**Onde:** MC (`marcos`, máquina C).
+**Ação:** `4) Cancelar carona`, escolher `rotafluminense:car-1`, confirmar com
+`s`.
+
+**Esperado no cliente:**
+
+```
+Carona rotafluminense:car-1 cancelada. 2 reservas de passageiro canceladas em cascata.
+```
+
+São duas porque a D-1 (maria) e a D-2 (pedro) usavam essa carona — as duas
+coordenadas pela `vaijunto`.
+
+**Esperado no terminal de A** — o aviso inverso e o leque do outbox:
+
+```
+[vaijunto] ← rotafluminense POST /avisos/carona-cancelada L=44 tx=vaijunto:res-074be78c AVISO_CARONA_CANCELADA situacao_reserva=CANCELADA → 200 (8.536 ms)
+[vaijunto] → rotafluminense POST /transacoes/vaijunto:res-074be78c/cancelar L=45 → 200 (3.545 ms)
+[vaijunto] → rotacapixaba   POST /transacoes/vaijunto:res-074be78c/cancelar L=45 → 200 (6.000 ms)
+```
+
+**O que apontar.**
+
+1. **A direção se inverte.** `/avisos/carona-cancelada` é o único recurso em que
+   um participante chama o coordenador, e é por isso que ele fica fora de
+   `/transacoes/{tx}` (seção 4.8 da API).
+2. **O itinerário é cancelado por inteiro.** Em PA, `2) Minhas reservas` de
+   maria e de pedro vem vazio.
+3. **Os assentos voltam nas caronas de joao e de rafael**, que nada tinham a ver
+   com o cancelamento. A auditoria das três:
+
+```
+vaijunto:car-1       livres [2,2] confirmados [1,1] em_espera [0,0] cancelada false
+rotacapixaba:car-1   livres [2,2] confirmados [1,1] em_espera [0,0] cancelada false
+rotafluminense:car-1 livres [2,2] confirmados [0,0] em_espera [0,0] cancelada true
+outbox das três: []
+```
+
+4. **O cancelamento não pode ser recusado por ninguém**, então ele não é 2PC:
+   basta **entrega confiável** da decisão. Se A estivesse fora do ar, o aviso
+   ficaria no outbox de C e seria entregue na volta — e até lá os assentos de
+   joao e de rafael continuariam ocupados. A propagação é conservadora: o
+   assento volta **depois**, nunca antes, e por isso nunca causa venda dupla
+   (seção 10.3).
+
+## D-7 — Abort presumido com `curl`
+
+Mostra a terminação cooperativa **sem derrubar nenhum servidor**, e deixa claro
+que entre os servidores só há HTTP e JSON. É a seção 7 do `API_CONSORCIO.md`.
+
+**(a) Um `PREPARAR` à mão, da máquina C, fingindo ser a `vaijunto`:**
+
+```bash
+curl -s -i -X POST http://$IP_B:8080/transacoes/vaijunto:res-0000abcd/preparar \
+  -H 'Content-Type: application/json' \
+  -H 'X-VaiJunto-Empresa: vaijunto' \
+  -H 'X-VaiJunto-Lamport: 100' \
+  -d '{
+    "coordenador": "vaijunto",
+    "participantes": ["vaijunto", "rotacapixaba"],
+    "carimbo": {"lamport": 100, "empresa": "vaijunto"},
+    "passageiro": {"ref": "vaijunto:maria", "nome": "Maria Souza"},
+    "itens": [{"carona_id": "rotacapixaba:car-1", "de": 0, "ate": 2}]
+  }'
+```
+
+```
+HTTP/1.1 200 OK
+X-Vaijunto-Empresa: rotacapixaba
+X-Vaijunto-Lamport: 101
+
+{"voto":"SIM","pernas":[{"carona_id":"rotacapixaba:car-1","empresa":"rotacapixaba","motorista_nome":"Rafael Mendonça Pires","de":0,"ate":2,"cidades":["Vitória da Conquista","Vitória","Cachoeiro de Itapemirim"],"partida":"2026-11-05T14:00:00-03:00","chegada":"2026-11-06T06:30:00-03:00","preco_centavos":21500}]}
+```
+
+O `X-Vaijunto-Lamport: 101` é a regra de recebimento: `max(L, 100) + 1`. O Go
+canoniza os nomes de cabeçalho, daí a grafia `X-Vaijunto`.
+
+**(b) O assento ficou em espera.** `curl -s http://$IP_B:8080/auditoria` mostra
+`em_espera: [1,1]` e a participação em `PREPARADO`. Mas a transação
+`vaijunto:res-0000abcd` **nunca existiu** na `vaijunto`.
+
+**(c) A própria B resolve, sozinha, em 10 s.** Passado o prazo de dúvida, ela
+pergunta ao coordenador e a resposta é o abort presumido:
+
+```
+[rotacapixaba] → vaijunto POST /transacoes/vaijunto:res-0000abcd/consultar L=101 → 200 (3.541 ms)
+[rotacapixaba] DECISAO tx="vaijunto:res-0000abcd" carimbo=(100,vaijunto) → TERMINACAO → ABORTADO por coordenador
+```
+
+E a auditoria volta a `livres [3,3] em_espera [0,0]`, com a participação
+`ABORTADO`. **O assento voltou sozinho.**
+
+**(d) A mesma pergunta, à mão**, para mostrar o que B perguntou:
+
+```bash
+curl -s -X POST http://$IP_A:8080/transacoes/vaijunto:res-0000abcd/consultar \
+  -H 'Content-Type: application/json' \
+  -H 'X-VaiJunto-Empresa: rotacapixaba' \
+  -H 'X-VaiJunto-Lamport: 102' -d '{}'
+```
+
+```json
+{"papel":"COORDENADOR","decisao":"ABORTADA"}
+```
+
+A `vaijunto` não encontra a transação nem na memória nem no log, e responde
+`ABORTADA` **sem gravar nada** (D23). Não gravar o abort é o que torna o
+protocolo econômico: o caso comum — a transação que ninguém mais procura — não
+custa um `fsync`.
+
+## Estado dos assentos ao longo da demonstração
+
+Assentos livres por trecho, para responder perguntas sem abrir a auditoria:
+
+| Depois de | vj:car-1 | vj:car-2 | rc:car-1 | rc:car-2 | rf:car-1 | rf:car-2 |
+|---|---|---|---|---|---|---|
+| início | [3,3] | [2] | [3,3] | [1,1] | [2,2] | [1,1] |
+| D-1 (maria) | [2,2] | [2] | [2,2] | [1,1] | [1,1] | [1,1] |
+| D-2 (um vence) | [1,1] | [2] | [1,1] | [1,1] | [0,1] | [1,1] |
+| D-3 (um vence) | [1,1] | [2] | [1,1] | [0,1] | [0,1] | [0,1] |
+| D-4c (lucia) | [1,1] | [1] | [1,1] | [0,1] | [0,1] | [0,1] |
+| D-5 (teste01) | [0,0] | [1] | [0,0] | [0,1] | [0,1] | [0,1] |
+| D-6 (cascata) | [2,2] | [1] | [2,2] | [0,1] | cancelada | [0,1] |
+
+Em toda linha e para toda carona vale `livres + confirmados + em espera ==
+assentos` — é a I-P2-1, e é o que `GET /auditoria` permite conferir linha a
+linha.
+
+## Mapa para o barema
+
+| Item | Onde aparece |
+|---|---|
+| 1 Arquitetura | Parte 1 inteira: duas portas, três WALs, nenhum componente central |
+| 2 Comunicação (API REST) | D-1 (recursos e códigos), D-7 (HTTP cru), D-4b (requisição sem resposta) |
+| 3 Busca Distribuída | 1.3 e D-4a |
+| 4 Exclusão Mútua | D-2 e D-3: um `OK` por assento, decidido sob o mutex do dono na fase 1 |
+| 5 Atomicidade Distribuída | D-1 e D-2c: o perdedor não fica com a perna que tinha vaga |
+| 6 Precedência | D-3: os carimbos `(lamport, empresa)` no terminal |
+| 7 Deadlock Distribuído | D-3: wait-die, `AGUARDE` × `PRECEDENCIA`, três tentativas |
+| 8 Tolerância a Falhas | D-4 (antes), D-5 (durante), D-6 (depois) |
+| 9 Recuperação e Persistência | D-4d e D-5d: replay, relógio restaurado, fase 2 retomada |
+| 10 Testes | Parte 3, mais a seção 11 do `PROJETO_P2.md` |
+| 11 Emulação | Partes 0, 1 e 4 |
+
+**Salve os registros antes de parar os servidores.** Com `--rm`, o `Ctrl+C` leva
+o `docker logs` junto. Em outro terminal de cada máquina:
+
+```bash
+docker logs vaijunto > registro-vaijunto.txt 2>&1
+```
+
+---
+
+# Parte 3: medição com os servidores em máquinas distintas
+
+A seção 11.6 do `PROJETO_P2.md` pede três configurações. As duas primeiras —
+reserva só local e reserva federada, as duas numa máquina — já estão medidas e
+no documento. A terceira é esta, e só o laboratório a produz: **a mesma rodada
+com os servidores em máquinas distintas**.
 
 ## 3.1 Regras da medição
 
-- **Reinicie o servidor antes de cada rodada, com o registro desligado.** A
-  latência cresce com o histórico de reservas.
-- **Uma carga por vez, sem clientes manuais abertos**, para não distorcer os
-  números nem gerar recusas.
-- **Mesma duração nas duas rodadas** (5 s por ponto, por padrão). Só rodadas com
-  a mesma duração e servidor novo são comparáveis.
-- **Sem `-race`.** O detector multiplica o custo de cada acesso à memória, e o
-  número medido seria o dele. O binário `/bin/carga` da imagem já é compilado
-  sem ele.
+- **Registro de operações desligado.** Cada linha é uma escrita síncrona no
+  terminal, que entra na latência e disputa com o mutex do estado (D19).
+- **`estado/` limpo antes de cada cenário.** O log cresce indefinidamente, e com
+  ele crescem o replay do boot e a verificação de sobreposição. Só rodadas com o
+  mesmo ponto de partida são comparáveis.
+- **Mesma duração** das rodadas já medidas: 5 s por ponto.
+- **Sem `-race`**, nem no simulador nem nos servidores. O `/bin/simulador` da
+  imagem já é compilado sem ele.
+- **Nenhum cliente manual aberto**, e uma carga por vez.
 
-## 3.2 Servidor desta parte
+## 3.2 Subir as três para medir
 
-Na máquina A, `Ctrl+C` no servidor e:
+Nas três máquinas, pare o servidor e repita o comando da 1.1 com uma mudança
+só: acrescente `--log-operacoes=false`. O `--auditoria` **continua**, porque a
+verificação de invariantes da 3.4 depende dele; ele é somente leitura e não é
+consultado durante a carga, então não entra na medição.
 
 ```bash
-docker run --rm --name vaijunto-servidor -p 9000:9000 -e TZ=America/Bahia \
-  -v "$(pwd)/dados:/dados" vaijunto-servidor \
-  --usuarios /dados/usuarios.json --caronas /dados/caronas.json \
-  --log-operacoes=false
+rm -f estado/*.wal          # nas três máquinas, antes de cada cenário
+docker run --rm --name vaijunto -p 9000:9000 -p 8080:8080 -e TZ=America/Bahia \
+  -v "$(pwd)/dados/vaijunto:/dados:ro" -v "$(pwd)/estado:/estado" \
+  --user "$(id -u):$(id -g)" vaijunto-servidor \
+  --empresa vaijunto \
+  --pares rotacapixaba=http://$IP_B:8080,rotafluminense=http://$IP_C:8080 \
+  --dados /dados --log /estado/vaijunto.wal --auditoria --log-operacoes=false
 ```
 
-Esperado: `servidor: escutando em [::]:9000 (registro de operações: false)`.
+Esperado: `(pares: 2, registro de operações: false)`. **Durante a carga, os três
+terminais devem ficar parados.**
 
-É o comando da seção 0.2 com `--log-operacoes=false` (D19). Com o registro
-ligado, cada requisição vira uma escrita síncrona no terminal; com centenas de
-milhares de requisições, isso entra na latência medida e disputa com o mutex do
-estado. **Durante a carga, o terminal do servidor deve ficar parado.**
+## 3.3 Rodar o simulador
 
-## 3.3 Rodada com rede (máquina B)
-
-Reinicie o servidor com o comando de 3.2 e rode:
+De uma máquina só — A serve —, apontando para as três pelos IPs:
 
 ```bash
 mkdir -p resultados
-docker run --rm --user "$(id -u):$(id -g)" \
-  -e VAIJUNTO_CARGA=1 -e VAIJUNTO_CARGA_ENDERECO=$IP_A:9000 \
-  -e VAIJUNTO_CARGA_ROTULO=rede \
-  -v "$(pwd)/resultados:/carga/resultados" -w /carga/testes \
-  vaijunto-cliente /bin/carga -test.run '^TestCarga$' -test.v
+docker run --rm --user "$(id -u):$(id -g)" -e TZ=America/Bahia \
+  -v "$(pwd)/resultados:/resultados" vaijunto-cliente /bin/simulador \
+  --empresas=vaijunto=$IP_A:9000,rotacapixaba=$IP_B:9000,rotafluminense=$IP_C:9000 \
+  --saida=/resultados --rotulo=tres-maquinas \
+  --cenario=federado --curva=1,10,50,100 --duracao=5s
 ```
 
-## 3.4 Rodada sem rede (máquina A)
+O número de passageiros é o **total no consórcio**, repartido entre as três (100
+vira 34, 33 e 33): é o que mantém o eixo das curvas igual ao do P1 e ao das duas
+rodadas já medidas. A linha de operação `total` do CSV é a diretamente
+comparável.
 
-Reinicie o servidor com o comando de 3.2 e, em outro terminal da **máquina A**,
-rode o mesmo comando de 3.3 com `IP_A` apontando para o IP da própria máquina A e
-`VAIJUNTO_CARGA_ROTULO=mesma-maquina`.
+Repita com `--cenario=local --rotulo=tres-maquinas-local`, apagando `estado/`
+antes, para ter o par de curvas da mesma máquina física. A diferença entre as
+duas é o custo da coordenação distribuída — rede mais `fsync`.
 
-As duas curvas passam pelo mesmo caminho de contêiner, e só a rede muda.
+Saem dois CSVs em `resultados/`: `simulador-tres-maquinas-<instante>.csv`, com
+p50, p95 e p99 por operação e a vazão, e `…-codigos.csv`, com a contagem por
+código de resposta.
 
-**Esperado nas duas rodadas:** `PASS`, `recusas` igual a 0 nos quatro pontos
-(N = 1, 10, 50 e 100 clientes), um CSV em `resultados/` e nenhuma linha nova no
-terminal do servidor.
+## 3.4 Verificar as invariantes depois da carga
 
-O `--user` evita que o CSV saia com dono `root`; o `-w` e o `-v` fazem o
-`../resultados` do binário cair na pasta `resultados/` da máquina.
+O simulador fala **só TCP**: ele é um cliente, e conferir as invariantes é
+trabalho de quem observa as três de fora. Daí serem dois comandos. De uma
+máquina com Go:
+
+```bash
+VAIJUNTO_AUDITORIA=vaijunto=http://$IP_A:8080,rotacapixaba=http://$IP_B:8080,rotafluminense=http://$IP_C:8080 \
+  go test -run TestInvariantesDoAmbiente ./testes -v
+```
+
+Ele espera a quiescência (até 90 s) e confere I-P2-1 a I-P2-5 nas três empresas.
 
 ## 3.5 Coleta para o relatório
 
 **Recolha:**
 
-- os dois CSVs de `resultados/`, um da máquina A e outro da máquina B;
-- o registro do servidor salvo na Parte 2 (`registro-demonstracao.txt`);
-- fotos ou capturas dos passos D3, D4 e D7.
+- os CSVs de `resultados/`, das duas rodadas desta parte;
+- os registros dos três servidores salvos na Parte 2;
+- fotos ou capturas de D-2c, D-5c, D-5e e D-6.
 
 **Anote:**
 
@@ -295,7 +756,7 @@ O `--user` evita que o CSV saia com dono `root`; o `-w` e o `-v` fazem o
 |---|---|
 | Data e hora | |
 | Commit (`git log -1 --oneline`) | |
-| IPs de A e B | |
+| IPs de A, B e C | |
 | Sistema e processador de cada máquina | |
 | Rede: cabo ou Wi-Fi, e switch | |
 
@@ -303,26 +764,122 @@ O `--user` evita que o CSV saia com dono `root`; o `-w` e o `-v` fazem o
 
 | Passo | Esperado | Observado |
 |---|---|---|
-| 0.3 | B conecta ao servidor em A pelo `PING` | |
-| D2 | Carona publicada, fora da busca de 01/10 | |
-| D3 | 4 itinerários na ordem da §9.2; 1 confirmação e 1 `SEM_ASSENTO`, nos clientes e no registro | |
-| D4 | `car-1` com o vencedor só no primeiro trecho; nada reservado pela metade | |
-| D5 e D6 | Cancelar devolve o assento; cliente morto não prende nada | |
-| D7 | Cascata cancela 1 reserva e devolve o assento da `car-4` | |
-| 3.3 e 3.4 | 2 rodadas, 0 recusas, servidor com `registro de operações: false` | |
+| 1.3 | `/saude` responde nas três; busca com `"parcial":false` | |
+| D-1 | 1 itinerário, R$ 430,00, `DECISAO → CONFIRMAR` no terminal | |
+| D-2 | 1 `OK` e 1 `SEM_ASSENTO`; perdedor com a perna capixaba em `ABORTADO` | |
+| D-3 | 1 `OK` e 1 `DISPUTA_PERDIDA`; carimbos visíveis; sem travar | |
+| D-4 | Busca parcial, `EMPRESA_INDISPONIVEL`, reserva local normal, replay na volta | |
+| D-5 | `em_espera` 1 durante a queda, 0 depois da volta; fase 2 retomada | |
+| D-6 | 2 reservas canceladas; assentos devolvidos nas outras duas empresas; outbox vazio | |
+| D-7 | `decisao: ABORTADA` e assento devolvido sozinho | |
+| 3.3 | 2 rodadas, 4 pontos cada, CSVs em `resultados/` | |
+| 3.4 | `TestInvariantesDoAmbiente` PASS | |
 
-## 3.6 Opcional: cabo desconectado
+---
 
-Mostra os prazos da D17, mas leva 3 minutos. Com `maria` logada num cliente da
-máquina B, desconecte o cabo (ou o Wi-Fi) e escolha `Minhas reservas`.
+# Parte 4: quando o tutor derrubar uma empresa
 
-- **Em B:** em até 30 s, a sessão termina com erro de rede, por exemplo
-  `o servidor não respondeu em 30s`.
-- **Em A:** depois de 2 a 3 minutos, o *keep-alive* TCP detecta o cliente sumido.
-  A linha sai no formato do `log` padrão (D18), sem milissegundos, por exemplo
-  `servidor: conexão … encerrada: read tcp …: connection timed out`. Se o
-  endereço dos clientes aparecer como gateway do Docker, a linha pode sair como
-  `conexão encerrada` comum.
+O enunciado manda demonstrar o sistema **sob a falha de um servidor**, então
+isso vai acontecer. Não é incidente: é a D-4 fora de hora.
+
+## 4.1 Primeiro, identifique qual caiu
+
+```bash
+curl -s --max-time 2 http://$IP_A:8080/saude; echo
+curl -s --max-time 2 http://$IP_B:8080/saude; echo
+curl -s --max-time 2 http://$IP_C:8080/saude; echo
+```
+
+Quem não responde é quem caiu. Os servidores de pé registram a tentativa de
+falar com ela:
+
+```
+[vaijunto] → rotacapixaba POST /transacoes/… → sem resposta (2000.431 ms)
+```
+
+A detecção é por **timeout** (D30), e só por timeout: não há *heartbeat* nem
+monitor. Cada operação tem o seu caminho seguro, e é por isso que a queda nunca
+é erro fatal.
+
+## 4.2 O que dizer, com a empresa ainda fora
+
+A tabela da seção 9.7, que é a resposta ao item 8 do barema:
+
+| Operação | Comportamento |
+|---|---|
+| Busca em outra empresa | Resultado parcial, sem as caronas dela, avisando a indisponibilidade |
+| Reserva sem perna dela | Normal |
+| Reserva com perna dela | `EMPRESA_INDISPONIVEL` após o prazo de votação; **nenhum assento fica preso** |
+| Passageiros e motoristas dela | Sem serviço: eles só se conectam a ela |
+| Cancelamento que precisa avisá-la | Fica no outbox e é entregue quando ela volta |
+| Assento de outra empresa em `PREPARADO` por transação que ela coordenava | Bloqueio residual (seção 9.6), até ela voltar |
+
+E mostre, não só diga: faça a busca parcial e a reserva local nas duas que
+sobraram, como na D-4.
+
+## 4.3 Religar
+
+Repita **o mesmo comando** da seção 1.1 na máquina derrubada — sem nenhuma flag
+nova, sem `FALHAR_EM`, e sem apagar `estado/`. O boot é a recuperação
+(seção 9.1): o servidor não tem rotina de desligamento, `docker stop` e
+`docker kill` têm o mesmo efeito do ponto de vista do protocolo, e todo boot
+passa pelo mesmo caminho.
+
+Aponte as três linhas do boot:
+
+```
+servidor: log /estado/rotacapixaba.wal aberto, 16 registros reaplicados, relógio de Lamport em 33
+servidor: empresa rotacapixaba atendendo clientes em [::]:9000 e pares em [::]:8080 (pares: 2, registro de operações: true)
+servidor: recuperação: 0 reserva(s) com a fase 2 a retomar, 0 participação(ões) em PREPARADO com o prazo de dúvida armado, 0 aviso(s) no outbox a entregar
+```
+
+- **`N registros reaplicados`**: o estado veio do log, aplicado sem revalidar
+  (D37). A semente é recarregada primeiro, e o log vai por cima.
+- **`relógio de Lamport em L`**: restaurado no maior valor do log, para nunca
+  andar para trás — sem isso, duas transações distintas apareceriam como
+  simultâneas na ordem da seção 8.1.
+- **`recuperação: …`**: as três tarefas da seção 9.3. Números diferentes de zero
+  são a recuperação trabalhando, não um problema.
+
+## 4.4 Provar que nada ficou preso
+
+É a afirmação que o enunciado cobra. Nas três máquinas:
+
+```bash
+curl -s http://localhost:8080/auditoria
+```
+
+Procure, em cada uma:
+
+- **`em_espera` zerado** em toda carona — nenhuma participação ficou em
+  `PREPARADO` (I-P2-3);
+- **`outbox: []`** — todo aviso de cancelamento foi entregue (I-P2-3);
+- **`livres + confirmados + em_espera == assentos`** em toda linha (I-P2-1).
+
+Se houver Go numa das máquinas, o verificador faz as cinco invariantes de uma
+vez, com o comando da 3.4.
+
+Depois, mostre que a empresa voltou a **servir**, e não apenas a responder:
+repita a busca Salvador → Petrópolis, que precisa voltar com `"parcial":false`,
+e faça uma reserva federada nova. Uma empresa que religasse e recusasse tudo
+passaria em todas as invariantes — é o mesmo argumento do passo 5 do TS1
+(seção 11.5).
+
+## 4.5 Se ele derrubar no meio de uma reserva
+
+É a D-5 sem aviso. O passageiro fica sem resposta, e o assento fica em
+`em_espera` nas outras empresas. Diga as três coisas, nesta ordem:
+
+1. **Se a queda foi antes do ponto de commit**, nada foi decidido: o abort
+   presumido devolve os assentos, e quem não recebeu o `abortar` descobre
+   perguntando (D-7).
+2. **Se foi depois**, a decisão está no log: na volta, a fase 2 é retomada e
+   todos confirmam. O passageiro perdeu a resposta de uma operação que deu
+   certo, e a encontra em `Minhas reservas`.
+3. **Enquanto ela está fora**, os assentos daquela transação ficam presos nas
+   outras empresas, e isso é o limite conhecido do 2PC (seção 9.6) — assumido,
+   delimitado a uma transação, e resolvido na volta. Evitá-lo exigiria replicar
+   o coordenador, como no Paxos Commit (seção 15).
 
 ---
 
@@ -330,18 +887,21 @@ máquina B, desconecte o cabo (ou o Wi-Fi) e escolha `Minhas reservas`.
 
 | Sintoma | Causa provável | O que fazer |
 |---|---|---|
-| O cliente não conecta | IP errado, servidor parado ou firewall | Em A, `docker ps` precisa mostrar `0.0.0.0:9000->9000/tcp`. Teste `ping $IP_A`. Libere a porta 9000/tcp no firewall |
-| Porta 9000 ocupada na máquina A | Outro processo usando a porta | `ss -ltn \| grep 9000`. Suba com `-p 9100:9000` e use `$IP_A:9100` nos clientes |
-| O cliente fecha logo ao abrir | Faltou `-it` | Rode com `docker run --rm -it …` |
-| Busca com menos de 4 itinerários | O servidor não estava limpo | Reinicie o servidor, reabra os clientes e recomece do D1 |
-| Cancelamento recusado por prazo | Já passou de 01/10/2026 05:00 (reserva) ou 06:00 (carona) | Pule o D5 e o D7 e registre o motivo |
-| Ctrl+C não encerra o cliente | O contêiner não repassa o sinal | `docker kill cliente-pb` em outro terminal da máquina B. Para o servidor é a mesma coisa: o socket fecha igual |
-| A rede do laboratório falha | — | Rode todos os clientes na máquina A. A disputa do D3 perde o efeito de duas máquinas, mas continua válida |
-| Endereço no registro aparece como `172.17.0.1` | O Docker encaminha a porta por um proxy, e o servidor enxerga o gateway | Não afeta o teste. Identifique o cliente pelo usuário da linha |
-| `escutando em` sem `(registro de operações: …)` | Imagem do servidor anterior ao registro | Monte a imagem do servidor de novo |
-| Horários 3 h deslocados nos clientes ou em `servidor_em` | Imagem antiga | Monte as imagens de novo |
-| Só as linhas sem milissegundos 3 h à frente | Servidor subiu sem `-e TZ=America/Bahia` | Não afeta o sistema. Para alinhar, reinicie com o comando da 0.2 |
-| `permission denied` ao gravar o CSV | Faltou `mkdir -p resultados` ou o `--user` | Crie a pasta e rode de novo com `--user "$(id -u):$(id -g)"` |
-| Carga com recusas | Servidor não reiniciado, cliente manual aberto ou duas cargas ao mesmo tempo | Reinicie o servidor e rode uma carga por vez |
-| Terminal do servidor rolando durante a carga | Servidor subiu sem `--log-operacoes=false` | Reinicie com o comando da 3.2 e refaça a rodada |
+| Busca sempre `"parcial":true` | Porta **8080** fechada no firewall, ou `--pares` com IP errado | Teste `curl http://$IP_B:8080/saude` da outra máquina. Confira `pares: 2` na linha de boot |
+| Toda reserva federada dá `EMPRESA_INDISPONIVEL` | O mesmo de cima | Idem. O sintoma é o mesmo de uma empresa fora do ar, de propósito (D30) |
+| `pares: 0` no boot | `--pares` vazio ou malformado | Formato é `empresa=url,empresa=url`, com `http://` e a porta |
+| `--empresa é obrigatória` | Faltou a flag | Sem default de propósito: uma empresa que sobe com o nome de outra geraria IDs com prefixo errado (D27) |
+| O cliente não conecta | IP errado, servidor parado ou porta 9000 fechada | `docker ps` precisa mostrar `0.0.0.0:9000->9000/tcp` e `0.0.0.0:8080->8080/tcp` |
+| O cliente fecha logo ao abrir | Faltou `-it` | `docker run --rm -it …` |
+| Porta 9000 ou 8080 ocupada | Outro processo na máquina | Suba com `-p 9100:9000` e use `$IP_A:9100` nos clientes; para a 8080, mude também o `--pares` **das outras duas** |
+| `permission denied` ao abrir o log | `.wal` com dono `root`, de uma execução sem `--user` | `sudo rm -f estado/*.wal` e suba com `--user "$(id -u):$(id -g)"` |
+| `RESERVA_EM_ANDAMENTO` | O passageiro já tem um `RESERVAR` em curso (D35) | Espere o prazo de votação (5 s) e repita |
+| `CONFLITO_HORARIO` | O passageiro já tem reserva que se sobrepõe ao período | Use outro usuário da tabela 1.4; é o motivo de `lucia` ficar reservada à D-4 |
+| `CARONA_EM_TRANSACAO` na D-6 | Alguma participação em `PREPARADO` usa a carona (D39) | Espere alguns segundos e repita: é a disputa de outra demonstração terminando |
+| Cancelamento recusado por prazo | Passou de 06/11/2026 08:00 (carona) ou 04/11 04:00 (reserva) | Seção 0.5. Pule a D-6 e registre o motivo |
+| O servidor morre sozinho ao reservar | `FALHAR_EM` ainda armado de um ensaio da D-5 | Religue **sem** a variável; ela é do contêiner, não da execução |
+| Busca sem o itinerário de R$ 430,00 | `estado/` com caronas de um ensaio anterior, ou carona cancelada na D-6 | `rm -f estado/*.wal` nas três e suba de novo: a semente é recarregada (D37) |
+| Horários 3 h deslocados | Servidor sem `-e TZ=America/Bahia` | Não afeta o domínio — o fuso das cidades é propriedade dele —, só as linhas de boot. Reinicie com a variável |
+| Nada aparece no terminal durante a carga | Correto: a Parte 3 roda com `--log-operacoes=false` | Se aparecer, reinicie com a flag e refaça a rodada |
+| A rede do laboratório falha de vez | — | Rode as três empresas numa máquina com `docker compose up -d` e siga o mesmo roteiro pelas portas 9001–9003 e 8081–8083. As disputas perdem o efeito de três máquinas, mas continuam válidas |
 | Registro perdido | O servidor foi reiniciado antes do `docker logs` | Refaça a parte, ou use as capturas de tela |
