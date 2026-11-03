@@ -523,6 +523,8 @@ type VotanteLocal struct {
 	p *transacao.Participante
 }
 
+// NovoVotanteLocal liga o participante desta empresa ao coordenador dela
+// (D21; seção 7.1, passo 5).
 func NovoVotanteLocal(p *transacao.Participante) *VotanteLocal {
 	return &VotanteLocal{p: p}
 }
@@ -542,6 +544,11 @@ func (v *VotanteLocal) Preparar(pedido dominio.PedidoPreparacao) (transacao.Resp
 	return voto, nil
 }
 
+// Confirmar, Abortar e Cancelar não traduzem nada: os três devolvem o
+// sentinela do domínio como vieram, porque quem os consome é o coordenador
+// desta mesma empresa, que já fala esse vocabulário. A tradução da borda
+// (seção 5.5) só é necessária no Preparar, cujo resultado precisa virar um
+// voto da seção 4.3 da API.
 func (v *VotanteLocal) Confirmar(txID string) (dominio.Situacao, error) {
 	return v.p.Confirmar(txID)
 }

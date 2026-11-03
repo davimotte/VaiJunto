@@ -77,6 +77,11 @@ const (
 	prazoConsultaPadrao = 3 * time.Second
 )
 
+// NovoTerminador liga o lado em dúvida do 2PC ao estado da empresa (D38).
+//
+// Prazo em zero recebe o padrão da D41 declarado acima, cuja relação com os
+// prazos do coordenador é o que faz consulta nenhuma acontecer num sistema
+// saudável.
 func NovoTerminador(cfg ConfigTerminador) *Terminador {
 	t := &Terminador{
 		empresa:       cfg.Empresa,
