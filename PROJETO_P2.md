@@ -633,9 +633,15 @@ O registro de operações da D19 ganha linhas para as operações entre servidor
 emitidas pela camada 1–4':
 
 ```
-2026/11/05 08:15:02.431 [rotacapixaba] ← vaijunto PREPARAR tx=vaijunto:res-3f0b11c4 L=(41,vaijunto) → SIM (1.8 ms)
-2026/11/05 08:15:02.437 [vaijunto] DECISAO tx=vaijunto:res-3f0b11c4 → CONFIRMAR
+2026/11/05 08:15:02.431 [rotacapixaba] ← vaijunto POST /transacoes/vaijunto:res-3f0b11c4/preparar L=106 tx=vaijunto:res-3f0b11c4 carimbo=(41,vaijunto) voto=SIM → 200 (1.800 ms)
+2026/11/05 08:15:02.437 [vaijunto] DECISAO tx="vaijunto:res-3f0b11c4" carimbo=(41,vaijunto) → CONFIRMAR
 ```
+
+A seta diz o sentido: `←` é requisição recebida de um par, `→` é chamada que
+este servidor fez. `L` é o relógio desta empresa depois do `max+1` do
+recebimento, o mesmo valor que foi para o cabeçalho da resposta, de modo que as
+linhas das duas pontas possam ser comparadas lado a lado. O `carimbo` é o da
+transação, e é por ele que se vê, numa disputa, qual delas era a mais velha.
 
 Na demonstração, é por essas linhas que o protocolo fica visível.
 
@@ -1533,6 +1539,13 @@ Esta é a especificação; o procedimento (máquinas, usuários e ordem) fica no
 A D-3 mostra o resultado, mas a ordem de chegada cruzada não é garantida ao
 vivo. A prova determinística da camada 2 é o teste TR3.
 
+O `ROTEIRO.md` acrescenta uma sétima, que não é propriedade do sistema e sim
+forma de exibi-lo: o abort presumido reproduzido com `curl` (seção 7 do
+`API_CONSORCIO.md`). Um `PREPARAR` à mão com um `txID` que nunca existiu deixa
+um assento em espera; passado o prazo de dúvida, o dono consulta, recebe
+`ABORTADA` e devolve o assento sozinho. É a terminação cooperativa sem derrubar
+nenhum servidor, e mostra que entre as empresas só há HTTP e JSON.
+
 ### 12.4 Fixture da regressão do P1
 
 As oito caronas e os usuários do P1 passam a ser um fixture de teste em
@@ -1579,10 +1592,19 @@ docker run --rm --name vaijunto -p 9000:9000 -p 8080:8080 -e TZ=America/Bahia \
   -v "$(pwd)/estado:/estado" --user "$(id -u):$(id -g)" \
   vaijunto-servidor --empresa vaijunto \
   --pares rotacapixaba=http://<IP2>:8080,rotafluminense=http://<IP3>:8080 \
-  --dados /dados --log /estado/vaijunto.wal
+  --dados /dados --log /estado/vaijunto.wal --auditoria
 ```
 
 As outras duas máquinas usam o mesmo comando, trocando a empresa e os IPs.
+
+- **`--auditoria` entra na demonstração**, embora o padrão da flag seja
+  desligada. Duas coisas dependem dela no laboratório: a D-5, que prova pelos
+  contadores que nenhum assento ficou em espera depois da recuperação, e o
+  `TestInvariantesDoAmbiente` (seção 11.2), que confere I-P2-1 a I-P2-5 contra
+  as três máquinas. Ela é somente leitura, não participa de decisão nenhuma e
+  não é consultada durante a carga da seção 11.6. Em produção ficaria
+  desligada, porque expõe também as participações, que nenhum par tem o direito
+  de ver (D32).
 
 - **O log fica num diretório da máquina** (`estado/`), e não dentro do
   contêiner. Por isso o `--rm` é seguro: o contêiner é descartável, o estado
@@ -1651,7 +1673,7 @@ sessão. Os critérios de pronto são os que a fase precisa demonstrar, com
 | 9 | Clientes e protocolo | `PROTOCOL.md` v2 (seção 5.6) e clientes adaptados; fluxo completo pelo CLI | ✅ |
 | 10 | Simulador | Seção 11.4 contra as três empresas | ✅ |
 | 11 | Teste de sistema | TS1 (seção 11.5) passa com `docker kill` e com `FALHAR_EM` | ✅ |
-| 12 | Documentação final | `README.md`, `ROTEIRO.md` e versão final do `API_CONSORCIO.md` | ⏳ |
+| 12 | Documentação final | `README.md`, `ROTEIRO.md` e versão final do `API_CONSORCIO.md` | ✅ |
 
 Notas de sequência:
 
@@ -1753,6 +1775,39 @@ dentro do **primeiro** `RESERVAR` que ela coordena, e esperar a auditoria dela
 acusar transação — o que torna "no meio da carga" verdade na rodada do
 `docker kill` — é esperar uma empresa que já morreu. A morte é a própria prova
 de que a carga chegou: nenhum outro caminho do servidor passa por aquele ponto.
+
+**Limitações da fase 12:** uma, de coleta. A terceira configuração da seção
+11.6 — a mesma curva com os servidores em máquinas distintas — continua sem CSV,
+porque depende do laboratório; o procedimento está na Parte 3 do `ROTEIRO.md`.
+Fora disso, `docs/apresentacao.html` continua sendo o deck do **P1**, com os
+títulos do barema anterior; os documentos novos não o referenciam, e refazê-lo é
+trabalho de uma fase própria.
+
+A fase conferiu o `API_CONSORCIO.md` recurso por recurso contra a implementação,
+e dela saíram três correções, duas no documento e uma no código:
+
+| Achado | Onde estava | O que mudou |
+|---|---|---|
+| A exceção do 409 da seção 1.3 da API valia só em `preparar` e `abortar` | `confirmarTodos` e o outbox repetiam para sempre, inclusive diante de um 409 | O código passou a parar, como o documento sempre disse. No outbox, o aviso é marcado como entregue antes de parar, senão a I-P2-3 nunca convergiria |
+| `SEM_ASSENTO` de carona remota saía como "no trecho  → ." | O voto NÃO não traz a rota (D32), e a borda TCP concatenava duas cidades vazias | A mensagem passa a citar a carona e o índice quando as cidades não vieram (`PROTOCOL.md`, seção 5.9) |
+| Dois exemplos do documento divergiam da implementação | Mensagem do `PAPEL_INVALIDO` na seção 2 e o `instante` do `/saude` sem fração de segundo | Corrigidos no `API_CONSORCIO.md`; o exemplo do registro de operações da seção 5.2 deste documento também foi trazido ao formato real |
+
+Conferir a seção "Comandos" do `CLAUDE.md` rendeu um quarto achado, este nos
+testes: o `go test -race -count=20 ./testes` falhava uma vez em dez no
+`TestSimuladorRecusaCenarioSujo`, e já falhava antes desta fase. A causa não
+era o guarda do cenário sujo (seção 11.4, decisão 3), que estava certo, e sim a
+pré-condição do teste: com **um** assento por carona sintética, a carga da
+primeira rodada às vezes o deixava confirmado; a busca poda perna sem assento
+livre, e a busca de prova da segunda rodada contava um itinerário em vez de
+dois, aceitando um cenário que era sujo de verdade. Com três assentos para dois
+passageiros a ocupação simultânea nunca passa de dois (decisão 1 da mesma
+seção), sempre sobra assento livre, e o teste passa a afirmar o que diz
+afirmar.
+
+Os três achados da API são pequenos, e isso é o resultado mais útil da
+conferência: o contrato estava fiel. Os dois primeiros só apareciam em caminhos que o argumento
+de atomicidade (seção 7.4) diz que nunca deveriam acontecer — e o segundo,
+justamente na tela que a demonstração D-2 mostra.
 
 O relatório SBC é escrito fora deste roteiro.
 
