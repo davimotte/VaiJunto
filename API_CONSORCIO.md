@@ -134,7 +134,7 @@ recusa legítima com uma falha e repetir à toa.
 Toda resposta de erro tem o mesmo formato do `PROTOCOL.md`:
 
 ```json
-{"codigo":"PAPEL_INVALIDO","mensagem":"Só o coordenador da transação pode prepará-la."}
+{"codigo":"PAPEL_INVALIDO","mensagem":"Só o coordenador da transação pode decidi-la."}
 ```
 
 O `409` merece uma nota. Pelo argumento de atomicidade do `PROJETO_P2.md`
@@ -245,7 +245,7 @@ sistema e no laboratório.
 **Resposta `200`:**
 
 ```json
-{"empresa":"rotacapixaba","versao_api":1,"instante":"2026-11-05T08:15:02-03:00"}
+{"empresa":"rotacapixaba","versao_api":1,"instante":"2026-11-05T08:15:02.431322-03:00"}
 ```
 
 `versao_api` é a versão deste documento. Uma divergência entre pares aparece no
@@ -327,8 +327,12 @@ Fase 1 do 2PC (`PROJETO_P2.md`, seção 7.2).
 | `AGUARDE` | Wait-die: a transação é mais velha que todos os portadores dos trechos esgotados (`PROJETO_P2.md`, seção 8.2) | Nada |
 
 `carona_id` e `trecho` acompanham `SEM_ASSENTO`, `PRECEDENCIA` e `AGUARDE`,
-indicando o primeiro trecho esgotado. Servem ao diagnóstico e ao registro de
-operações.
+indicando o primeiro trecho esgotado. Servem ao diagnóstico, ao registro de
+operações e à mensagem que o coordenador devolve ao passageiro: como o voto NÃO
+não traz a rota da carona recusada — nada obriga um dono a revelá-la (D32) —, é
+por eles que a recusa é identificada, e é por isso que a mensagem de
+`SEM_ASSENTO` nomeia as cidades só quando a carona é do próprio servidor que
+responde ao cliente (`PROTOCOL.md`, seção 5.9).
 
 | Status | Código | Quando |
 |---|---|---|
@@ -776,7 +780,7 @@ curl -s http://10.0.0.2:8080/saude
 ```
 
 ```json
-{"empresa":"rotacapixaba","versao_api":1,"instante":"2026-11-05T08:15:02-03:00"}
+{"empresa":"rotacapixaba","versao_api":1,"instante":"2026-11-05T08:15:02.431322-03:00"}
 ```
 
 **Um `preparar` feito à mão, fingindo ser a `vaijunto`:**
