@@ -92,7 +92,19 @@ func configDaCarga(t *testing.T, consorcio map[string]*empresa, cenario string) 
 		Duracao:                   200 * time.Millisecond,
 		ProbabilidadeCancelamento: 0.5,
 		FracaoBuscaVazia:          0.2,
-		Assentos:                  1,
+		// Três assentos, e não um, para dois passageiros: pela decisão 1 da
+		// seção 11.4 cada passageiro carrega no máximo uma reserva, então a
+		// ocupação simultânea nunca passa de dois e **sobra sempre** um assento
+		// livre em cada carona sintética.
+		//
+		// Isso é pré-condição do TestSimuladorRecusaCenarioSujo, não gosto: com
+		// um assento só, a carga da primeira rodada às vezes o deixava
+		// confirmado, a busca poda perna sem assento livre
+		// (dominio/caronas.go, passo 4 da seção 6), e a busca de prova da
+		// segunda rodada contava **um** itinerário em vez de dois — aceitando
+		// um cenário que era sujo de verdade. O teste falhava uma vez em dez,
+		// por motivo que nada tinha a ver com o que ele afirma.
+		Assentos: 3,
 		// Dia base fixo: o teste em processo começa com o log vazio, então não
 		// há rodada anterior de quem fugir, e um dia fixo mantém o cenário
 		// igual entre execuções.
