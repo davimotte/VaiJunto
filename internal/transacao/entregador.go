@@ -61,6 +61,11 @@ type ConfigEntregador struct {
 
 const prazoEntregaPadrao = 2 * time.Second
 
+// NovoEntregador liga o outbox da D39 ao estado da empresa.
+//
+// Nasce sem rede quando o cliente HTTP ainda não existe no ponto do boot em
+// que ele é construído; UsarRede a injeta depois, no mesmo padrão de
+// dominio.Estado.UsarLog. PrazoEntrega em zero recebe o padrão da D41.
 func NovoEntregador(cfg ConfigEntregador) *Entregador {
 	en := &Entregador{
 		empresa:      cfg.Empresa,
@@ -119,8 +124,9 @@ func (en *Entregador) Enfileirar(avisos []dominio.Aviso) {
 }
 
 // entregar repete o envio de um aviso a cada PrazoEntrega até confirmar, sem
-// limite (D41) — mesmo padrão de abortarTodos: o único motivo para parar é o
-// servidor terminar (ver Parar).
+// limite (D41) — mesmo padrão de confirmarTodos. Só duas coisas a encerram: o
+// servidor terminar (ver Parar) e um 409, que a seção 1.3 da API trata como
+// exceção em qualquer recurso.
 func (en *Entregador) entregar(a dominio.Aviso) {
 	// D31: ponto aviso-apos-registrar (TF8). O AVISO_REGISTRADO já está no
 	// log com fsync e nenhum HTTP saiu ainda — é o estado que a retomada do
@@ -143,6 +149,22 @@ func (en *Entregador) entregar(a dominio.Aviso) {
 		}
 		cancelar()
 		if err == nil {
+			_ = en.estado.AvisoEntregue(a.ID)
+			return
+		}
+
+		// 409 encerra a repetição (seção 1.3 da API). Pela seção 7.4 um
+		// CANCELAR recusado nunca deveria acontecer: cancelar não pode ser
+		// negado por ninguém (seção 10.3), e um participante que responde
+		// VIOLACAO_PROTOCOLO já está num estado que nenhuma retransmissão
+		// conserta.
+		//
+		// O aviso é marcado como entregue antes de parar, e isso é deliberado:
+		// um aviso que fica no outbox para sempre deixa a I-P2-3 — "outbox
+		// vazio após a quiescência" — impossível de satisfazer, e a falha
+		// apareceria como um sistema que nunca aquieta, em vez da violação de
+		// protocolo que ela é. A violação já está registrada nas duas pontas.
+		if ehViolacao(err) {
 			_ = en.estado.AvisoEntregue(a.ID)
 			return
 		}

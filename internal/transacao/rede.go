@@ -26,7 +26,6 @@ import (
 // Os prazos da D41 são de quem chama, e entram pelo ctx. `destino` é o
 // identificador da empresa, nunca uma URL: quem resolve empresa → endereço é a
 // implementação, com a lista estática da D20.
-//
 type Rede interface {
 	// Preparar é a fase 1 do 2PC (seção 4.3 da API). O txID vai dentro do
 	// pedido; é a implementação HTTP que o põe no caminho da URL.

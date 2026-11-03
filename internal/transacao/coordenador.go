@@ -104,6 +104,11 @@ const (
 	tentativasPadrao   = 3
 )
 
+// NovoCoordenador liga o coordenador do 2PC às peças do boot (D21).
+//
+// Prazo ou contagem em zero recebe o padrão da D41 e da D36 declarado acima,
+// de modo que um Coordenador montado num teste sem configurar nada se comporte
+// como o de produção.
 func NovoCoordenador(cfg ConfigCoordenador) *Coordenador {
 	c := &Coordenador{
 		empresa:      cfg.Empresa,
@@ -467,8 +472,9 @@ func (c *Coordenador) Recuperar() int {
 // gravar CONCLUIDA.
 //
 // A repetição é "sem limite" (D41) porque a decisão já está gravada e **tem**
-// de chegar: é o passo 4 do argumento de atomicidade da seção 7.4. O único
-// motivo para parar é o servidor terminar (ver Parar).
+// de chegar: é o passo 4 do argumento de atomicidade da seção 7.4. Só duas
+// coisas a encerram: o servidor terminar (ver Parar) e um 409, que a seção 1.3
+// da API trata como exceção em qualquer recurso.
 func (c *Coordenador) confirmarTodos(txID string, participantes []string) {
 	falta := make(map[string]bool, len(participantes))
 	for _, empresa := range participantes {
@@ -488,7 +494,8 @@ func (c *Coordenador) confirmarTodos(txID string, participantes []string) {
 				_, err = c.rede.Confirmar(ctx, empresa, txID)
 			}
 			cancelar()
-			if err == nil {
+			switch {
+			case err == nil:
 				delete(falta, empresa)
 				// D31: ponto coord-durante-confirmar (TF3). Está depois de
 				// **cada** confirmação recebida e por isso dispara na primeira:
@@ -498,6 +505,24 @@ func (c *Coordenador) confirmarTodos(txID string, participantes []string) {
 				// quiescência. A retomada reenvia a todos, e quem já confirmou
 				// responde de novo, idempotente (D28, regra 6).
 				c.falha.Em(PontoCoordDuranteConfirmar)
+
+			case ehViolacao(err):
+				// 409 encerra a repetição (seção 1.3 da API), aqui como em
+				// abortarTodos e no passo 5. Pela seção 7.4 ele nunca deveria
+				// acontecer — um CONFIRMAR recusado significa que decidimos
+				// confirmar sem unanimidade —, e justamente por isso insistir
+				// seria o pior caminho: repetir de 2 em 2 s, para sempre, um
+				// pedido que o outro lado já provou incoerente, enquanto o
+				// registro dele enche de linhas de violação. Quem recebeu já
+				// gravou a violação (middleware da federação) e a nossa linha
+				// "→ 409" está no registro desta ponta; o que falta é parar.
+				//
+				// O participante sai de falta como se tivesse confirmado, para
+				// que a transação seja concluída e a goroutine termine: a
+				// divergência já existe e não é esta repetição que a conserta.
+				// Ela aparece para o teste na I-P2-2, que é onde tem de
+				// aparecer.
+				delete(falta, empresa)
 			}
 		}
 		if len(falta) == 0 {
