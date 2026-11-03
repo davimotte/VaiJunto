@@ -1,8 +1,8 @@
 # Protocolo de aplicação VAIJUNTO — v2
 
-Especificação do protocolo de aplicação entre clientes e servidor central.
-Este documento é o contrato: um cliente escrito em qualquer linguagem que o
-respeite interopera com o servidor.
+Especificação do protocolo de aplicação entre um cliente e o servidor da sua
+própria empresa. Este documento é o contrato: um cliente escrito em qualquer
+linguagem que o respeite interopera com o servidor.
 
 ## Índice
 
@@ -547,6 +547,19 @@ Erro por indisponibilidade, com detalhe suficiente para o CLI explicar:
  "mensagem":"Assento esgotado no trecho Salvador → Feira de Santana.",
  "dados":{"carona_id":"vaijunto:car-1","indice_trecho":0}}
 ```
+
+A mensagem nomeia as cidades quando a carona é **do servidor que responde**.
+Quando o trecho esgotado é de outra empresa, o voto NÃO traz dela só a carona e
+o índice (seção 4.3 do `API_CONSORCIO.md`), e a frase passa a citá-los:
+
+```json
+{"id":"7","status":"ERRO","codigo":"SEM_ASSENTO",
+ "mensagem":"Assento esgotado no trecho 0 da carona rotafluminense:car-1.",
+ "dados":{"carona_id":"rotafluminense:car-1","indice_trecho":0}}
+```
+
+O campo `dados` é o mesmo nos dois casos, e é por ele — e não pela mensagem —
+que o cliente localiza a perna no itinerário que acabou de exibir.
 
 Erro por sobreposição:
 

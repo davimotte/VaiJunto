@@ -3,6 +3,7 @@ package servidor
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"vaijunto/internal/dominio"
 	"vaijunto/internal/protocolo"
@@ -137,7 +138,7 @@ func comDetalhe(id string, err error) *protocolo.Resposta {
 	var semAssento *dominio.ErroSemAssento
 	if errors.As(err, &semAssento) {
 		resp := respostaErroDe(id, dominio.ErrSemAssento,
-			"Assento esgotado no trecho "+semAssento.Origem+" → "+semAssento.Destino+".",
+			mensagemSemAssento(semAssento),
 			protocolo.SemAssentoDados{
 				CaronaID:     semAssento.CaronaID,
 				IndiceTrecho: semAssento.IndiceTrecho,
@@ -162,6 +163,27 @@ func comDetalhe(id string, err error) *protocolo.Resposta {
 	}
 
 	return nil
+}
+
+// mensagemSemAssento nomeia o trecho que esgotou da forma mais precisa que os
+// dados em mãos permitem (PROTOCOL.md, seção 5.9).
+//
+// As cidades vêm preenchidas quando a carona é **desta** empresa: aí o erro
+// nasce no domínio, que tem a rota (dominio/transacoes.go, decidirDisputa). Num
+// itinerário federado o voto NÃO vem de outro dono, e a seção 4.3 da API traz
+// dele só `carona_id` e `trecho` — por privacidade (D32), nada obriga um
+// participante a devolver a rota de uma carona que ele recusou. O coordenador
+// monta o erro com as cidades vazias (transacao/coordenador.go, recusa.erro), e
+// concatenar mesmo assim produzia a frase "no trecho  → .".
+//
+// Então o trecho é identificado pelo que existe nos dois casos: a carona e o
+// índice, que são exatamente os campos que o `dados` da resposta leva e que o
+// cliente usa para achar a perna na busca que ele mesmo acabou de exibir.
+func mensagemSemAssento(e *dominio.ErroSemAssento) string {
+	if e.Origem == "" || e.Destino == "" {
+		return fmt.Sprintf("Assento esgotado no trecho %d da carona %s.", e.IndiceTrecho, e.CaronaID)
+	}
+	return "Assento esgotado no trecho " + e.Origem + " → " + e.Destino + "."
 }
 
 // respostaErroDe monta uma resposta de erro cujo código vem da tabela, com

@@ -115,3 +115,58 @@ func TestTodaOperacaoDaTabelaTemHandler(t *testing.T) {
 		}
 	}
 }
+
+// TestMensagemSemAssentoNomeiaOTrechoDasDuasFormas cobre os dois caminhos pelos
+// quais um SEM_ASSENTO chega a esta borda (PROTOCOL.md, seção 5.9).
+//
+// Com a carona desta empresa, o erro nasce no domínio, que tem a rota, e a
+// mensagem nomeia as cidades. Num itinerário federado o voto NÃO vem de outro
+// dono, e a seção 4.3 da API traz dele só carona_id e trecho (D32): a mensagem
+// passa a citar a carona e o índice. O que não pode acontecer, e era o que
+// acontecia, é concatenar duas cidades vazias e produzir "no trecho  → .".
+func TestMensagemSemAssentoNomeiaOTrechoDasDuasFormas(t *testing.T) {
+	casos := []struct {
+		nome string
+		err  *dominio.ErroSemAssento
+		want string
+	}{
+		{
+			"carona desta empresa, com a rota em mãos",
+			&dominio.ErroSemAssento{
+				CaronaID: "vaijunto:car-1", IndiceTrecho: 0,
+				Origem: "Salvador", Destino: "Feira de Santana",
+			},
+			"Assento esgotado no trecho Salvador → Feira de Santana.",
+		},
+		{
+			"voto NÃO de outra empresa, sem as cidades",
+			&dominio.ErroSemAssento{CaronaID: "rotafluminense:car-1", IndiceTrecho: 0},
+			"Assento esgotado no trecho 0 da carona rotafluminense:car-1.",
+		},
+	}
+
+	for _, caso := range casos {
+		t.Run(caso.nome, func(t *testing.T) {
+			resp := comDetalhe("7", caso.err)
+			if resp == nil {
+				t.Fatalf("comDetalhe devolveu nil para %T", caso.err)
+			}
+			if resp.Codigo != protocolo.CodigoSemAssento {
+				t.Errorf("codigo = %q, want %s", resp.Codigo, protocolo.CodigoSemAssento)
+			}
+			if resp.Mensagem != caso.want {
+				t.Errorf("mensagem = %q, want %q", resp.Mensagem, caso.want)
+			}
+
+			// O `dados` é o mesmo nos dois casos, e é por ele que o cliente
+			// acha a perna na busca que acabou de exibir.
+			var dados protocolo.SemAssentoDados
+			if err := json.Unmarshal(resp.Dados, &dados); err != nil {
+				t.Fatalf("decodificar dados %s: %v", resp.Dados, err)
+			}
+			if dados.CaronaID != caso.err.CaronaID || dados.IndiceTrecho != caso.err.IndiceTrecho {
+				t.Errorf("dados = %+v, want %s trecho %d", dados, caso.err.CaronaID, caso.err.IndiceTrecho)
+			}
+		})
+	}
+}
