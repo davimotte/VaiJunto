@@ -24,10 +24,27 @@ precisam entrar na apresentação principal.
 
 ## Checklist de terminais — deixe tudo isto aberto antes de começar
 
-Nove janelas, três por máquina. Abra na ordem da tabela: primeiro os três
-servidores (as outras janelas dependem deles estarem no ar). Depois disso,
-abra também as janelas de leitura (linha final da tabela) para consulta
-durante a arguição.
+Catorze janelas: seis na máquina A, quatro em cada uma das máquinas B e C.
+Abra na ordem da tabela: primeiro os três servidores (as outras janelas
+dependem deles estarem no ar). Depois disso, abra também as janelas de
+leitura (linha final da tabela) para consulta durante a arguição.
+
+Cada máquina ganha uma janela extra de **apoio** (A6, B4, C4): um shell livre,
+sem cliente nem servidor rodando nela, usado só para os comandos que provam
+alguma coisa que não aparece na interface do passageiro/motorista — `curl`
+direto na API entre empresas, `docker kill`/`docker ps`, `grep` no código e
+os `go test`/`go build`. Cada passo do roteiro abaixo diz explicitamente em
+qual janela (nome de A1–C4) rodar o comando; **é sempre uma janela de apoio
+para comandos novos, nunca a janela de um cliente TCP** (que só aceita as
+opções do próprio menu) **nem a do servidor** (que já está ocupada rodando o
+processo em primeiro plano).
+
+A janela de apoio A (A6) é também a **máquina de testes**: é nela que ficam
+o repositório clonado com Go instalado e a pasta `resultados/`, usados nos
+`grep`, `go build`/`go vet`/`go test` e no simulador de carga. Se o
+repositório e o Go estiverem só numa máquina diferente da A, troque as
+instruções abaixo que dizem "em A6" por "na máquina de testes", mantendo o
+comando igual.
 
 Os comandos de subida fazem duas coisas em sequência: (1) zeram o conteúdo de
 `estado/` e ajustam o dono dos arquivos para o usuário atual, usando um
@@ -46,6 +63,7 @@ contém `dados/` e `estado/`.
 | A3 | PA — passageiro | `docker run --rm -it -e VAIJUNTO_SERVIDOR=$IP_A:9000 vaijunto-cliente /bin/passageiro` → login `maria` / `abcd` | D-1 |
 | A4 | PA2 — passageiro | mesmo comando de A3 → login `pedro` / `abcd` | D-2 |
 | A5 | PA3 — passageiro | mesmo comando de A3 → login `lucia` / `abcd` | D-4 |
+| A6 | apoio A (shell livre, repo + Go) | sem comando fixo — fica livre para os comandos indicados em cada passo | Parte 1, D-1, D-4, Parte 3, Extras |
 
 Login extra, só quando chegar na D-4b: `teste01` / `teste` na própria janela
 A3 ou A4 (depois de maria/pedro já terem reservado).
@@ -57,6 +75,7 @@ A3 ou A4 (depois de maria/pedro já terem reservado).
 | B1 | servidor | ```bash\ndocker run --rm -v "$(pwd)/estado:/estado" alpine sh -c "rm -rf /estado/* && chown -R $(id -u):$(id -g) /estado" && \\\ndocker run --rm --name rotacapixaba -p 9000:9000 -p 8080:8080 -e TZ=America/Bahia \\\n  -v "$(pwd)/dados/rotacapixaba:/dados:ro" -v "$(pwd)/estado:/estado" \\\n  --user "$(id -u):$(id -g)" vaijunto-servidor \\\n  --empresa rotacapixaba \\\n  --pares vaijunto=http://$IP_A:8080,rotafluminense=http://$IP_C:8080 \\\n  --dados /dados --log /estado/rotacapixaba.wal --auditoria\n``` | todas |
 | B2 | PB — passageiro | `docker run --rm -it -e VAIJUNTO_SERVIDOR=$IP_B:9000 vaijunto-cliente /bin/passageiro` → login `clara` / `abcd` | D-2 |
 | B3 | PB2 — passageiro | mesmo comando de B2 → login `paulo` / `abcd` | D-3 |
+| B4 | apoio B (shell livre) | sem comando fixo — fica livre para os comandos indicados em cada passo | Parte 1, D-2, D-4 |
 
 ### Máquina C — `rotafluminense`
 
@@ -65,6 +84,7 @@ A3 ou A4 (depois de maria/pedro já terem reservado).
 | C1 | servidor | ```bash\ndocker run --rm -v "$(pwd)/estado:/estado" alpine sh -c "rm -rf /estado/* && chown -R $(id -u):$(id -g) /estado" && \\\ndocker run --rm --name rotafluminense -p 9000:9000 -p 8080:8080 -e TZ=America/Bahia \\\n  -v "$(pwd)/dados/rotafluminense:/dados:ro" -v "$(pwd)/estado:/estado" \\\n  --user "$(id -u):$(id -g)" vaijunto-servidor \\\n  --empresa rotafluminense \\\n  --pares vaijunto=http://$IP_A:8080,rotacapixaba=http://$IP_B:8080 \\\n  --dados /dados --log /estado/rotafluminense.wal --auditoria\n``` | todas |
 | C2 | PC — passageiro | `docker run --rm -it -e VAIJUNTO_SERVIDOR=$IP_C:9000 vaijunto-cliente /bin/passageiro` → login `tiago` / `abcd` | D-3 |
 | C3 | MC — motorista | `docker run --rm -it -e VAIJUNTO_SERVIDOR=$IP_C:9000 vaijunto-cliente /bin/motorista` → login `marcos` / `1234` | D-5 |
+| C4 | apoio C (shell livre) | sem comando fixo — fica livre para os comandos indicados em cada passo | Parte 1 |
 
 Todos os logins usam senha de teste da semente; nenhum é secreto.
 
@@ -78,8 +98,10 @@ Todos os logins usam senha de teste da semente; nenhum é secreto.
 
 ### Confirme antes de liberar o tutor
 
+Em A6 (apoio A):
+
 ```bash
-docker ps                                   # três contêineres, 1 por máquina
+docker ps                                   # 1 contêiner nesta máquina (vaijunto)
 curl -s http://$IP_B:8080/saude && echo && curl -s http://$IP_C:8080/saude
 ```
 
@@ -98,11 +120,14 @@ comum (ver tabela de problemas no fim).
 
 Com os servidores já de pé (checklist acima):
 
-1. Em cada uma das três máquinas, rode `docker ps`. Mostre que cada uma tem
-   **um único contêiner**, com um nome diferente (`vaijunto`,
-   `rotacapixaba`, `rotafluminense`) — nenhum processo central, nenhum
-   contêiner compartilhado entre elas.
-2. Em cada máquina, rode `curl -s http://localhost:8080/federacao/caronas?desde=2026-11-05T00:00:00-03:00&ate=2026-11-07T00:00:00-03:00`.
+1. Em A6, B4 e C4 (uma janela de apoio por máquina), rode `docker ps` em cada
+   uma. Mostre que cada máquina tem **um único contêiner**, com um nome
+   diferente (`vaijunto`, `rotacapixaba`, `rotafluminense`) — nenhum
+   processo central, nenhum contêiner compartilhado entre elas.
+2. Em A6, B4 e C4, rode na respectiva janela:
+   ```bash
+   curl -s "http://localhost:8080/federacao/caronas?desde=2026-11-05T00:00:00-03:00&ate=2026-11-07T00:00:00-03:00"
+   ```
    Mostre que a resposta de cada servidor só lista caronas com o prefixo da
    própria empresa (`vaijunto:car-…` em A, `rotacapixaba:car-…` em B,
    `rotafluminense:car-…` em C) — cada servidor só guarda os dados da sua
@@ -114,10 +139,14 @@ Com os servidores já de pé (checklist acima):
 4. Diga a frase do mutex: *"o mutex ficou local, um por servidor — ainda dá
    exclusão mútua dentro de cada empresa, mas não dá mais atomicidade do
    itinerário inteiro; isso é o que o 2PC resolve"*.
-5. Rode `grep -rn "context.WithTimeout" internal/federacao/cliente.go` (mostra
-   o prazo estrutural de toda chamada entre pares) e
-   `grep -rn "http.Get\|http.DefaultClient" internal/ cmd/` (não acha nada) —
-   nenhuma chamada de rede escapa do cliente HTTP do pacote de federação.
+5. Em A6, dentro do diretório do repositório:
+   ```bash
+   grep -rn "context.WithTimeout" internal/federacao/cliente.go
+   grep -rn "http.Get\|http.DefaultClient" internal/ cmd/
+   ```
+   O primeiro mostra o prazo estrutural de toda chamada entre pares; o
+   segundo não acha nada — nenhuma chamada de rede escapa do cliente HTTP do
+   pacote de federação.
 
 ### D-1 — Busca e reserva atômica entre três empresas (+ idempotência)
 
@@ -133,8 +162,8 @@ Passo a passo em A3 (login já feito como `maria`):
    a entrada `PREPARADO` da perna local precisa aparecer **antes** da
    resposta do voto — é o fsync acontecendo dentro da seção crítica, não
    depois.
-7. No terminal do servidor A (ou nos logs, se estiver redirecionando para
-   arquivo), aponte as duas chamadas `preparar` saindo em paralelo para
+7. Na janela A1 (o servidor, em primeiro plano — não digite nada ali, só
+   leia a saída), aponte as duas chamadas `preparar` saindo em paralelo para
    `rotacapixaba` e `rotafluminense`, depois `DECISAO → CONFIRMAR`, e só
    então os dois `confirmar` em segundo plano.
 8. No cliente, a tela final mostra `Reserva vaijunto:res-… confirmada. Total: R$ …`.
@@ -144,9 +173,16 @@ Passo a passo em A3 (login já feito como `maria`):
 9. Acompanhe com o diagrama de sequência (janela de leitura, ou o apêndice
    deste documento) enquanto narra os passos 6–7.
 
-**Idempotência do commit**, na sequência, sem trocar de janela de terminal
-(usando o `txID` anotado no passo 8; ajuste `$TX` e o `$IP` da perna que você
-quer repetir, por exemplo a de `rotacapixaba`):
+**Idempotência do commit**, em A6 (apoio A), usando o `txID` anotado no
+passo 8. Primeiro confira o contador de assentos antes de repetir o
+`confirmar`:
+
+```bash
+curl -s http://$IP_B:8080/auditoria
+```
+
+Agora cole o `confirmar` abaixo (troque `TX=` pelo `ReservaID` real) e rode
+o mesmo bloco **duas vezes seguidas**:
 
 ```bash
 TX="vaijunto:res-3f0b11c4"   # troque pelo txID real anotado no passo 8
@@ -157,10 +193,9 @@ curl -s -i -X POST http://$IP_B:8080/transacoes/$TX/confirmar \
   -d '{}'
 ```
 
-Repita o mesmo `curl` duas vezes. As duas respostas devem ser
-`200 {"situacao":"CONFIRMADO"}`, e o contador de assentos de B
-(`/auditoria`) não muda entre uma chamada e outra — repetir o `confirmar`
-nunca reserva de novo.
+As duas respostas devem ser `200 {"situacao":"CONFIRMADO"}`. Rode de novo o
+`curl .../auditoria` de cima: o contador de assentos de B não muda entre as
+chamadas — repetir o `confirmar` nunca reserva de novo.
 
 ### D-2 — Último assento disputado entre empresas
 
@@ -176,10 +211,13 @@ Passo a passo, coordenado entre A4 (pedro) e B2 (clara):
 3. Combine "3, 2, 1" e aperte Enter **nas duas janelas ao mesmo tempo**.
 4. Um dos dois recebe a confirmação normal; o outro recebe a recusa
    `Assento esgotado…` (ou equivalente, conforme a mensagem do protocolo).
-5. Em B, rode `curl -s http://localhost:8080/auditoria`. Mostre que a
-   participação perdedora aparece como `ABORTADO` e que o trecho da
-   `rotacapixaba` está livre de novo — ou a reserva inteira passou, ou
-   nenhuma perna ficou presa.
+5. Em B4 (apoio B):
+   ```bash
+   curl -s http://localhost:8080/auditoria
+   ```
+   Mostre que a participação perdedora aparece como `ABORTADO` e que o
+   trecho da `rotacapixaba` está livre de novo — ou a reserva inteira
+   passou, ou nenhuma perna ficou presa.
 
 ### D-3 — Disputa cruzada entre empresas (Lamport + wait-die)
 
@@ -190,9 +228,10 @@ Passo a passo, coordenado entre B3 (paulo) e C2 (tiago):
 2. Em C2, logado como `tiago`: mesma busca, mesmo itinerário. Pare também.
 3. "3, 2, 1", Enter nas duas janelas juntas.
 4. Um confirma; o outro recebe `DISPUTA_PERDIDA`.
-5. Aponte, no terminal dos servidores, os carimbos `(lamport, empresa)` nas
-   mensagens: o critério de prioridade é Lamport e, em caso de empate,
-   o nome da empresa (nunca o relógio físico).
+5. Aponte, nas janelas B1 e C1 (os servidores, só leitura — não digite
+   nada ali), os carimbos `(lamport, empresa)` nas mensagens: o critério de
+   prioridade é Lamport e, em caso de empate, o nome da empresa (nunca o
+   relógio físico).
 6. Se aparecer `AGUARDE` ou algo como `PRECEDENCIA` no log antes da decisão
    final, explique que é o wait-die: quem tem prioridade menor espera, sem
    travar o servidor; três tentativas de `ABORTAR` do mesmo carimbo é o teto
@@ -210,8 +249,10 @@ alguma, corte a (c), nunca a (a) ou a (b).
 
 **(a) Queda fora de uma transação — efeito na busca e na reserva.**
 
-1. Em qualquer máquina, rode `docker kill rotacapixaba` (ou peça ao tutor
-   para fazer).
+1. Em B4 (apoio B, ou peça ao tutor para rodar na máquina B):
+   ```bash
+   docker kill rotacapixaba
+   ```
 2. Em A5, logado como `lucia`: menu → **1 — Buscar itinerários** → Salvador
    → Petrópolis, 05/11. A resposta deve trazer o aviso
    `Aviso: busca incompleta — sem resposta de: rotacapixaba` e só os
@@ -222,35 +263,49 @@ alguma, corte a (c), nunca a (a) ou a (b).
 4. Ainda em A5, busque e reserve um itinerário que **não** toque
    `rotacapixaba` (ex.: Feira de Santana → Jequié). Deve funcionar
    normalmente — a queda de uma empresa não trava as outras duas.
-5. Religue B com o mesmo comando da linha B1 da tabela de terminais (ele já
-   limpa e religa do jeito certo). No boot, aponte a linha que mostra os
-   registros do WAL sendo reaplicados e o relógio de Lamport restaurado.
+5. Na janela B1, religue B com o mesmo comando já usado para subir B (o
+   bloco completo está na linha B1 da tabela de terminais — copie e cole o
+   mesmo bloco de novo). No boot, aponte a linha que mostra os registros do
+   WAL sendo reaplicados e o relógio de Lamport restaurado.
 6. Repita a busca do passo 2 → agora deve voltar `"parcial":false`.
 
 **(b) Queda no meio de uma transação, em ponto escolhido.**
 
-1. Suba A de novo acrescentando `-e FALHAR_EM=coord-apos-decidir` ao
-   comando A1 (a mesma estrutura, só com essa variável extra antes do nome
-   da imagem).
+1. Na janela A1, suba A de novo com a mesma estrutura do comando original,
+   só acrescentando `-e FALHAR_EM=coord-apos-decidir` logo depois de
+   `-e TZ=America/Bahia`:
+   ```bash
+   docker run --rm -v "$(pwd)/estado:/estado" alpine sh -c "rm -rf /estado/* && chown -R $(id -u):$(id -g) /estado" && \
+   docker run --rm --name vaijunto -p 9000:9000 -p 8080:8080 -e TZ=America/Bahia -e FALHAR_EM=coord-apos-decidir \
+     -v "$(pwd)/dados/vaijunto:/dados:ro" -v "$(pwd)/estado:/estado" \
+     --user "$(id -u):$(id -g)" vaijunto-servidor \
+     --empresa vaijunto \
+     --pares rotacapixaba=http://$IP_B:8080,rotafluminense=http://$IP_C:8080 \
+     --dados /dados --log /estado/vaijunto.wal --auditoria
+   ```
 2. Em A3 ou A4, faça login como `teste01` / `teste` e reserve
    Salvador → Cachoeiro de Itapemirim, 05/11. O cliente trava sem resposta —
    o servidor morreu de propósito depois de decidir, antes de confirmar.
-3. Em B, rode `curl -s http://localhost:8080/auditoria`. Deve aparecer
-   `em_espera:[1,1]` (ou equivalente) e a participação dessa transação em
-   `PREPARADO`.
+3. Em B4 (apoio B):
+   ```bash
+   curl -s http://localhost:8080/auditoria
+   ```
+   Deve aparecer `em_espera:[1,1]` (ou equivalente) e a participação dessa
+   transação em `PREPARADO`.
 4. Pare e diga: *"ela votou SIM, gravou com fsync e descontou o assento;
    não existe prazo que libere esse assento sozinho — ela só confirma ou
    aborta com evidência conclusiva de outro participante ou do
    coordenador"*.
-5. Religue A **sem** `FALHAR_EM` (comando normal da linha A1). No boot,
-   aponte a linha `1 reserva(s) com a fase 2 a retomar`.
-6. Repita `curl -s http://localhost:8080/auditoria` em B: `em_espera`
-   deve voltar a `[0,0]` e o contador de confirmados deve estar
-   atualizado.
+5. Na janela A1, religue A **sem** `FALHAR_EM` — cole de novo o comando
+   original da linha A1 da tabela de terminais (sem a variável extra). No
+   boot, aponte a linha `1 reserva(s) com a fase 2 a retomar`.
+6. Em B4, repita o mesmo `curl` do passo 3: `em_espera` deve voltar a
+   `[0,0]` e o contador de confirmados deve estar atualizado.
 
 **(c) Queda sob carga, em ponto escolhido pelo tutor (se houver tempo).**
 
-1. Rode o simulador contra as três empresas (cenário federado, ~120 s):
+1. Em A6 (apoio A), rode o simulador contra as três empresas (cenário
+   federado, ~120 s):
    ```bash
    docker run --rm --user "$(id -u):$(id -g)" -e TZ=America/Bahia \
      -v "$(pwd)/resultados:/resultados" vaijunto-cliente /bin/simulador \
@@ -258,14 +313,16 @@ alguma, corte a (c), nunca a (a) ou a (b).
      --cenario=federado --curva=1,10,50,100 --duracao=120s \
      --saida=/resultados --rotulo=tres-maquinas
    ```
-2. Convide o tutor a escolher e derrubar qualquer contêiner com
-   `docker kill <nome>` no meio da carga.
+2. Convide o tutor a escolher uma máquina e a rodar, na janela de apoio
+   dela (A6/B4/C4), `docker kill <nome-do-contêiner>` no meio da carga.
 3. Mostre que os outros dois continuam respondendo e que o log registra
    timeout de 2 s contra o caído.
-4. Religue o contêiner derrubado (mesmo comando da tabela de terminais),
-   espere a carga terminar e rode:
+4. Religue o contêiner derrubado (cole de novo o comando da linha
+   A1/B1/C1 correspondente, na janela do próprio servidor), espere a carga
+   do passo 1 terminar e, em A6, rode:
    ```bash
-   go test -run TestInvariantesDoAmbiente ./testes -v
+   VAIJUNTO_AUDITORIA=vaijunto=http://$IP_A:8080,rotacapixaba=http://$IP_B:8080,rotafluminense=http://$IP_C:8080 \
+     go test -run TestInvariantesDoAmbiente ./testes -v
    ```
    Resultado esperado: `PASS` — nenhum assento vendido duas vezes, nenhuma
    reserva perdida.
@@ -278,7 +335,7 @@ Só roda até 06/11/2026 08:00 — confira a data antes de começar.
 2. Escolha a carona `rotafluminense:car-1` na lista.
 3. Confirme o cancelamento quando perguntado. A resposta deve ser algo como
    `2 reservas de passageiro canceladas em cascata`.
-4. No terminal do servidor A, aponte o aviso recebido em
+4. Na janela A1 (o servidor A, só leitura), aponte o aviso recebido em
    `/avisos/carona-cancelada`, seguido da chamada `cancelar` que A dispara
    para os outros donos das reservas afetadas.
 5. Diga: *"não é 2PC — ninguém pode recusar um cancelamento, então basta
@@ -286,6 +343,9 @@ Só roda até 06/11/2026 08:00 — confira a data antes de começar.
    antes, por isso nunca causa venda dupla"*.
 
 ### Parte 3 — os testes na tela (~4 min)
+
+Tudo nesta parte roda em A6 (apoio A — a máquina de testes, com o
+repositório e o Go).
 
 ```bash
 go build ./... && go vet ./... && go test -race ./...
@@ -309,7 +369,7 @@ Explique cada teste em uma frase:
   de coordenador, timeout de voto, etc.), todos esperados `PASS`.
 
 Se a D-4c não tiver rodado, mostre também os invariantes depois de uma carga
-curta:
+curta, ainda em A6:
 
 ```bash
 docker run --rm --user "$(id -u):$(id -g)" -e TZ=America/Bahia \
@@ -340,8 +400,8 @@ específica sem precisar derrubar nenhum servidor.
 Mostra que uma empresa em dúvida se resolve sozinha, sem esperar prazo
 nenhum, perguntando ao coordenador.
 
-1. Em qualquer máquina com acesso a `$IP_B`, monte um `preparar` à mão,
-   fingindo ser a `vaijunto`, com um `txID` que nunca existiu de verdade:
+1. Em A6 (apoio A), monte um `preparar` à mão, fingindo ser a `vaijunto`,
+   com um `txID` que nunca existiu de verdade:
    ```bash
    curl -s -i -X POST http://$IP_B:8080/transacoes/vaijunto:res-0000abcd/preparar \
      -H 'Content-Type: application/json' \
@@ -358,7 +418,7 @@ nenhum, perguntando ao coordenador.
 2. A resposta é `200 {"voto":"SIM", ...}` — B votou SIM e ficou em
    `PREPARADO`, sem saber que a `vaijunto` nunca vai mandar `confirmar`.
 3. Espere ~10 s. B consulta a `vaijunto` sozinha (reproduza a consulta à
-   mão, se quiser mostrar o payload exato):
+   mão, ainda em A6, se quiser mostrar o payload exato):
    ```bash
    curl -s -X POST http://$IP_A:8080/transacoes/vaijunto:res-0000abcd/consultar \
      -H 'Content-Type: application/json' \
