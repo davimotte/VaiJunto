@@ -141,7 +141,7 @@ restrições arquiteturais.
 | RD08 | D01, D22 | `go.mod` sem `require` |
 | RD09 | D28 | `API_CONSORCIO.md` |
 | RD10 | D30, D41 | TB2, TF1–TF10 |
-| RD11 | Seção 13 | `ROTEIRO.md` |
+| RD11 | Seção 13 | `ROTEIRO_DEMONSTRACAO.md` |
 | RF12 | D26, D40, seção 6 | TB1, TB2 |
 | RF13 | D21, D34, seção 7 | TR2 |
 | RF14 | D32 | TC4 |
@@ -1525,7 +1525,7 @@ lá.
 ### 12.3 O que a demonstração precisa exercitar
 
 Esta é a especificação; o procedimento (máquinas, usuários e ordem) fica no
-`ROTEIRO.md`.
+`ROTEIRO_DEMONSTRACAO.md`.
 
 | # | Propriedade | O que precisa ficar visível |
 |---|---|---|
@@ -1539,7 +1539,7 @@ Esta é a especificação; o procedimento (máquinas, usuários e ordem) fica no
 A D-3 mostra o resultado, mas a ordem de chegada cruzada não é garantida ao
 vivo. A prova determinística da camada 2 é o teste TR3.
 
-O `ROTEIRO.md` acrescenta uma sétima, que não é propriedade do sistema e sim
+O `ROTEIRO_DEMONSTRACAO.md` acrescenta uma sétima, que não é propriedade do sistema e sim
 forma de exibi-lo: o abort presumido reproduzido com `curl` (seção 7 do
 `API_CONSORCIO.md`). Um `PREPARAR` à mão com um `txID` que nunca existiu deixa
 um assento em espera; passado o prazo de dúvida, o dono consulta, recebe
@@ -1673,7 +1673,7 @@ sessão. Os critérios de pronto são os que a fase precisa demonstrar, com
 | 9 | Clientes e protocolo | `PROTOCOL.md` v2 (seção 5.6) e clientes adaptados; fluxo completo pelo CLI | ✅ |
 | 10 | Simulador | Seção 11.4 contra as três empresas | ✅ |
 | 11 | Teste de sistema | TS1 (seção 11.5) passa com `docker kill` e com `FALHAR_EM` | ✅ |
-| 12 | Documentação final | `README.md`, `ROTEIRO.md` e versão final do `API_CONSORCIO.md` | ✅ |
+| 12 | Documentação final | `README.md`, `ROTEIRO_DEMONSTRACAO.md` e versão final do `API_CONSORCIO.md` | ✅ |
 
 Notas de sequência:
 
@@ -1778,7 +1778,7 @@ de que a carga chegou: nenhum outro caminho do servidor passa por aquele ponto.
 
 **Limitações da fase 12:** uma, de coleta. A terceira configuração da seção
 11.6 — a mesma curva com os servidores em máquinas distintas — continua sem CSV,
-porque depende do laboratório; o procedimento está na Parte 3 do `ROTEIRO.md`.
+porque depende do laboratório; o procedimento está na Parte 3 do `ROTEIRO_DEMONSTRACAO.md`.
 Fora disso, `docs/apresentacao.html` continua sendo o deck do **P1**, com os
 títulos do barema anterior; os documentos novos não o referenciam, e refazê-lo é
 trabalho de uma fase própria.

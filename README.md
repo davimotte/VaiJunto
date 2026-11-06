@@ -10,7 +10,7 @@ compartilhado.**
 com apresentação e relatório no formato SBC. O Problema 1, de servidor único,
 está preservado na tag `p1-final`.
 
-**Autor:** _(preencher)_
+**Autor:** Davi Zardo Motté
 
 ## O problema
 
@@ -81,7 +81,7 @@ A camada 5 é a única que espera, e **nunca espera segurando o lock** da camada
 | [`PROJETO_P2.md`](PROJETO_P2.md) | Decisões D20–D42, modelo, algoritmos, invariantes, plano de teste, medições e fases |
 | [`API_CONSORCIO.md`](API_CONSORCIO.md) | Contrato REST entre os servidores: recursos, códigos, diagramas de sequência |
 | [`PROTOCOL.md`](PROTOCOL.md) | Contrato TCP entre cliente e o servidor da sua empresa (v2) |
-| [`ROTEIRO.md`](ROTEIRO.md) | Operação em três máquinas: preparar, demonstrar, medir e lidar com a queda provocada |
+| [`ROTEIRO_DEMONSTRACAO.md`](ROTEIRO_DEMONSTRACAO.md) | Operação em três máquinas: preparar, demonstrar, medir e lidar com a queda provocada |
 | [`PROJETO.md`](PROJETO.md) | **Histórico do P1.** Explica o código herdado, mas tem decisões revogadas pelo P2 |
 
 Em conflito, vale a ordem da tabela.
@@ -156,7 +156,7 @@ docker compose run --rm -e VAIJUNTO_SERVIDOR=rotafluminense:9000 motorista
 
 O `docker-compose.yml` serve **só ao desenvolvimento**: ele resolve
 `http://rotacapixaba:8080` pela rede interna do Docker. No laboratório, cada
-máquina sobe a sua empresa com `docker run` — é o [`ROTEIRO.md`](ROTEIRO.md).
+máquina sobe a sua empresa com `docker run` — é o [`ROTEIRO_DEMONSTRACAO.md`](ROTEIRO_DEMONSTRACAO.md).
 
 O log de cada empresa fica em `estado/<empresa>/`, no host e não dentro do
 contêiner: `docker compose down` não perde o que foi publicado e reservado. Para
@@ -261,7 +261,7 @@ já passou por lá — é o controle de que o encadeamento é mesmo verificado.
 
 As seis demonstrações que o projeto precisa exercitar estão na seção 12.3 do
 `PROJETO_P2.md`, e o procedimento — máquinas, usuários e ordem — no
-[`ROTEIRO.md`](ROTEIRO.md).
+[`ROTEIRO_DEMONSTRACAO.md`](ROTEIRO_DEMONSTRACAO.md).
 
 ## Usuários de teste
 
@@ -338,7 +338,7 @@ go run ./cmd/simulador --cenario=federado --curva=1,10,50,100 --duracao=5s
 
 Os números já medidos estão na seção 11.6; a terceira configuração — a mesma
 rodada com os servidores em máquinas distintas — é coleta de laboratório, na
-Parte 3 do [`ROTEIRO.md`](ROTEIRO.md).
+Parte 3 do [`ROTEIRO_DEMONSTRACAO.md`](ROTEIRO_DEMONSTRACAO.md).
 
 ## Limites conhecidos
 
